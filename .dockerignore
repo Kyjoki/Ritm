@@ -1,0 +1,11 @@
+.git
+node_modules
+data
+.env
+.env.*
+!.env.example
+dist
+build
+.openai
+test-results
+design
