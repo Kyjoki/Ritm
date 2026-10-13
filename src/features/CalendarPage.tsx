@@ -12,6 +12,8 @@ import {
   LoaderCircle,
   RefreshCw,
 } from 'lucide-react';
+import { Dialog } from '../components/Dialog';
+import { mobileCalendarGroups } from './mobile-calendar-groups';
 import type {
   GoogleCalendarEvent,
   GoogleCalendarStatus,
@@ -177,6 +179,10 @@ export function CalendarPage({
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches,
   );
   const [view, setView] = useState<CalendarView>('week');
+  const [eventPicker, setEventPicker] = useState<{ date: string; keys: string[] } | null>(null);
+  useEffect(() => {
+    if (!isMobile || view !== 'week') setEventPicker(null);
+  }, [isMobile, view]);
   const [nowMinutes, setNowMinutes] = useState(() => minutesInZone(timeZone, new Date()));
   useEffect(() => {
     const update = () => setNowMinutes(minutesInZone(timeZone, new Date()));
@@ -284,6 +290,11 @@ export function CalendarPage({
     if (entry.source === 'google') onGoogleEdit?.(entry.event);
     else onEdit(entry.task);
   }
+  const pickerEntries = eventPicker
+    ? calendarOccurrences(tasks, googleEvents, eventPicker.date, timeZone).filter((entry) =>
+        eventPicker.keys.includes(entry.key),
+      )
+    : [];
   const uncertainGoogle =
     (googleLoading && !googleFetchedAt) ||
     Boolean(googleError) ||
@@ -661,33 +672,84 @@ export function CalendarPage({
                       </button>
                     )),
                   )}
-                  {layoutCalendarOccurrences(entries).map((entry) => {
-                    const duration = (entry.end ?? 0) - (entry.start ?? 0);
-                    return (
-                      <button
-                        key={entry.key}
-                        type="button"
-                        className={`cal-grid-event ${entry.source === 'google' || entry.task.kind === 'event' ? 'cal-event-kind' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''} ${entry.completed ? 'cal-completed' : ''} ${duration < 75 ? 'cal-compact-event' : ''}`}
-                        style={{
-                          ...calendarEntryStyle(entry),
-                          top: ((entry.start ?? 0) / 60) * HOUR_HEIGHT + 2,
-                          height: Math.max(22, (duration / 60) * HOUR_HEIGHT - 4),
-                          width: `calc(${100 / entry.lanes}% - ${isMobile ? 2 : 7}px)`,
-                          left: `calc(${(entry.lane * 100) / entry.lanes}% + ${isMobile ? 1 : 4}px)`,
-                        }}
-                        onClick={() => editEntry(entry)}
-                        title={occurrenceLabel(entry)}
-                        aria-label={occurrenceLabel(entry)}
-                      >
-                        <strong>{entry.title}</strong>
-                        <span className="cal-event-time">
-                          {entryTime(entry, 'start')}–{entryTime(entry, 'end')}
-                          {entry.source === 'ritm' && entry.task.repeat !== 'none' ? ' · ↻' : ''}
-                          {entry.clockChange ? ' · Перевод часов' : ''}
-                        </span>
-                      </button>
-                    );
-                  })}
+                  {isMobile && view === 'week'
+                    ? mobileCalendarGroups(entries).map((group) => {
+                        const entry = group.entries[0];
+                        const multiple = group.entries.length > 1;
+                        return (
+                          <button
+                            key={group.key}
+                            type="button"
+                            className={`cal-grid-event cal-mobile-event ${multiple ? 'cal-overlap-group' : ''} ${entry.completed ? 'cal-completed' : ''}`}
+                            style={{
+                              ...calendarEntryStyle(entry),
+                              top: (group.start / 60) * HOUR_HEIGHT + 2,
+                              height: Math.max(
+                                22,
+                                ((group.end - group.start) / 60) * HOUR_HEIGHT - 4,
+                              ),
+                              width: 'calc(100% - 2px)',
+                              left: 1,
+                            }}
+                            onClick={() =>
+                              multiple
+                                ? setEventPicker({
+                                    date,
+                                    keys: group.entries.map((item) => item.key),
+                                  })
+                                : editEntry(entry)
+                            }
+                            aria-haspopup={multiple ? 'dialog' : undefined}
+                            aria-label={
+                              multiple
+                                ? `${group.entries.length} ${recordWord(group.entries.length)} с пересечением, ${formatDate(date, { day: 'numeric', month: 'long' })}, ${formatTime(group.start)}–${formatTime(group.end)}. Выбрать событие`
+                                : occurrenceLabel(entry)
+                            }
+                            title={group.entries.map(occurrenceLabel).join('\n')}
+                          >
+                            <strong>{entry.title}</strong>
+                            {multiple ? (
+                              <>
+                                <span className="cal-overlap-count">{group.entries.length}</span>
+                                <span className="cal-overlap-colors" aria-hidden="true">
+                                  {group.entries.slice(0, 4).map((item) => (
+                                    <i key={item.key} style={calendarEntryStyle(item)} />
+                                  ))}
+                                </span>
+                              </>
+                            ) : null}
+                          </button>
+                        );
+                      })
+                    : layoutCalendarOccurrences(entries).map((entry) => {
+                        const duration = (entry.end ?? 0) - (entry.start ?? 0);
+                        return (
+                          <button
+                            key={entry.key}
+                            type="button"
+                            className={`cal-grid-event ${entry.source === 'google' || entry.task.kind === 'event' ? 'cal-event-kind' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''} ${entry.completed ? 'cal-completed' : ''} ${duration < 75 ? 'cal-compact-event' : ''}`}
+                            style={{
+                              ...calendarEntryStyle(entry),
+                              top: ((entry.start ?? 0) / 60) * HOUR_HEIGHT + 2,
+                              height: Math.max(22, (duration / 60) * HOUR_HEIGHT - 4),
+                              width: `calc(${100 / entry.lanes}% - ${isMobile ? 2 : 7}px)`,
+                              left: `calc(${(entry.lane * 100) / entry.lanes}% + ${isMobile ? 1 : 4}px)`,
+                            }}
+                            onClick={() => editEntry(entry)}
+                            title={occurrenceLabel(entry)}
+                            aria-label={occurrenceLabel(entry)}
+                          >
+                            <strong>{entry.title}</strong>
+                            <span className="cal-event-time">
+                              {entryTime(entry, 'start')}–{entryTime(entry, 'end')}
+                              {entry.source === 'ritm' && entry.task.repeat !== 'none'
+                                ? ' · ↻'
+                                : ''}
+                              {entry.clockChange ? ' · Перевод часов' : ''}
+                            </span>
+                          </button>
+                        );
+                      })}
                   {date === today ? (
                     <div
                       className="cal-now-line"
@@ -757,6 +819,61 @@ export function CalendarPage({
           ) : null}
         </section>
       </div>
+      {eventPicker && isMobile && view === 'week' ? (
+        <Dialog
+          title="Пересекающиеся события"
+          className="cal-event-picker"
+          onClose={() => setEventPicker(null)}
+        >
+          <p className="cal-picker-description">
+            {formatDate(eventPicker.date, { weekday: 'long', day: 'numeric', month: 'long' })}.
+            Выбери запись, чтобы посмотреть подробности или изменить её.
+          </p>
+          <div className="cal-picker-list">
+            {pickerEntries.map((entry) => (
+              <button
+                key={entry.key}
+                type="button"
+                className="cal-picker-entry"
+                style={calendarEntryStyle(entry)}
+                onClick={() => {
+                  setEventPicker(null);
+                  editEntry(entry);
+                }}
+                aria-label={occurrenceLabel(entry)}
+              >
+                <span className="cal-picker-color" aria-hidden="true" />
+                <span className="cal-picker-copy">
+                  <strong>{entry.title}</strong>
+                  <span>
+                    {entry.allDay
+                      ? 'Весь день'
+                      : entry.start === null
+                        ? 'Без времени'
+                        : `${entryTime(entry, 'start')}–${entryTime(entry, 'end')}`}
+                    {entry.source === 'google' && entry.event.readOnly ? ' · Только просмотр' : ''}
+                  </span>
+                </span>
+                <ChevronRight size={18} aria-hidden="true" />
+              </button>
+            ))}
+            {!pickerEntries.length ? (
+              <p className="cal-picker-description">
+                Эти события уже изменились. Закрой список и выбери запись в обновлённом календаре.
+              </p>
+            ) : null}
+          </div>
+          <div className="dialog-actions">
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => setEventPicker(null)}
+            >
+              Закрыть список
+            </button>
+          </div>
+        </Dialog>
+      ) : null}
     </div>
   );
 }
