@@ -13,5 +13,5 @@
     "skipLibCheck": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["src", "server", "agent", "shared", "tests", "vite.config.ts"]
+  "include": ["src", "server", "api", "migrations", "agent", "shared", "tests", "vite.config.ts"]
 }

@@ -17,12 +17,16 @@ import {
   UserRound,
   X,
 } from 'lucide-react';
-import type { AiStatus, Settings } from '../../shared/types';
+import type { AiStatus, GoogleCalendarStatus, Settings } from '../../shared/types';
+import { Dialog } from '../components/Dialog';
 import '../styles/calendar-settings.css';
 
 interface SettingsPageProps {
   settings: Settings;
   aiStatus: AiStatus;
+  googleStatus: GoogleCalendarStatus;
+  onConnectGoogle: () => Promise<void>;
+  onDisconnectGoogle: () => Promise<void>;
   onSave: (settings: Settings) => Promise<void>;
   onConfigureAI: (apiKey: string, model: string) => Promise<void>;
   onDisconnectAI: () => Promise<void>;
@@ -52,6 +56,9 @@ function errorText(error: unknown): string {
 export function SettingsPage({
   settings,
   aiStatus,
+  googleStatus,
+  onConnectGoogle,
+  onDisconnectGoogle,
   onSave,
   onConfigureAI,
   onDisconnectAI,
@@ -70,10 +77,28 @@ export function SettingsPage({
   const [connectionNotice, setConnectionNotice] = useState('');
   const [disconnecting, setDisconnecting] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
+  const [googleError, setGoogleError] = useState('');
+  const [confirmGoogleDisconnect, setConfirmGoogleDisconnect] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const secretInputRef = useRef<HTMLInputElement>(null);
   const titleId = useId();
   const previousSettings = useRef(settings);
+  async function googleAction(disconnect = false) {
+    setGoogleBusy(true);
+    setGoogleError('');
+    try {
+      if (disconnect) {
+        await onDisconnectGoogle();
+        setConfirmGoogleDisconnect(false);
+        setConnectionNotice('Google Calendar отключён от Ritm.');
+      } else await onConnectGoogle();
+    } catch (error) {
+      setGoogleError(errorText(error));
+    } finally {
+      setGoogleBusy(false);
+    }
+  }
   useEffect(() => {
     const previous = previousSettings.current;
     previousSettings.current = settings;
@@ -480,14 +505,58 @@ export function SettingsPage({
                 </div>
                 <div className="settings-connection-copy">
                   <strong>Google Calendar</strong>
-                  <span className="settings-connection-status">
+                  <span
+                    className={`settings-connection-status ${googleStatus.status === 'connected' ? 'settings-configured' : ''}`}
+                  >
                     <i />
-                    Не подключён
+                    {googleStatus.status === 'connected'
+                      ? 'Подключён'
+                      : googleStatus.status === 'reauth_required'
+                        ? 'Нужно подключить заново'
+                        : googleStatus.configured
+                          ? 'Не подключён'
+                          : 'Ожидает настройки сервера'}
                   </span>
-                  <small>Подключение запланировано</small>
+                  <small>
+                    {googleStatus.configured
+                      ? 'Основной календарь · просмотр, создание и редактирование событий'
+                      : 'Добавь настройки Google OAuth на сервере'}
+                  </small>
                 </div>
-                <span className="settings-coming">Планируется</span>
+                <div className="settings-connection-actions">
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    disabled={!googleStatus.configured || googleBusy}
+                    onClick={() => void googleAction()}
+                  >
+                    {googleBusy
+                      ? 'Подождите…'
+                      : googleStatus.status === 'connected'
+                        ? 'Переподключить'
+                        : 'Подключить'}
+                  </button>
+                  {['connected', 'reauth_required'].includes(googleStatus.status) ? (
+                    <button
+                      type="button"
+                      className="settings-text-button"
+                      disabled={googleBusy}
+                      onClick={() => {
+                        setGoogleError('');
+                        setConfirmGoogleDisconnect(true);
+                      }}
+                    >
+                      Отключить
+                    </button>
+                  ) : null}
+                </div>
               </div>
+              {googleError && !confirmGoogleDisconnect ? (
+                <p className="settings-inline-error" role="alert">
+                  <AlertCircle size={16} aria-hidden="true" />
+                  {googleError}
+                </p>
+              ) : null}
               {connectionNotice ? (
                 <p className="settings-connection-notice" role="status">
                   <CheckCircle2 size={16} aria-hidden="true" />
@@ -553,6 +622,41 @@ export function SettingsPage({
           </div>
         </div>
       </form>
+      {confirmGoogleDisconnect ? (
+        <Dialog
+          title="Отключить Google Calendar?"
+          onClose={() => setConfirmGoogleDisconnect(false)}
+          busy={googleBusy}
+        >
+          <p className="dialog-copy">
+            Ritm перестанет получать и изменять события. События в Google и подключение другого
+            приложения сохранятся.
+          </p>
+          {googleError ? (
+            <p className="error-note" role="alert">
+              {googleError}
+            </p>
+          ) : null}
+          <div className="dialog-actions">
+            <button
+              type="button"
+              className="button button-secondary"
+              disabled={googleBusy}
+              onClick={() => setConfirmGoogleDisconnect(false)}
+            >
+              Отмена
+            </button>
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={googleBusy}
+              onClick={() => void googleAction(true)}
+            >
+              {googleBusy ? 'Отключаем…' : 'Отключить'}
+            </button>
+          </div>
+        </Dialog>
+      ) : null}
       {onLogout ? (
         <button
           type="button"

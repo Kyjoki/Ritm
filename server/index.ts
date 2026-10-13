@@ -4,13 +4,27 @@ import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod';
-import { Store } from './store.ts';
+import { Store, localDate } from './store.ts';
+import { PostgresStore } from './postgres-store.ts';
+import {
+  createGoogleCalendarService,
+  GOOGLE_CALLBACK_PATH,
+  GOOGLE_OAUTH_COOKIE,
+  googleEventInputSchema,
+  googleEventIdSchema,
+  googleEtagSchema,
+  type GoogleCalendarService,
+  type GoogleTransport,
+} from './google-calendar.ts';
+import type { WorkspaceRepository } from './repository.ts';
+import { SqliteRuntimeState, type RuntimeState } from './runtime-state.ts';
 import { SecretStore } from './secrets.ts';
 import { Security } from './security.ts';
 import { AppError, conflict } from './errors.ts';
 import { assistantMessage, runAssistant, type AssistantRunner } from './assistant.ts';
 import {
   chatSchema,
+  dateValue,
   idSchema,
   proposalActionSchema,
   secretSchema,
@@ -21,20 +35,81 @@ import {
 } from './validation.ts';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+type AppGoogleService = Pick<
+  GoogleCalendarService,
+  | 'status'
+  | 'connect'
+  | 'callback'
+  | 'listEvents'
+  | 'createEvent'
+  | 'updateEvent'
+  | 'disconnect'
+  | 'assertFreeSlots'
+>;
 export interface AppOptions {
   dataDir?: string;
   clientDir?: string;
   env?: NodeJS.ProcessEnv;
   seed?: boolean;
   assistant?: AssistantRunner;
+  repository?: WorkspaceRepository;
+  runtimeState?: RuntimeState;
+  googleTransport?: GoogleTransport;
+  googleService?: AppGoogleService;
 }
 
 export function createApp(options: AppOptions = {}) {
   const env = options.env ?? process.env;
-  const security = new Security(env);
+  const shared = Boolean(env.DATABASE_URL) || options.repository instanceof PostgresStore;
+  if (env.VERCEL === '1' && !shared && !options.repository)
+    throw new Error('DATABASE_URL is required on Vercel. Local SQLite is not durable there.');
   const dataDir = resolve(options.dataDir ?? env.DATA_DIR ?? resolve(projectRoot, 'data'));
-  const store = new Store(dataDir, options.seed ?? env.SEED_DEMO !== 'false');
-  const secrets = new SecretStore(dataDir, env);
+  const postgres = shared && !options.repository ? new PostgresStore(env.DATABASE_URL!) : undefined;
+  const candidate = options.repository as (WorkspaceRepository & Partial<RuntimeState>) | undefined;
+  const repositoryState =
+    candidate &&
+    [
+      'createSession',
+      'hasSession',
+      'deleteSession',
+      'consumeRateLimit',
+      'getServerSecret',
+      'setServerSecret',
+      'deleteServerSecret',
+      'consumeServerSecret',
+      'acquireLease',
+      'releaseLease',
+    ].every((name) => typeof (candidate as unknown as Record<string, unknown>)[name] === 'function')
+      ? (candidate as RuntimeState)
+      : undefined;
+  if (shared && options.repository && !options.runtimeState && !repositoryState)
+    throw new Error('A shared repository must provide durable runtime state.');
+  const localState =
+    !options.runtimeState && !postgres && !repositoryState
+      ? new SqliteRuntimeState(dataDir)
+      : undefined;
+  const state: RuntimeState = options.runtimeState ?? postgres ?? repositoryState ?? localState!;
+  let security: Security;
+  try {
+    security = new Security(env, state, dataDir);
+  } catch (error) {
+    localState?.close();
+    void postgres?.close();
+    throw error;
+  }
+  // Constructors never migrate/query PostgreSQL. Migrations are explicit.
+  const store: WorkspaceRepository =
+    options.repository ?? postgres ?? new Store(dataDir, options.seed ?? env.SEED_DEMO !== 'false');
+  const secrets = new SecretStore(dataDir, env, state, shared);
+  const google =
+    options.googleService ??
+    createGoogleCalendarService({
+      secrets,
+      security,
+      settings: async () => await store.settings(),
+      env,
+      transport: options.googleTransport,
+    });
   const assistant = options.assistant ?? runAssistant;
   const app = express();
   app.disable('x-powered-by');
@@ -44,12 +119,11 @@ export function createApp(options: AppOptions = {}) {
     res.setHeader('Referrer-Policy', 'same-origin');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-    if (env.NODE_ENV === 'production') {
+    if (env.NODE_ENV === 'production' || env.VERCEL === '1')
       res.setHeader(
         'Content-Security-Policy',
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
       );
-    }
     next();
   });
   app.use('/api', security.originGuard, express.json({ limit: '128kb' }));
@@ -57,67 +131,152 @@ export function createApp(options: AppOptions = {}) {
     res.setHeader('Cache-Control', 'no-store');
     next();
   });
-  app.get('/api/session', (req, res) => {
-    res.json(security.session(req));
-  });
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
   });
-  app.post('/api/login', (req, res) => {
-    const { password } = z
-      .object({ password: z.string().max(512) })
+  app.get('/api/session', async (req, res) => {
+    res.json(await security.session(req));
+  });
+  app.post('/api/login', async (req, res) => {
+    const { login, password } = z
+      .object({ login: z.string().trim().min(1).max(100), password: z.string().max(512) })
       .strict()
       .parse(req.body);
-    res.json(security.login(req, res, password));
+    res.json(await security.login(req, res, login, password));
   });
-  app.post('/api/logout', (req, res) => {
-    res.json(security.logout(req, res));
+  app.post('/api/logout', async (req, res) => {
+    res.json(await security.logout(req, res));
+  });
+  app.get(GOOGLE_CALLBACK_PATH, async (req, res) => {
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    try {
+      const input = z
+        .object({
+          state: z.string().max(128),
+          code: z.string().max(2048).optional(),
+          error: z.string().max(100).optional(),
+        })
+        .parse(req.query);
+      const cookie = req.headers.cookie
+        ?.split(';')
+        .map((part) => part.trim())
+        .find((part) => part.startsWith(GOOGLE_OAUTH_COOKIE + '='))
+        ?.slice(GOOGLE_OAUTH_COOKIE.length + 1);
+      await google.callback({ ...input, correlationCookie: cookie });
+      res.clearCookie(GOOGLE_OAUTH_COOKIE, {
+        path: GOOGLE_CALLBACK_PATH,
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: env.GOOGLE_REDIRECT_URI?.startsWith('https://') ?? false,
+      });
+      res.redirect(303, '/?section=settings&google=connected');
+    } catch (error) {
+      res.redirect(
+        303,
+        '/?section=settings&google=error&code=' +
+          encodeURIComponent(error instanceof AppError ? error.code : 'GOOGLE_ERROR'),
+      );
+    }
   });
   app.use('/api', security.requireAuth);
-  app.use('/api', (req, _res, next) => {
+  app.use('/api', async (req, _res, next) => {
     try {
-      if (!['GET', 'HEAD'].includes(req.method)) security.limit(req, 'mutation', 120, 60_000);
+      if (!['GET', 'HEAD'].includes(req.method)) await security.limit(req, 'mutation', 120, 60_000);
       next();
     } catch (error) {
       next(error);
     }
   });
-  app.get('/api/bootstrap', (_req, res) => {
-    res.json(store.bootstrap(secrets.status()));
+  app.get('/api/bootstrap', async (_req, res) => {
+    res.json(await store.bootstrap(await secrets.status()));
   });
-  app.post('/api/tasks', (req, res) => {
-    res.status(201).json(store.createTask(taskInputSchema.parse(req.body)));
+  app.get('/api/integrations/google/status', async (_req, res) => {
+    res.json(await google.status());
   });
-  app.patch('/api/tasks/:id', (req, res) => {
-    res.json(store.updateTask(idSchema.parse(req.params.id), taskPatchSchema.parse(req.body)));
+  app.post('/api/integrations/google/connect', async (req, res) => {
+    z.object({})
+      .strict()
+      .parse(req.body ?? {});
+    await security.limit(req, 'google-connect', 10, 60_000);
+    const owner = await security.ownerSession(req);
+    if (!owner)
+      throw new AppError(401, 'AUTH_REQUIRED', 'Войдите в Ritm перед подключением Google.');
+    const connection = await google.connect(owner);
+    res.cookie(GOOGLE_OAUTH_COOKIE, connection.correlationCookie, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: connection.secureCookie,
+      path: GOOGLE_CALLBACK_PATH,
+      maxAge: Math.max(0, connection.expiresAt - Date.now()),
+    });
+    res.json({ authorizationUrl: connection.authorizationUrl });
   });
-  app.delete('/api/tasks/:id', (req, res) => {
-    res.json({ deletedTask: store.deleteTask(idSchema.parse(req.params.id)) });
+  app.get('/api/integrations/google/events', async (req, res) => {
+    const input = z
+      .object({ from: dateValue, to: dateValue, timeZone: z.string().max(80).optional() })
+      .strict()
+      .parse(req.query);
+    const settings = await store.settings();
+    if (input.timeZone && input.timeZone !== settings.timeZone)
+      throw new AppError(400, 'GOOGLE_TIMEZONE', 'Используйте часовой пояс из настроек Ritm.');
+    await security.limit(req, 'google-read', 60, 60_000);
+    res.json(await google.listEvents({ ...input, timeZone: settings.timeZone }));
   });
-  app.post('/api/tasks/restore', (req, res) => {
+  app.post('/api/integrations/google/events', async (req, res) => {
+    const { event, requestId } = z
+      .object({ event: googleEventInputSchema, requestId: idSchema })
+      .strict()
+      .parse(req.body);
+    await security.limit(req, 'google-write', 20, 60_000);
+    res.status(201).json(await google.createEvent(event, requestId));
+  });
+  app.patch('/api/integrations/google/events/:id', async (req, res) => {
+    const { event, etag } = z
+      .object({ event: googleEventInputSchema, etag: googleEtagSchema })
+      .strict()
+      .parse(req.body);
+    await security.limit(req, 'google-write', 20, 60_000);
+    res.json(await google.updateEvent(googleEventIdSchema.parse(req.params.id), event, etag));
+  });
+  app.delete('/api/integrations/google/connection', async (req, res) => {
+    await security.limit(req, 'google-connect', 10, 60_000);
+    res.json(await google.disconnect());
+  });
+  app.post('/api/tasks', async (req, res) => {
+    res.status(201).json(await store.createTask(taskInputSchema.parse(req.body)));
+  });
+  app.patch('/api/tasks/:id', async (req, res) => {
+    res.json(
+      await store.updateTask(idSchema.parse(req.params.id), taskPatchSchema.parse(req.body)),
+    );
+  });
+  app.delete('/api/tasks/:id', async (req, res) => {
+    res.json({ deletedTask: await store.deleteTask(idSchema.parse(req.params.id)) });
+  });
+  app.post('/api/tasks/restore', async (req, res) => {
     const { task } = z.object({ task: taskSchema }).strict().parse(req.body);
-    res.json(store.restoreTask(task));
+    res.json(await store.restoreTask(task));
   });
-  app.patch('/api/settings', (req, res) => {
-    res.json(store.updateSettings(settingsPatchSchema.parse(req.body)));
+  app.patch('/api/settings', async (req, res) => {
+    res.json(await store.updateSettings(settingsPatchSchema.parse(req.body)));
   });
-  app.post('/api/settings/openai', (req, res) => {
-    security.limit(req, 'secret', 10, 60_000);
-    res.json(secrets.save(secretSchema.parse(req.body)));
+  app.post('/api/settings/openai', async (req, res) => {
+    await security.limit(req, 'secret', 10, 60_000);
+    res.json(await secrets.save(secretSchema.parse(req.body)));
   });
-  app.delete('/api/settings/openai', (req, res) => {
-    res.json(secrets.remove());
+  app.delete('/api/settings/openai', async (_req, res) => {
+    res.json(await secrets.remove());
   });
-  app.post('/api/conversations', (req, res) => {
+  app.post('/api/conversations', async (req, res) => {
     z.object({}).strict().parse(req.body);
-    res.status(201).json(store.createConversation());
+    res.status(201).json(await store.createConversation());
   });
   const busyConversations = new Set<string>();
-  app.delete('/api/conversations/:id', (req, res) => {
+  app.delete('/api/conversations/:id', async (req, res) => {
     const id = idSchema.parse(req.params.id);
     if (busyConversations.has(id))
       throw conflict('Дождитесь ответа помощника перед удалением диалога.');
-    store.deleteConversation(id);
+    await store.deleteConversation(id);
     res.json({ deleted: true });
   });
   app.post('/api/chat', async (req, res) => {
@@ -127,26 +286,26 @@ export function createApp(options: AppOptions = {}) {
         JSON.stringify({ conversationId: input.conversationId ?? null, message: input.message }),
       )
       .digest('hex');
-    const existing = store.request(input.requestId);
+    const existing = await store.request(input.requestId);
     if (existing) {
       if (existing.fingerprint !== fingerprint)
         throw conflict('Этот идентификатор запроса уже использован для другого сообщения.');
       if (existing.status === 'complete' && existing.conversationId) {
-        res.json(store.conversation(existing.conversationId));
+        res.json(await store.conversation(existing.conversationId));
         return;
       }
       throw conflict('Помощник уже обрабатывает этот запрос. Дождитесь ответа.');
     }
-    const credential = secrets.credentials();
+    const credential = await secrets.credentials();
     if (!credential)
       throw new AppError(
         503,
         'AI_NOT_CONFIGURED',
         'Подключите OpenAI в настройках, чтобы начать разговор.',
       );
-    security.limit(req, 'chat', 10, 60_000);
+    await security.limit(req, 'chat', 10, 60_000);
     const conversation = input.conversationId
-      ? store.conversation(input.conversationId)
+      ? await store.conversation(input.conversationId)
       : undefined;
     if (conversation && conversation.messages.length >= 200)
       throw new AppError(
@@ -163,36 +322,92 @@ export function createApp(options: AppOptions = {}) {
       if (!res.writableEnded) controller.abort();
     };
     res.on('close', onDisconnect);
+    let leaseToken: string | undefined,
+      acquired = false;
     try {
-      store.startRequest(input.requestId, fingerprint, input.conversationId ?? null);
-      const snapshot = store.tasks();
+      const snapshot = await store.tasks(),
+        settings = await store.settings();
+      const googleStatus = await google.status();
+      const today = localDate(new Date(), settings.timeZone),
+        until = new Date(today + 'T12:00:00Z');
+      until.setUTCDate(until.getUTCDate() + 14);
+      const googleCalendar =
+        googleStatus.status === 'connected'
+          ? await google.listEvents({
+              from: today,
+              to: until.toISOString().slice(0, 10),
+              timeZone: settings.timeZone,
+            })
+          : undefined;
+      if (controller.signal.aborted)
+        throw new AppError(499, 'REQUEST_CANCELLED', 'Запрос отменён.');
+      // Reserve the paid model generation after read-only calendar loading, so
+      // Google latency does not consume the 120-second database claim lease.
+      const claim = await store.startRequest(
+        input.requestId,
+        fingerprint,
+        input.conversationId ?? null,
+      );
+      if (claim?.completedConversationId) {
+        res.json(await store.conversation(claim.completedConversationId));
+        return;
+      }
+      leaseToken = claim?.leaseToken;
+      acquired = true;
+      const freshConversation = input.conversationId
+        ? await store.conversation(input.conversationId)
+        : undefined;
       const reply = await assistant({
         ...credential,
-        settings: store.settings(),
+        settings,
         tasks: snapshot,
-        conversation,
+        conversation: freshConversation,
         message: input.message,
         signal: controller.signal,
+        googleCalendar,
+        googleCalendarStatus: googleStatus.status,
       });
       if (controller.signal.aborted)
         throw new AppError(499, 'REQUEST_CANCELLED', 'Запрос отменён.');
-      const message = assistantMessage(reply, snapshot, store.settings().timeZone);
-      res.json(store.finishChat(input.requestId, input.conversationId, input.message, message));
+      const message = assistantMessage(reply, snapshot, settings.timeZone);
+      res.json(
+        await store.finishChat(
+          input.requestId,
+          input.conversationId,
+          input.message,
+          message,
+          leaseToken,
+        ),
+      );
     } catch (error) {
-      store.abandonRequest(input.requestId);
+      if (acquired) await store.abandonRequest(input.requestId, leaseToken);
       throw error;
     } finally {
       busyConversations.delete(busyId);
       res.off('close', onDisconnect);
     }
   });
-  for (const action of ['apply', 'undo', 'reject'] as const) {
-    app.post(`/api/proposals/${action}`, (req, res) => {
+  for (const action of ['apply', 'undo', 'reject'] as const)
+    app.post('/api/proposals/' + action, async (req, res) => {
       const { conversationId, messageId, proposalIds } = proposalActionSchema.parse(req.body);
-      const result = store.proposalAction(action, conversationId, messageId, proposalIds);
+      if (action === 'apply') {
+        const conversation = await store.conversation(conversationId);
+        const message = conversation.messages.find(
+          (item) => item.id === messageId && item.role === 'assistant',
+        );
+        const selected = proposalIds.map((id) =>
+          message?.proposals.find((proposal) => proposal.id === id),
+        );
+        if (selected.some((proposal) => !proposal || proposal.status !== 'pending'))
+          throw conflict('Предложение уже обработано или удалено. Обновите диалог.');
+        await google.assertFreeSlots(
+          selected.map((proposal) => ({ ...proposal!.after, title: proposal!.title })),
+          (await store.settings()).timeZone,
+        );
+      }
+      const result = await store.proposalAction(action, conversationId, messageId, proposalIds);
       res.json(action === 'reject' ? result.conversation : result);
     });
-  }
   app.use('/api', (_req, _res, next) => {
     next(new AppError(404, 'NOT_FOUND', 'Этот запрос не найден.'));
   });
@@ -217,7 +432,7 @@ export function createApp(options: AppOptions = {}) {
           : path === '/api/settings'
             ? 'Проверьте имя, почту, часовой пояс и время рабочего дня.'
             : path === '/api/login'
-              ? 'Введите пароль приложения.'
+              ? 'Введите логин и пароль приложения.'
               : path === '/api/chat'
                 ? 'Введите сообщение длиной до 6000 символов.'
                 : path.startsWith('/api/proposals/')
@@ -245,7 +460,17 @@ export function createApp(options: AppOptions = {}) {
     });
   };
   app.use(errorHandler);
-  return { app, store, close: () => store.close() };
+  return {
+    app,
+    store,
+    secrets,
+    security,
+    google,
+    close: async () => {
+      await store.close();
+      localState?.close();
+    },
+  };
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
@@ -257,12 +482,11 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     throw new Error('PORT must be between 1 and 65535.');
   const instance = createApp();
   const server = instance.app.listen(port, process.env.HOST || '127.0.0.1', () => {
-    console.log(`Ritm server ready on port ${port}.`);
+    console.log('Ritm server ready on port ' + port + '.');
   });
   const shutdown = () => {
     server.close(() => {
-      instance.close();
-      process.exit(0);
+      void instance.close().then(() => process.exit(0));
     });
   };
   process.on('SIGINT', shutdown);

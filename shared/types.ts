@@ -81,3 +81,41 @@ export interface ApiErrorBody {
   error: string;
   code?: string;
 }
+
+export interface GoogleCalendarStatus {
+  configured: boolean;
+  status: 'unconfigured' | 'disconnected' | 'connected' | 'reauth_required';
+  mode: 'readwrite';
+  calendarId: 'primary';
+  lastFetchedAt: string | null;
+}
+export interface GoogleCalendarEvent {
+  id: string;
+  source: 'google';
+  calendarId: 'primary';
+  title: string;
+  description: string;
+  etag: string;
+  start: { date?: string; dateTime?: string };
+  end: { date?: string; dateTime?: string };
+  timeZone: string;
+  allDay: boolean;
+  busy: boolean;
+  readOnly: boolean;
+}
+export interface GoogleCalendarResult {
+  events: GoogleCalendarEvent[];
+  from: string;
+  to: string;
+  timeZone: string;
+  fetchedAt: string;
+  partial: boolean;
+}
+export interface GoogleEventInput {
+  title: string;
+  description: string;
+  date: string;
+  time: string | null;
+  duration: number;
+  allDay: boolean;
+}

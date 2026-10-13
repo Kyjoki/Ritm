@@ -9,13 +9,17 @@ import {
   ListTodo,
   Sparkles,
 } from 'lucide-react';
-import type { Settings, Task, TaskInput } from '../../shared/types';
-import { getDayOccurrences, isTimedOccurrence } from '../features/calendar-utils';
+import type { GoogleCalendarEvent, Settings, Task, TaskInput } from '../../shared/types';
+import { getDayOccurrences } from '../features/calendar-utils';
+import { calendarOccurrences, type CalendarOccurrence } from '../features/google-occurrences';
 import { durationText, formatDate, formatTime, greeting } from '../lib/date';
 import { Orb } from './Orb';
 
 interface Props {
   tasks: Task[];
+  googleEvents: GoogleCalendarEvent[];
+  googleUncertain: boolean;
+  onGoogleEdit: (event: GoogleCalendarEvent) => void;
   settings: Settings;
   today: string;
   now: number;
@@ -28,6 +32,9 @@ interface Props {
 }
 export function DashboardPage({
   tasks,
+  googleEvents,
+  googleUncertain,
+  onGoogleEdit,
   settings,
   today,
   now,
@@ -43,19 +50,28 @@ export function DashboardPage({
     (a, b) => Number(a.completed) - Number(b.completed) || (a.start ?? 1441) - (b.start ?? 1441),
   );
   const completed = todayEntries.filter((t) => t.completed).length;
-  const upcoming = occurrences
-    .filter(isTimedOccurrence)
+  const combined = calendarOccurrences(tasks, googleEvents, today, settings.timeZone);
+  const timed = combined.filter(
+    (o): o is CalendarOccurrence & { start: number; end: number } =>
+      o.start !== null && o.end !== null,
+  );
+  const upcoming = timed
     .filter((o) => !o.completed && o.end > now)
     .sort((a, b) => a.start - b.start)[0];
-  const schedule = occurrences.filter(isTimedOccurrence).sort((a, b) => a.start - b.start);
+  const schedule = timed.sort((a, b) => a.start - b.start);
+  const openEntry = (entry: CalendarOccurrence) =>
+    entry.source === 'google' ? onGoogleEdit(entry.event) : onEdit(entry.task);
   const undated = tasks.filter((t) => !t.date && !t.completed),
     overdue = tasks.filter((t) => t.date && t.date < today && !t.completed && t.repeat === 'none');
   const workStart =
       Number(settings.workDayStart.slice(0, 2)) * 60 + Number(settings.workDayStart.slice(3)),
     workEnd = Number(settings.workDayEnd.slice(0, 2)) * 60 + Number(settings.workDayEnd.slice(3));
-  const intervals = schedule
-    .filter((o) => !o.completed)
-    .map((o) => [Math.max(workStart, o.start, now), Math.min(workEnd, o.end)])
+  const intervals = combined
+    .filter((o) => o.busy)
+    .map((o) => [
+      Math.max(workStart, o.allDay ? workStart : (o.start ?? workEnd), now),
+      Math.min(workEnd, o.allDay ? workEnd : (o.end ?? workStart)),
+    ])
     .filter(([s, e]) => e > s)
     .sort((a, b) => a[0] - b[0]);
   let occupied = 0,
@@ -104,27 +120,36 @@ export function DashboardPage({
             </div>
           </div>
           <p className="card-footnote">
-            {free
-              ? `Свободно ${durationText(free)}`
-              : now >= workEnd
-                ? 'Рабочий день завершён'
-                : 'Всё время уже в плане'}
+            {googleUncertain
+              ? 'Уточняем расписание Google'
+              : free
+                ? `Свободно ${durationText(free)}`
+                : now >= workEnd
+                  ? 'Рабочий день завершён'
+                  : 'Всё время уже в плане'}
           </p>
         </div>
         <button
           className="panel focus-card"
-          onClick={() => (upcoming ? onEdit(upcoming.task) : onCalendar())}
+          onClick={() => (upcoming ? openEntry(upcoming) : onCalendar())}
         >
           <span className="card-eyebrow">
-            {upcoming && upcoming.start <= now ? 'Сейчас в плане' : 'Ближайшее событие'}
+            {upcoming && upcoming.start <= now
+              ? 'Сейчас в плане'
+              : googleUncertain
+                ? 'Ближайшая известная запись'
+                : 'Ближайшее событие'}
           </span>
           <strong className="focus-time">
             {upcoming ? formatTime(upcoming.start) : 'Без спешки'}
           </strong>
-          <span className="focus-name">{upcoming?.task.title ?? 'Впереди свободное время'}</span>
+          <span className="focus-name">
+            {upcoming?.title ??
+              (googleUncertain ? 'События Google пока не загружены' : 'Впереди свободное время')}
+          </span>
           <span className="focus-meta">
             {upcoming
-              ? `${durationText(upcoming.task.duration)} · ${upcoming.task.kind === 'event' ? 'Событие' : 'Задача'}`
+              ? `${durationText(upcoming.duration)} · ${upcoming.source === 'google' ? 'Google Calendar' : upcoming.task.kind === 'event' ? 'Событие' : 'Задача'}`
               : 'Открыть календарь'}
             <ArrowUpRight size={16} />
           </span>
@@ -217,13 +242,13 @@ export function DashboardPage({
                   <time>{formatTime(o.start)}</time>
                   <button
                     className={`schedule-event${o.completed ? ' is-complete' : ''}`}
-                    onClick={() => onEdit(o.task)}
+                    onClick={() => openEntry(o)}
                   >
-                    <strong>{o.task.title}</strong>
+                    <strong>{o.title}</strong>
                     <span>
                       {o.completed
                         ? 'Завершено'
-                        : `${formatTime(o.start)}–${formatTime(o.end)}${o.end === 1440 ? ' · следующий день' : ''}`}
+                        : `${o.startLabel ?? formatTime(o.start)}–${o.endLabel ?? formatTime(o.end)}${o.end === 1440 ? ' · следующий день' : ''}${o.source === 'google' ? ' · Google' : ''}`}
                     </span>
                   </button>
                 </div>
@@ -246,6 +271,18 @@ export function DashboardPage({
               </button>
             </div>
           )}
+          {combined
+            .filter((o) => o.allDay)
+            .map((o) => (
+              <button key={o.key} className="text-button" onClick={() => openEntry(o)}>
+                Весь день · {o.title} · Google
+              </button>
+            ))}
+          {googleUncertain ? (
+            <p className="field-hint" role="status">
+              Google Calendar ещё не проверен. Открой календарь, чтобы обновить события.
+            </p>
+          ) : null}
           <div className="backlog-grid">
             <Backlog title="Без даты" tasks={undated} onEdit={onEdit} />
             <Backlog title="Просрочено" tasks={overdue} onEdit={onEdit} />

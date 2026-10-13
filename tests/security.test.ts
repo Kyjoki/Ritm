@@ -184,34 +184,34 @@ test('duplicate or unexpected model actions fail validation and never become exe
   assert.deepEqual(message.proposals, []);
 });
 
-test('credential tampering is authenticated and env credentials take precedence without decrypting saved data', (t) => {
+test('credential tampering is authenticated and env credentials take precedence without decrypting saved data', async (t) => {
   const dataDir = ownDirectory(t);
   const secrets = new SecretStore(dataDir, {});
-  secrets.save({ apiKey: fakeKey, model: 'gpt-6-luna' });
+  await secrets.save({ apiKey: fakeKey, model: 'gpt-6-luna' });
   const path = join(dataDir, 'openai-secret.json');
   const envelope = JSON.parse(readFileSync(path, 'utf8'));
   const ciphertext = Buffer.from(envelope.ciphertext, 'base64');
   ciphertext[0] ^= 1;
   writeFileSync(path, JSON.stringify({ ...envelope, ciphertext: ciphertext.toString('base64') }));
-  assert.throws(
-    () => secrets.status(),
+  await assert.rejects(
+    secrets.status(),
     (error: unknown) =>
       error instanceof AppError &&
       error.code === 'SECRET_STORE_ERROR' &&
       !error.message.includes(fakeKey),
   );
   const environment = new SecretStore(dataDir, { OPENAI_API_KEY: fakeKey });
-  assert.deepEqual(environment.status(), {
+  assert.deepEqual(await environment.status(), {
     configured: true,
     model: 'gpt-6-luna',
     source: 'environment',
   });
-  assert.throws(
-    () => environment.remove(),
+  await assert.rejects(
+    environment.remove(),
     (error: unknown) => error instanceof AppError && error.code === 'ENVIRONMENT_KEY',
   );
-  secrets.save({ apiKey: fakeKey, model: 'gpt-6-luna' });
-  assert.equal(secrets.status().configured, true);
+  await secrets.save({ apiKey: fakeKey, model: 'gpt-6-luna' });
+  assert.equal((await secrets.status()).configured, true);
 });
 
 test(
@@ -258,7 +258,7 @@ test(
       release();
       server.closeAllConnections();
       await new Promise<void>((done) => server.close(() => done()));
-      instance.close();
+      await instance.close();
       removeOwnDirectory(dataDir);
     });
     const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
@@ -270,7 +270,7 @@ test(
       });
       return { status: response.status, body: (await response.json()) as any };
     };
-    const task = instance.store.createTask(taskInput);
+    const task = await instance.store.createTask(taskInput);
     const initial = await call('/chat', 'POST', {
       message: 'Предложи план',
       requestId: randomUUID(),
@@ -294,7 +294,7 @@ test(
       proposalIds: [proposalMessage.proposals[0].id],
     });
     assert.equal(applied.status, 200);
-    assert.equal(instance.store.task(task.id).date, '2099-10-15');
+    assert.equal((await instance.store.task(task.id)).date, '2099-10-15');
     release();
     const response = await responsePending;
     assert.equal(response.status, 200);

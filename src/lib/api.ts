@@ -2,6 +2,10 @@ import type {
   AiStatus,
   Bootstrap,
   Conversation,
+  GoogleCalendarStatus,
+  GoogleCalendarResult,
+  GoogleCalendarEvent,
+  GoogleEventInput,
   ProposalResult,
   Settings,
   Task,
@@ -45,11 +49,17 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
       data?.code,
     );
   }
+  if (data === null || typeof data !== 'object')
+    throw new ApiError(
+      'Сервер вернул некорректный ответ. Обновите страницу или проверьте настройку сервера.',
+      502,
+      'INVALID_RESPONSE',
+    );
   return data as T;
 }
 export const api = {
   session: () => request<{ authenticated: boolean; requiresLogin: boolean }>('/session'),
-  login: (password: string) => request('/login', 'POST', { password }),
+  login: (login: string, password: string) => request('/login', 'POST', { login, password }),
   logout: () => request('/logout', 'POST'),
   bootstrap: () => request<Bootstrap>('/bootstrap'),
   createTask: (task: TaskInput) => request<Task>('/tasks', 'POST', task),
@@ -62,6 +72,22 @@ export const api = {
   configureAI: (apiKey: string, model: string) =>
     request<AiStatus>('/settings/openai', 'POST', { apiKey, model }),
   disconnectAI: () => request<AiStatus>('/settings/openai', 'DELETE'),
+  googleStatus: () => request<GoogleCalendarStatus>('/integrations/google/status'),
+  connectGoogle: () =>
+    request<{ authorizationUrl: string }>('/integrations/google/connect', 'POST', {}),
+  disconnectGoogle: () =>
+    request<GoogleCalendarStatus>('/integrations/google/connection', 'DELETE'),
+  googleEvents: (from: string, to: string, timeZone: string) =>
+    request<GoogleCalendarResult>(
+      `/integrations/google/events?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&timeZone=${encodeURIComponent(timeZone)}`,
+    ),
+  createGoogleEvent: (event: GoogleEventInput, requestId: string) =>
+    request<GoogleCalendarEvent>('/integrations/google/events', 'POST', { event, requestId }),
+  updateGoogleEvent: (id: string, event: GoogleEventInput, etag: string) =>
+    request<GoogleCalendarEvent>(`/integrations/google/events/${encodeURIComponent(id)}`, 'PATCH', {
+      event,
+      etag,
+    }),
   createConversation: () => request<Conversation>('/conversations', 'POST', {}),
   deleteConversation: (id: string) => request(`/conversations/${encodeURIComponent(id)}`, 'DELETE'),
   chat: (conversationId: string | undefined, message: string, requestId: string) =>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CalendarDays,
   Check,
@@ -8,21 +8,34 @@ import {
   Plus,
   Repeat2,
   Sparkles,
+  AlertCircle,
+  LoaderCircle,
+  RefreshCw,
 } from 'lucide-react';
-import type { Task, TaskInput } from '../../shared/types';
+import type {
+  GoogleCalendarEvent,
+  GoogleCalendarStatus,
+  GoogleEventInput,
+  Task,
+  TaskInput,
+} from '../../shared/types';
 import {
   addDays,
   addMonths,
   dateKey,
   durationLabel,
   formatDate,
-  getDayOccurrences,
-  layoutOccurrences,
   minuteTime,
   parseDate,
   startOfWeek,
+  timeMinutes,
 } from './calendar-utils';
-import type { TaskOccurrence } from './calendar-utils';
+import {
+  calendarOccurrences,
+  calendarRange,
+  layoutCalendarOccurrences,
+  type CalendarOccurrence,
+} from './google-occurrences';
 import '../styles/calendar-settings.css';
 
 interface CalendarPageProps {
@@ -31,17 +44,30 @@ interface CalendarPageProps {
   timeZone: string;
   onEdit: (task: Task) => void;
   onCreate: (draft?: Partial<TaskInput>) => void;
+  googleStatus?: GoogleCalendarStatus | null;
+  googleEvents?: GoogleCalendarEvent[];
+  googleLoading?: boolean;
+  googleError?: string;
+  googlePartial?: boolean;
+  googleFetchedAt?: string | null;
+  onGoogleEdit?: (event: GoogleCalendarEvent) => void;
+  onGoogleCreate?: (draft: Partial<GoogleEventInput>) => void;
+  onRangeChange?: (from: string, to: string) => void;
+  onGoogleRefresh?: () => void;
+  onOpenSettings?: () => void;
 }
 
 type CalendarView = 'day' | 'week' | 'month';
 const VIEW_LABELS: Record<CalendarView, string> = { day: 'День', week: 'Неделя', month: 'Месяц' };
 const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+const EMPTY_GOOGLE_EVENTS: GoogleCalendarEvent[] = [];
 
-function freeIntervals(entries: TaskOccurrence[]): { start: number; end: number }[] {
+function freeIntervals(entries: CalendarOccurrence[]): { start: number; end: number }[] {
+  if (entries.some((entry) => entry.allDay && entry.busy)) return [];
   let cursor = 8 * 60;
   const intervals: { start: number; end: number }[] = [];
   for (const entry of entries) {
-    if (entry.start === null || entry.end === null) continue;
+    if (!entry.busy || entry.start === null || entry.end === null) continue;
     const start = Math.max(8 * 60, entry.start);
     if (start - cursor >= 30) intervals.push({ start: cursor, end: Math.min(start, 20 * 60) });
     cursor = Math.max(cursor, entry.end);
@@ -51,35 +77,53 @@ function freeIntervals(entries: TaskOccurrence[]): { start: number; end: number 
   return intervals.filter((interval) => interval.end - interval.start >= 30);
 }
 
-function occurrenceLabel(entry: TaskOccurrence): string {
-  const time =
-    entry.start === null
+function occurrenceLabel(entry: CalendarOccurrence): string {
+  const time = entry.allDay
+    ? 'Весь день'
+    : entry.start === null
       ? 'Без времени'
-      : `${minuteTime(entry.start)}–${entry.end === 1440 ? '00:00' : minuteTime(entry.end ?? entry.start)}`;
-  return `${entry.task.title}, ${time}${entry.completed ? ', выполнено' : ''}${entry.task.repeat !== 'none' ? ', повторяющаяся запись, редактировать серию' : ''}`;
+      : `${entry.startLabel ?? minuteTime(entry.start)}–${entry.endLabel ?? (entry.end === 1440 ? '00:00' : minuteTime(entry.end ?? entry.start))}`;
+  return `${entry.title}, ${time}${entry.source === 'google' ? ', Google Calendar' : ', Ritm'}${entry.completed ? ', выполнено' : ''}${entry.source === 'ritm' && entry.task.repeat !== 'none' ? ', повторяющаяся запись, редактировать серию' : ''}${entry.source === 'google' && entry.event.readOnly ? ', только просмотр' : ''}${entry.clockChange ? ', перевод часов' : ''}`;
 }
 
-function AgendaEntry({ entry, onEdit }: { entry: TaskOccurrence; onEdit: (task: Task) => void }) {
+function AgendaEntry({
+  entry,
+  onEdit,
+}: {
+  entry: CalendarOccurrence;
+  onEdit: (entry: CalendarOccurrence) => void;
+}) {
   return (
     <button
       type="button"
-      className={`cal-agenda-entry ${entry.completed ? 'cal-completed' : ''}`}
-      onClick={() => onEdit(entry.task)}
+      className={`cal-agenda-entry ${entry.completed ? 'cal-completed' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''}`}
+      onClick={() => onEdit(entry)}
       aria-label={occurrenceLabel(entry)}
     >
       <span className="cal-agenda-time">
-        {entry.start === null ? <Clock3 size={18} aria-hidden="true" /> : minuteTime(entry.start)}
+        {entry.start === null ? (
+          <Clock3 size={18} aria-hidden="true" />
+        ) : (
+          (entry.startLabel ?? minuteTime(entry.start))
+        )}
       </span>
       <span className="cal-agenda-copy">
-        <strong>{entry.task.title}</strong>
+        <strong>{entry.title}</strong>
         <span>
-          {entry.task.kind === 'event' ? 'Событие' : 'Задача'} ·{' '}
-          {durationLabel(entry.task.duration)}
-          {entry.task.priority === 'high' ? ' · Высокий приоритет' : ''}
-          {entry.key.endsWith(':continued') ? ' · Продолжение' : ''}
+          {entry.source === 'google'
+            ? 'Google Calendar'
+            : entry.task.kind === 'event'
+              ? 'Событие Ritm'
+              : 'Задача Ritm'}{' '}
+          · {entry.allDay ? 'Весь день' : durationLabel(Math.ceil(entry.duration))}
+          {entry.source === 'ritm' && entry.task.priority === 'high' ? ' · Высокий приоритет' : ''}
+          {entry.continued ? ' · Продолжение' : ''}
+          {entry.clockChange ? ' · Перевод часов' : ''}
+          {entry.source === 'google' && entry.event.readOnly ? ' · Просмотр' : ''}
+          {entry.source === 'google' && !entry.busy ? ' · Время свободно' : ''}
         </span>
       </span>
-      {entry.task.repeat !== 'none' ? (
+      {entry.source === 'ritm' && entry.task.repeat !== 'none' ? (
         <Repeat2 size={16} aria-label="Повторяющаяся запись" />
       ) : null}
       {entry.completed ? (
@@ -91,8 +135,35 @@ function AgendaEntry({ entry, onEdit }: { entry: TaskOccurrence; onEdit: (task: 
   );
 }
 
-export function CalendarPage({ tasks, today, timeZone, onEdit, onCreate }: CalendarPageProps) {
+export function CalendarPage({
+  tasks,
+  today,
+  timeZone,
+  onEdit,
+  onCreate,
+  googleStatus = null,
+  googleEvents = EMPTY_GOOGLE_EVENTS,
+  googleLoading = false,
+  googleError = '',
+  googlePartial = false,
+  googleFetchedAt = null,
+  onGoogleEdit,
+  onGoogleCreate,
+  onRangeChange,
+  onGoogleRefresh,
+  onOpenSettings,
+}: CalendarPageProps) {
   const [selectedDate, setSelectedDate] = useState(today);
+  const [creationSource, setCreationSource] = useState<'ritm' | 'google'>('ritm');
+  const googleConnected = googleStatus?.status === 'connected';
+  const sourceAvailable = googleConnected && Boolean(onGoogleCreate);
+  const rangeCallback = useRef(onRangeChange);
+  useEffect(() => {
+    rangeCallback.current = onRangeChange;
+  }, [onRangeChange]);
+  useEffect(() => {
+    if (!sourceAvailable) setCreationSource('ritm');
+  }, [sourceAvailable]);
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches,
   );
@@ -109,6 +180,10 @@ export function CalendarPage({ tasks, today, timeZone, onEdit, onCreate }: Calen
   }, []);
 
   const weekStart = startOfWeek(selectedDate);
+  const range = calendarRange(view, selectedDate);
+  useEffect(() => {
+    rangeCallback.current?.(range.from, range.to);
+  }, [range.from, range.to, timeZone]);
   const periodDays = useMemo(
     () =>
       Array.from({ length: view === 'week' ? 7 : 1 }, (_, index) =>
@@ -117,12 +192,16 @@ export function CalendarPage({ tasks, today, timeZone, onEdit, onCreate }: Calen
     [view, weekStart, selectedDate],
   );
   const occurrencesByDay = useMemo(
-    () => periodDays.map((date) => ({ date, entries: getDayOccurrences(tasks, date) })),
-    [tasks, periodDays],
+    () =>
+      periodDays.map((date) => ({
+        date,
+        entries: calendarOccurrences(tasks, googleEvents, date, timeZone),
+      })),
+    [tasks, googleEvents, periodDays, timeZone],
   );
   const selectedEntries = useMemo(
-    () => getDayOccurrences(tasks, selectedDate),
-    [tasks, selectedDate],
+    () => calendarOccurrences(tasks, googleEvents, selectedDate, timeZone),
+    [tasks, googleEvents, selectedDate, timeZone],
   );
   const monthDays = useMemo(() => {
     const month = parseDate(selectedDate);
@@ -132,11 +211,11 @@ export function CalendarPage({ tasks, today, timeZone, onEdit, onCreate }: Calen
       const date = addDays(first, index);
       return {
         date,
-        entries: getDayOccurrences(tasks, date),
+        entries: calendarOccurrences(tasks, googleEvents, date, timeZone),
         currentMonth: date.slice(0, 7) === selectedDate.slice(0, 7),
       };
     });
-  }, [tasks, selectedDate]);
+  }, [tasks, googleEvents, selectedDate, timeZone]);
   const [startHour, endHour] = useMemo(() => {
     let start = 8;
     let end = 20;
@@ -169,8 +248,32 @@ export function CalendarPage({ tasks, today, timeZone, onEdit, onCreate }: Calen
   }
 
   function addEntry(date: string, time: string | null = null, duration = 60) {
-    onCreate({ date, time, duration, kind: 'event' });
+    const boundedDuration = time ? Math.min(duration, 1440 - timeMinutes(time)) : duration;
+    if (creationSource === 'google' && sourceAvailable)
+      onGoogleCreate?.({ date, time, duration: boundedDuration, allDay: time === null });
+    else onCreate({ date, time, duration: boundedDuration, kind: 'event' });
   }
+  function editEntry(entry: CalendarOccurrence) {
+    if (entry.source === 'google') onGoogleEdit?.(entry.event);
+    else onEdit(entry.task);
+  }
+  const uncertainGoogle =
+    googleLoading ||
+    Boolean(googleError) ||
+    googlePartial ||
+    googleStatus?.status === 'reauth_required' ||
+    (googleConnected && !googleFetchedAt);
+  const fetchedDate = googleFetchedAt ? new Date(googleFetchedAt) : null;
+  const fetchedLabel =
+    fetchedDate && Number.isFinite(fetchedDate.getTime())
+      ? new Intl.DateTimeFormat('ru-RU', {
+          timeZone,
+          day: 'numeric',
+          month: 'short',
+          hour: '2-digit',
+          minute: '2-digit',
+        }).format(fetchedDate)
+      : null;
 
   return (
     <div className="cal-page">
@@ -231,6 +334,97 @@ export function CalendarPage({ tasks, today, timeZone, onEdit, onCreate }: Calen
         </div>
       </div>
 
+      {sourceAvailable ? (
+        <div
+          className="cal-create-destination"
+          role="group"
+          aria-label="Куда добавить новую запись"
+        >
+          <span>Новая запись:</span>
+          <button
+            type="button"
+            className={creationSource === 'ritm' ? 'cal-destination-active' : ''}
+            aria-pressed={creationSource === 'ritm'}
+            onClick={() => setCreationSource('ritm')}
+          >
+            Ritm
+          </button>
+          <button
+            type="button"
+            className={creationSource === 'google' ? 'cal-destination-active' : ''}
+            aria-pressed={creationSource === 'google'}
+            onClick={() => setCreationSource('google')}
+          >
+            Google Calendar
+          </button>
+        </div>
+      ) : null}
+
+      {googleStatus || googleLoading || googleError ? (
+        <div
+          className={`cal-google-status ${googleError || googlePartial || googleStatus?.status === 'reauth_required' ? 'cal-google-status-warning' : ''}`}
+          role={googleError ? 'alert' : 'status'}
+        >
+          {googleLoading ? (
+            <LoaderCircle size={18} className="spinning" aria-hidden="true" />
+          ) : googleError || googlePartial || googleStatus?.status === 'reauth_required' ? (
+            <AlertCircle size={18} aria-hidden="true" />
+          ) : (
+            <CalendarDays size={18} aria-hidden="true" />
+          )}
+          <div className="cal-google-status-copy">
+            <strong>
+              {googleLoading
+                ? 'Загружаем Google Calendar…'
+                : googleError
+                  ? 'Google Calendar требует внимания'
+                  : googleStatus?.status === 'reauth_required'
+                    ? 'Подключи Google Calendar заново'
+                    : googlePartial
+                      ? 'Загружена часть событий Google'
+                      : googleConnected
+                        ? 'Основной календарь Google'
+                        : 'Google Calendar пока не подключён'}
+            </strong>
+            <span>
+              {googleError
+                ? `${googleError} Показанные события могут быть неактуальны.`
+                : googlePartial
+                  ? 'Часть событий не загружена. Свободное время нужно уточнить в Google Calendar.'
+                  : googleLoading
+                    ? 'Обновляем выбранный период. План Ritm остаётся доступен.'
+                    : googleStatus?.status === 'reauth_required'
+                      ? 'Разрешение нужно обновить в настройках.'
+                      : googleConnected
+                        ? 'События Google и задачи Ritm в одном расписании.'
+                        : 'Подключи его в настройках, чтобы видеть встречи рядом со своим планом.'}
+            </span>
+            {fetchedLabel ? (
+              <small className="cal-google-updated">Последнее обновление: {fetchedLabel}</small>
+            ) : null}
+          </div>
+          <div className="cal-google-status-actions">
+            {onGoogleRefresh && (googleConnected || Boolean(googleError)) ? (
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={googleLoading}
+                onClick={onGoogleRefresh}
+              >
+                <RefreshCw size={15} aria-hidden="true" />
+                Обновить
+              </button>
+            ) : null}
+            {onOpenSettings && !googleConnected ? (
+              <button type="button" className="cal-google-settings" onClick={onOpenSettings}>
+                Настройки
+                <ChevronRight size={15} aria-hidden="true" />
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       {view === 'month' ? (
         <section className="panel cal-month-panel" aria-label="Календарь на месяц">
           <div className="cal-month-grid">
@@ -265,18 +459,27 @@ export function CalendarPage({ tasks, today, timeZone, onEdit, onCreate }: Calen
                     ? entries
                         .slice(0, 3)
                         .map((entry) => (
-                          <span key={entry.key} className="cal-month-dot" aria-hidden="true" />
+                          <span
+                            key={entry.key}
+                            className={`cal-month-dot ${entry.source === 'google' ? 'cal-google-dot' : ''}`}
+                            aria-hidden="true"
+                          />
                         ))
                     : entries.slice(0, 2).map((entry) => (
                         <button
                           key={entry.key}
-                          className={`cal-month-event ${entry.completed ? 'cal-completed' : ''}`}
+                          className={`cal-month-event ${entry.completed ? 'cal-completed' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''}`}
                           type="button"
-                          onClick={() => onEdit(entry.task)}
+                          onClick={() => editEntry(entry)}
                           aria-label={occurrenceLabel(entry)}
                         >
                           {entry.start === null ? '' : `${minuteTime(entry.start)} `}
-                          {entry.task.title}
+                          {entry.source === 'google' ? (
+                            <span className="cal-google-mark" aria-hidden="true">
+                              G
+                            </span>
+                          ) : null}
+                          {entry.title}
                         </button>
                       ))}
                   {!isMobile && entries.length > 2 ? (
@@ -307,36 +510,39 @@ export function CalendarPage({ tasks, today, timeZone, onEdit, onCreate }: Calen
               </div>
               {entries.length ? (
                 entries.map((entry) => (
-                  <AgendaEntry key={entry.key} entry={entry} onEdit={onEdit} />
+                  <AgendaEntry key={entry.key} entry={entry} onEdit={editEntry} />
                 ))
               ) : (
                 <div className="cal-empty-small">
                   <CalendarDays size={24} aria-hidden="true" />
-                  <p>На этот день пока нет планов</p>
+                  <p>
+                    {uncertainGoogle
+                      ? 'В Ritm на этот день пока нет планов'
+                      : 'На этот день пока нет планов'}
+                  </p>
                 </div>
               )}
               <div className="cal-free-intervals">
-                {freeIntervals(entries)
-                  .slice(0, 2)
-                  .map((interval) => (
-                    <button
-                      className="cal-free-time"
-                      type="button"
-                      key={interval.start}
-                      onClick={() =>
-                        addEntry(
-                          date,
-                          minuteTime(interval.start),
-                          Math.min(60, interval.end - interval.start),
-                        )
-                      }
-                    >
-                      <Plus size={16} aria-hidden="true" />
-                      <span>
-                        Свободно {minuteTime(interval.start)}–{minuteTime(interval.end)}
-                      </span>
-                    </button>
-                  ))}
+                {(uncertainGoogle ? [] : freeIntervals(entries)).slice(0, 2).map((interval) => (
+                  <button
+                    className="cal-free-time"
+                    type="button"
+                    key={interval.start}
+                    onClick={() =>
+                      addEntry(
+                        date,
+                        minuteTime(interval.start),
+                        Math.min(60, interval.end - interval.start),
+                      )
+                    }
+                  >
+                    <Plus size={16} aria-hidden="true" />
+                    <span>
+                      {googleConnected ? 'Свободно' : 'Свободно в Ritm'}{' '}
+                      {minuteTime(interval.start)}–{minuteTime(interval.end)}
+                    </span>
+                  </button>
+                ))}
               </div>
               <button className="cal-mobile-add" type="button" onClick={() => addEntry(date)}>
                 <Plus size={17} aria-hidden="true" />
@@ -381,11 +587,7 @@ export function CalendarPage({ tasks, today, timeZone, onEdit, onCreate }: Calen
               className="cal-all-day"
               style={{ gridTemplateColumns: `52px repeat(${periodDays.length}, minmax(0, 1fr))` }}
             >
-              <span>
-                Без
-                <br />
-                времени
-              </span>
+              <span>Весь день / без времени</span>
               {occurrencesByDay.map(({ date, entries }) => (
                 <div key={date}>
                   {entries
@@ -394,10 +596,16 @@ export function CalendarPage({ tasks, today, timeZone, onEdit, onCreate }: Calen
                       <button
                         type="button"
                         key={entry.key}
-                        className="cal-all-day-event"
-                        onClick={() => onEdit(entry.task)}
+                        className={`cal-all-day-event ${entry.source === 'google' ? 'cal-google-entry' : ''}`}
+                        onClick={() => editEntry(entry)}
+                        aria-label={occurrenceLabel(entry)}
                       >
-                        {entry.task.title}
+                        {entry.source === 'google' ? (
+                          <span className="cal-google-mark" aria-hidden="true">
+                            G
+                          </span>
+                        ) : null}
+                        {entry.title}
                       </button>
                     ))}
                 </div>
@@ -438,28 +646,37 @@ export function CalendarPage({ tasks, today, timeZone, onEdit, onCreate }: Calen
                       </button>
                     )),
                   )}
-                  {layoutOccurrences(entries).map((entry) => {
+                  {layoutCalendarOccurrences(entries).map((entry) => {
                     const duration = (entry.end ?? 0) - (entry.start ?? 0);
                     return (
                       <button
                         key={entry.key}
                         type="button"
-                        className={`cal-grid-event ${entry.task.kind === 'event' ? 'cal-event-kind' : ''} ${entry.completed ? 'cal-completed' : ''} ${duration < 40 ? 'cal-compact-event' : ''}`}
+                        className={`cal-grid-event ${entry.source === 'google' || entry.task.kind === 'event' ? 'cal-event-kind' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''} ${entry.completed ? 'cal-completed' : ''} ${duration < 40 ? 'cal-compact-event' : ''}`}
                         style={{
                           top: (((entry.start ?? 0) - startHour * 60) / 60) * 62 + 2,
                           height: Math.max(22, (duration / 60) * 62 - 4),
                           width: `calc(${100 / entry.lanes}% - 7px)`,
                           left: `calc(${(entry.lane * 100) / entry.lanes}% + 4px)`,
                         }}
-                        onClick={() => onEdit(entry.task)}
+                        onClick={() => editEntry(entry)}
                         title={occurrenceLabel(entry)}
                         aria-label={occurrenceLabel(entry)}
                       >
-                        <strong>{entry.task.title}</strong>
+                        <strong>
+                          {entry.source === 'google' ? (
+                            <span className="cal-google-mark" aria-hidden="true">
+                              G
+                            </span>
+                          ) : null}
+                          {entry.title}
+                        </strong>
                         <span>
-                          {minuteTime(entry.start ?? 0)}–
-                          {entry.end === 1440 ? '00:00' : minuteTime(entry.end ?? 0)}
-                          {entry.task.repeat !== 'none' ? ' · ↻' : ''}
+                          {entry.startLabel ?? minuteTime(entry.start ?? 0)}–
+                          {entry.endLabel ??
+                            (entry.end === 1440 ? '00:00' : minuteTime(entry.end ?? 0))}
+                          {entry.source === 'ritm' && entry.task.repeat !== 'none' ? ' · ↻' : ''}
+                          {entry.clockChange ? ' · Перевод часов' : ''}
                         </span>
                       </button>
                     );
@@ -473,7 +690,13 @@ export function CalendarPage({ tasks, today, timeZone, onEdit, onCreate }: Calen
               <i className="cal-legend-task" />
               Задачи
               <i className="cal-legend-event" />
-              События
+              События Ritm
+              {googleConnected || googleEvents.length ? (
+                <>
+                  <i className="cal-legend-google" />
+                  Google Calendar
+                </>
+              ) : null}
             </span>
             <span>Выбери свободный интервал, чтобы добавить запись</span>
           </footer>
@@ -498,9 +721,12 @@ export function CalendarPage({ tasks, today, timeZone, onEdit, onCreate }: Calen
           <p>
             {(view === 'month' ? selectedEntries.length : visibleCount) ? (
               <>
-                В плане <strong>{view === 'month' ? selectedEntries.length : visibleCount}</strong>{' '}
-                записей. Оставь немного времени для себя.
+                {uncertainGoogle ? 'Показано' : 'В плане'}{' '}
+                <strong>{view === 'month' ? selectedEntries.length : visibleCount}</strong> записей.
+                Оставь немного времени для себя.
               </>
+            ) : uncertainGoogle ? (
+              'План Ritm доступен. События Google ещё нужно уточнить.'
             ) : (
               'Пока всё свободно. Начни с одного важного дела.'
             )}

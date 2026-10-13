@@ -37,7 +37,7 @@ async function harness(t: TestContext, options: AppOptions = {}) {
   t.after(async () => {
     server.closeAllConnections();
     await new Promise<void>((done) => server.close(() => done()));
-    instance.close();
+    await instance.close();
     // This is our own mkdtemp directory, verified before recursive cleanup.
     assert.ok(
       resolve(dataDir).startsWith(resolve(tmpdir()) + '\\') ||
@@ -59,7 +59,7 @@ async function harness(t: TestContext, options: AppOptions = {}) {
     });
     return { response, status: response.status, body: (await response.json()) as any };
   };
-  return { ...instance, dataDir, call, url };
+  return { ...instance, store: instance.store as Store, dataDir, call, url };
 }
 
 test('SQLite CRUD, validation, deletion undo and persistence are real', async (t) => {
@@ -171,8 +171,14 @@ test('password sessions, hostile Origin/Host and secret non-exposure', async (t)
   const h = await harness(t, { env: { NODE_ENV: 'test', APP_PASSWORD: 'a-long-test-password' } });
   assert.equal((await h.call('/session')).body.authenticated, false);
   assert.equal((await h.call('/bootstrap')).status, 401);
-  assert.equal((await h.call('/login', 'POST', { password: 'wrong' })).status, 401);
-  const login = await h.call('/login', 'POST', { password: 'a-long-test-password' });
+  assert.equal(
+    (await h.call('/login', 'POST', { login: 'maksim', password: 'wrong' })).status,
+    401,
+  );
+  const login = await h.call('/login', 'POST', {
+    login: 'MaKsim',
+    password: 'a-long-test-password',
+  });
   assert.equal(login.status, 200);
   const setCookie = login.response.headers.get('set-cookie')!;
   assert.match(setCookie, /HttpOnly/);

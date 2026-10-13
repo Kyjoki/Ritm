@@ -6,11 +6,21 @@ if (Number(process.versions.node.split('.')[0]) < 24) {
   process.exit(1);
 }
 const processes = [
-  spawn(process.execPath, ['--env-file-if-exists=.env', '--import', 'tsx', 'server/index.ts'], {
-    cwd: root,
-    stdio: 'inherit',
-    env: { ...process.env, NODE_ENV: 'development' },
-  }),
+  spawn(
+    process.execPath,
+    [
+      '--env-file-if-exists=.env',
+      '--env-file-if-exists=.env.local',
+      '--import',
+      'tsx',
+      'server/index.ts',
+    ],
+    {
+      cwd: root,
+      stdio: 'inherit',
+      env: { ...process.env, NODE_ENV: 'development' },
+    },
+  ),
   spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1'], {
     cwd: root,
     stdio: 'inherit',

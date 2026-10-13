@@ -1,12 +1,10 @@
 import { Activity, useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ArrowRight,
   CalendarDays,
   Check,
   CircleAlert,
   LayoutDashboard,
   LoaderCircle,
-  LockKeyhole,
   Moon,
   Plus,
   RefreshCw,
@@ -16,17 +14,28 @@ import {
   Undo2,
   X,
 } from 'lucide-react';
-import type { Bootstrap, Conversation, Settings, Task, TaskInput } from '../shared/types';
+import type {
+  Bootstrap,
+  Conversation,
+  GoogleCalendarEvent,
+  GoogleEventInput,
+  Settings,
+  Task,
+  TaskInput,
+} from '../shared/types';
 import { api, ApiError } from './lib/api';
 import { dateInZone, minutesInZone } from './lib/date';
-import { getDayOccurrences, isTimedOccurrence } from './features/calendar-utils';
+import { addDays, getDayOccurrences, isTimedOccurrence } from './features/calendar-utils';
 import { CalendarPage } from './features/CalendarPage';
 import { SettingsPage } from './features/SettingsPage';
 import { AssistantPage } from './features/AssistantPage';
 import { DashboardPage } from './components/DashboardPage';
 import { TaskDialog } from './components/TaskDialog';
+import { LoginPage } from './features/LoginPage';
+import { GoogleEventDialog } from './components/GoogleEventDialog';
+import { useGoogleCalendar } from './lib/google-calendar';
 
-type Page = 'day' | 'calendar' | 'assistant' | 'settings';
+type Page = 'day' | 'calendar' | 'assistant' | 'settings' | 'login-preview';
 const navigation = [
   { id: 'day' as const, label: 'Мой день', icon: LayoutDashboard },
   { id: 'calendar' as const, label: 'Календарь', icon: CalendarDays },
@@ -34,7 +43,9 @@ const navigation = [
   { id: 'settings' as const, label: 'Настройки', icon: Settings2 },
 ];
 function currentPage(): Page {
+  if (new URLSearchParams(window.location.search).get('section') === 'settings') return 'settings';
   const hash = window.location.hash.slice(1);
+  if (import.meta.env.DEV && hash === 'login-preview') return 'login-preview';
   return navigation.some((n) => n.id === hash) ? (hash as Page) : 'day';
 }
 type Toast = { message: string; error?: boolean; undo?: () => Promise<void>; id: number };
@@ -47,6 +58,10 @@ export default function App() {
   const [taskDialog, setTaskDialog] = useState<{ task?: Task; draft?: Partial<TaskInput> } | null>(
     null,
   );
+  const [googleDialog, setGoogleDialog] = useState<{
+    event?: GoogleCalendarEvent;
+    draft?: Partial<GoogleEventInput>;
+  } | null>(null);
   const [toast, setToast] = useState<Toast | null>(null),
     [undoBusy, setUndoBusy] = useState(false),
     [busyIds, setBusyIds] = useState<Set<string>>(new Set());
@@ -95,9 +110,13 @@ export default function App() {
   }, []);
   useEffect(() => {
     const expired = () => {
+      loadGeneration.current++;
       setData(null);
       setRequiresLogin(true);
+      setLoading(false);
+      setLoadError('');
       setTaskDialog(null);
+      setGoogleDialog(null);
       setToast(null);
     };
     window.addEventListener('ritm:auth-required', expired);
@@ -109,6 +128,7 @@ export default function App() {
   }, []);
   const theme = data?.settings.theme;
   useEffect(() => {
+    if (page === 'login-preview') return;
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const update = () => {
       let selected = theme;
@@ -135,9 +155,9 @@ export default function App() {
         /* storage may be unavailable */
       }
     return () => media.removeEventListener('change', update);
-  }, [theme]);
+  }, [theme, page]);
   useEffect(() => {
-    document.title = `${navigation.find((n) => n.id === page)?.label} — Ritm`;
+    document.title = `${page === 'login-preview' ? 'Вход' : navigation.find((n) => n.id === page)?.label} — Ritm`;
   }, [page]);
   useEffect(() => {
     if (!toast) return;
@@ -149,6 +169,45 @@ export default function App() {
   }, [toast]);
   const today = dateInZone(data?.settings.timeZone ?? 'Asia/Qyzylorda', clock),
     now = minutesInZone(data?.settings.timeZone ?? 'Asia/Qyzylorda', clock);
+  const google = useGoogleCalendar(
+    Boolean(data),
+    data?.settings.timeZone ?? 'Asia/Qyzylorda',
+    today,
+  );
+  useEffect(() => {
+    if (page !== 'calendar') google.setRange(today, addDays(today, 1));
+  }, [page, today, google.setRange]);
+  useEffect(() => {
+    if (!data) return;
+    const params = new URLSearchParams(window.location.search);
+    const outcome = params.get('google');
+    if (!outcome || params.get('section') !== 'settings') return;
+    history.replaceState(null, '', `${window.location.pathname}#settings`);
+    setPage('settings');
+    let active = true;
+    void google
+      .refreshStatus()
+      .then((status) => {
+        if (!active) return;
+        const connected = outcome === 'connected' && status.status === 'connected';
+        notify(
+          connected
+            ? 'Google Calendar подключён'
+            : 'Не удалось подключить Google Calendar. Повтори подключение в настройках.',
+          !connected,
+        );
+      })
+      .catch((handle) => {
+        if (active)
+          notify(
+            handle instanceof Error ? handle.message : 'Не удалось проверить Google Calendar.',
+            true,
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, [Boolean(data), notify, google.refreshStatus]);
   useEffect(() => {
     if (
       !data?.settings.notifications ||
@@ -278,9 +337,14 @@ export default function App() {
   );
   const logout = async () => {
     await api.logout();
+    loadGeneration.current++;
     setData(null);
+    setLoading(false);
+    setLoadError('');
     setRequiresLogin(true);
     setToast(null);
+    setTaskDialog(null);
+    setGoogleDialog(null);
   };
   const themeToggle = async () => {
     if (!data) return;
@@ -302,6 +366,8 @@ export default function App() {
     }
   };
 
+  if (page === 'login-preview')
+    return <LoginPage preview onSubmit={async () => {}} onBack={() => go('day')} />;
   if (loading && !data)
     return (
       <div className="startup">
@@ -334,7 +400,15 @@ export default function App() {
         </div>
       </div>
     );
-  if (!data) return <Login onLogin={load} requiresLogin={requiresLogin} />;
+  if (!data)
+    return (
+      <LoginPage
+        onSubmit={async ({ login, password }) => {
+          await api.login(login, password);
+          await load();
+        }}
+      />
+    );
   return (
     <div className={`app-shell sidebar-${data.settings.sidebar}`}>
       <a
@@ -394,6 +468,17 @@ export default function App() {
           {page === 'day' ? (
             <DashboardPage
               tasks={data.tasks}
+              googleEvents={google.result?.events ?? []}
+              googleUncertain={
+                Boolean(google.error) ||
+                google.status.status === 'reauth_required' ||
+                (google.status.status === 'connected' &&
+                  (google.loading ||
+                    Boolean(google.error) ||
+                    !google.result ||
+                    google.result.partial))
+              }
+              onGoogleEdit={(event) => setGoogleDialog({ event })}
               settings={data.settings}
               today={today}
               now={now}
@@ -412,6 +497,17 @@ export default function App() {
               timeZone={data.settings.timeZone}
               onEdit={(task) => setTaskDialog({ task })}
               onCreate={(draft) => setTaskDialog({ draft })}
+              googleStatus={google.status}
+              googleEvents={google.result?.events ?? []}
+              googleLoading={google.loading}
+              googleError={google.error}
+              googlePartial={google.result?.partial ?? false}
+              googleFetchedAt={google.result?.fetchedAt ?? null}
+              onGoogleEdit={(event) => setGoogleDialog({ event })}
+              onGoogleCreate={(draft) => setGoogleDialog({ draft })}
+              onRangeChange={google.setRange}
+              onGoogleRefresh={google.refresh}
+              onOpenSettings={() => go('settings')}
             />
           </Activity>
           <Activity mode={page === 'assistant' ? 'visible' : 'hidden'}>
@@ -478,6 +574,9 @@ export default function App() {
             <SettingsPage
               settings={data.settings}
               aiStatus={data.aiStatus}
+              googleStatus={google.status}
+              onConnectGoogle={google.connect}
+              onDisconnectGoogle={google.disconnect}
               onSave={saveSettings}
               onConfigureAI={async (key, model) => {
                 const aiStatus = await api.configureAI(key, model);
@@ -517,6 +616,22 @@ export default function App() {
           onDelete={deleteTask}
         />
       ) : null}
+      {googleDialog ? (
+        <GoogleEventDialog
+          {...googleDialog}
+          timeZone={data.settings.timeZone}
+          onClose={() => {
+            setGoogleDialog(null);
+            google.refresh();
+          }}
+          onSave={async (input, requestId, event) => {
+            if (event) await api.updateGoogleEvent(event.id, input, event.etag);
+            else await api.createGoogleEvent(input, requestId);
+            google.refresh();
+            notify(event ? 'Событие Google обновлено' : 'Событие добавлено в Google Calendar');
+          }}
+        />
+      ) : null}
       {toast ? (
         <div
           className={`toast${toast.error ? ' toast-error' : ''}`}
@@ -547,64 +662,5 @@ function Brand() {
     <span className="brand">
       <span className="brand-mark">✦</span>Ritm
     </span>
-  );
-}
-function Login({
-  onLogin,
-  requiresLogin,
-}: {
-  onLogin: () => Promise<void>;
-  requiresLogin: boolean;
-}) {
-  const [password, setPassword] = useState(''),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState('');
-  return (
-    <div className="startup login-page">
-      <Brand />
-      <form
-        className="startup-card login-card"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setBusy(true);
-          setError('');
-          try {
-            await api.login(password);
-            setPassword('');
-            await onLogin();
-          } catch (err) {
-            setError(err instanceof Error ? err.message : 'Не удалось войти.');
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        <div className="login-icon">
-          <LockKeyhole size={25} />
-        </div>
-        <h1>Ваше пространство</h1>
-        <p>Войдите, чтобы вернуться к своему плану.</p>
-        <label className="field">
-          Пароль
-          <input
-            type="password"
-            autoFocus
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required={requiresLogin}
-          />
-        </label>
-        {error ? (
-          <p className="error-note" role="alert">
-            {error}
-          </p>
-        ) : null}
-        <button className="button button-primary" type="submit" disabled={busy}>
-          {busy ? <LoaderCircle size={18} className="spinning" /> : <ArrowRight size={18} />}{' '}
-          {busy ? 'Входим…' : 'Войти в Ritm'}
-        </button>
-      </form>
-    </div>
   );
 }

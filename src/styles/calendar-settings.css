@@ -1422,3 +1422,158 @@
     display: none;
   }
 }
+
+/* Google events stay separate from local tasks; both use the violet palette. */
+.cal-create-destination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: -3px 0 16px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.cal-create-destination > span {
+  margin-right: 6px;
+}
+.cal-create-destination > button {
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--muted);
+  background: var(--panel);
+  font: inherit;
+  cursor: pointer;
+}
+.cal-create-destination > .cal-destination-active {
+  color: var(--accent);
+  background: var(--soft);
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+}
+.cal-google-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  margin-bottom: 18px;
+  background: color-mix(in srgb, var(--soft) 48%, var(--panel));
+  color: var(--muted);
+}
+.cal-google-status > svg {
+  flex: none;
+  color: var(--accent);
+  margin-top: 2px;
+}
+.cal-google-status-copy {
+  display: grid;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.cal-google-status-copy strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.cal-google-status-copy > span {
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.cal-google-updated {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.cal-google-status-warning {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+}
+.cal-google-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.cal-google-status-actions .button {
+  min-height: 36px;
+  font-size: 11px;
+  padding: 8px 11px;
+}
+.cal-google-settings {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
+  padding: 6px 2px;
+  background: transparent;
+  color: var(--accent);
+  border: 0;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.cal-grid-event.cal-google-entry,
+.cal-all-day-event.cal-google-entry,
+.cal-month-event.cal-google-entry {
+  background: color-mix(in srgb, var(--accent) 17%, var(--panel));
+  border-left-color: var(--accent);
+  border-left-style: dashed;
+}
+.cal-agenda-entry.cal-google-entry {
+  border-left: 2px dashed var(--accent);
+  padding-left: 10px;
+}
+.cal-google-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  margin-right: 4px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-size: 8px;
+  font-weight: 600;
+  vertical-align: middle;
+  flex: none;
+}
+.cal-month-dot.cal-google-dot {
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+}
+.cal-calendar-foot .cal-legend-google {
+  background: transparent;
+  border: 1px dashed var(--accent);
+}
+.cal-calendar-foot > span:first-child {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+@media (max-width: 760px) {
+  .cal-create-destination > button {
+    min-height: 44px;
+    padding: 10px 13px;
+    font-size: 12px;
+  }
+  .cal-google-status {
+    flex-wrap: wrap;
+    gap: 9px;
+    padding: 13px;
+  }
+  .cal-google-status-copy {
+    min-width: calc(100% - 30px);
+    flex-basis: calc(100% - 30px);
+  }
+  .cal-google-status-actions {
+    margin-left: 27px;
+  }
+  .cal-google-status-actions .button,
+  .cal-google-settings {
+    min-height: 44px;
+  }
+}

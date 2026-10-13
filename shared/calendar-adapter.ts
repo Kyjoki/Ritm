@@ -1,4 +1,5 @@
-/** Future Google Calendar boundary. No provider connection exists in this release. */
+/** Legacy provider-neutral contract. Current Google DTOs are in shared/types.ts;
+ * server/google-calendar.ts is the implementation and requires owner OAuth setup. */
 export interface ExternalCalendarEvent {
   externalId: string;
   calendarId: string;
