@@ -6,6 +6,8 @@ import type {
   GoogleCalendarResult,
   GoogleCalendarEvent,
   GoogleEventInput,
+  GoogleOAuthSetup,
+  GoogleOAuthSetupInput,
   ProposalResult,
   Settings,
   Task,
@@ -72,6 +74,11 @@ export const api = {
   configureAI: (apiKey: string, model: string) =>
     request<AiStatus>('/settings/openai', 'POST', { apiKey, model }),
   disconnectAI: () => request<AiStatus>('/settings/openai', 'DELETE'),
+  googleConfiguration: () => request<GoogleOAuthSetup>('/integrations/google/configuration'),
+  configureGoogle: (configuration: GoogleOAuthSetupInput) =>
+    request<GoogleOAuthSetup>('/integrations/google/configuration', 'POST', configuration),
+  removeGoogleConfiguration: () =>
+    request<GoogleOAuthSetup>('/integrations/google/configuration', 'DELETE'),
   googleStatus: () => request<GoogleCalendarStatus>('/integrations/google/status'),
   connectGoogle: () =>
     request<{ authorizationUrl: string }>('/integrations/google/connect', 'POST', {}),

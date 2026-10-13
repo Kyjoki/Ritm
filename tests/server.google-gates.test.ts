@@ -26,6 +26,19 @@ test('connected Google snapshot reaches AI; confirmation checks fresh busy slots
     lastFetchedAt: null,
   };
   const google: NonNullable<AppOptions['googleService']> = {
+    configuration: async () => ({
+      configured: true,
+      source: 'environment',
+      clientId: 'test.apps.googleusercontent.com',
+      hasClientSecret: true,
+      redirectUri: 'https://ritm.example/api/integrations/google/callback',
+    }),
+    saveConfiguration: async () => {
+      throw new Error('not in this scenario');
+    },
+    removeConfiguration: async () => {
+      throw new Error('not in this scenario');
+    },
     status: async () => status,
     connect: async () => {
       throw new Error('not in this scenario');

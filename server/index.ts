@@ -13,6 +13,7 @@ import {
   googleEventInputSchema,
   googleEventIdSchema,
   googleEtagSchema,
+  googleOAuthSetupInputSchema,
   type GoogleCalendarService,
   type GoogleTransport,
 } from './google-calendar.ts';
@@ -51,6 +52,9 @@ type AppGoogleService = Pick<
   | 'updateEvent'
   | 'disconnect'
   | 'assertFreeSlots'
+  | 'configuration'
+  | 'saveConfiguration'
+  | 'removeConfiguration'
 >;
 export interface AppOptions {
   dataDir?: string;
@@ -198,18 +202,19 @@ export function createApp(options: AppOptions = {}) {
           error: z.string().max(100).optional(),
         })
         .parse(req.query);
-      const cookie = req.headers.cookie
+      const cookies = req.headers.cookie
         ?.split(';')
         .map((part) => part.trim())
-        .find((part) => part.startsWith(GOOGLE_OAUTH_COOKIE + '='))
-        ?.slice(GOOGLE_OAUTH_COOKIE.length + 1);
+        .filter((part) => part.startsWith(GOOGLE_OAUTH_COOKIE + '='));
+      const cookie =
+        cookies?.length === 1 ? cookies[0].slice(GOOGLE_OAUTH_COOKIE.length + 1) : undefined;
       await google.callback({ ...input, correlationCookie: cookie });
       audit(res, 'google_connected', 303);
       res.clearCookie(GOOGLE_OAUTH_COOKIE, {
         path: GOOGLE_CALLBACK_PATH,
         httpOnly: true,
         sameSite: 'lax',
-        secure: env.GOOGLE_REDIRECT_URI?.startsWith('https://') ?? false,
+        secure: (env.APP_ORIGIN || env.GOOGLE_REDIRECT_URI)?.startsWith('https://') ?? false,
       });
       res.redirect(303, '/?section=settings&google=connected');
     } catch (error) {
@@ -235,6 +240,18 @@ export function createApp(options: AppOptions = {}) {
   });
   app.get('/api/integrations/google/status', async (_req, res) => {
     res.json(await google.status());
+  });
+  app.get('/api/integrations/google/configuration', async (_req, res) => {
+    res.json(await google.configuration());
+  });
+  app.post('/api/integrations/google/configuration', async (req, res) => {
+    const input = googleOAuthSetupInputSchema.parse(req.body);
+    await security.limit(req, 'google-configuration', 10, 60_000);
+    res.json(await google.saveConfiguration(input));
+  });
+  app.delete('/api/integrations/google/configuration', async (req, res) => {
+    await security.limit(req, 'google-configuration', 10, 60_000);
+    res.json(await google.removeConfiguration());
   });
   app.post('/api/integrations/google/connect', async (req, res) => {
     z.object({})
@@ -511,15 +528,17 @@ export function createApp(options: AppOptions = {}) {
       const message =
         path === '/api/settings/openai'
           ? 'Проверьте ключ OpenAI (начинается с sk-) и название модели.'
-          : path === '/api/settings'
-            ? 'Проверьте имя, почту, часовой пояс и время рабочего дня.'
-            : path === '/api/login'
-              ? 'Введите логин и пароль приложения.'
-              : path === '/api/chat'
-                ? 'Введите сообщение длиной до 6000 символов.'
-                : path.startsWith('/api/proposals/')
-                  ? 'Не удалось выбрать изменения. Обновите диалог и повторите.'
-                  : 'Проверьте заполненные поля: название, дату, время и длительность.';
+          : path === '/api/integrations/google/configuration'
+            ? 'Введите Client ID Google и Client Secret без пробелов. Callback URL задаётся сервером.'
+            : path === '/api/settings'
+              ? 'Проверьте имя, почту, часовой пояс и время рабочего дня.'
+              : path === '/api/login'
+                ? 'Введите логин и пароль приложения.'
+                : path === '/api/chat'
+                  ? 'Введите сообщение длиной до 6000 символов.'
+                  : path.startsWith('/api/proposals/')
+                    ? 'Не удалось выбрать изменения. Обновите диалог и повторите.'
+                    : 'Проверьте заполненные поля: название, дату, время и длительность.';
       res.status(400).json({ error: message, code: 'VALIDATION_ERROR' });
       return;
     }

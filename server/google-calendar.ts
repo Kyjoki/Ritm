@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { CodeChallengeMethod, OAuth2Client, type Credentials } from 'google-auth-library';
 import { z } from 'zod';
 import type {
@@ -6,6 +7,8 @@ import type {
   GoogleCalendarResult,
   GoogleCalendarStatus,
   GoogleEventInput,
+  GoogleOAuthSetup,
+  GoogleOAuthSetupInput,
   Settings,
 } from '../shared/types.ts';
 import { AppError, conflict } from './errors.ts';
@@ -16,6 +19,7 @@ export const GOOGLE_OAUTH_COOKIE = 'ritm_google_flow';
 export const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 const EVENTS_URL = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
 const TOKEN_SLOT = 'google.tokens';
+const CONFIGURATION_SLOT = 'google.oauth.configuration';
 const EPOCH_SLOT = 'google.connection-epoch';
 const CONNECTION_LEASE = 'google.connection';
 const FLOW_TTL_MS = 10 * 60_000;
@@ -61,6 +65,7 @@ export interface GoogleCalendarOptions {
   env?: NodeJS.ProcessEnv;
   transport?: GoogleTransport;
   now?: () => number;
+  leaseClock?: () => number;
 }
 
 const flowSchema = z
@@ -82,10 +87,37 @@ const tokensSchema = z
     needsReauth: z.boolean(),
     configFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
     connectionId: z.string().uuid(),
+    epoch: z.string().uuid().optional(),
     lastFetchedAt: z.string().nullable(),
   })
   .strict();
 type StoredTokens = z.infer<typeof tokensSchema>;
+interface GoogleConnection {
+  tokens: StoredTokens;
+  config: GoogleOAuthConfig;
+  epoch: string;
+}
+const googleClientIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(512)
+  .regex(/^[a-zA-Z0-9_-]+\.apps\.googleusercontent\.com$/);
+const googleClientSecretSchema = z.string().trim().min(1).max(2048).regex(/^\S+$/);
+const savedConfigurationSchema = z
+  .object({ clientId: googleClientIdSchema, clientSecret: googleClientSecretSchema })
+  .strict();
+export const googleOAuthSetupInputSchema = z
+  .object({
+    clientId: googleClientIdSchema,
+    clientSecret: z
+      .string()
+      .trim()
+      .max(2048)
+      .refine((value) => !value || /^\S+$/.test(value))
+      .optional(),
+  })
+  .strict();
 export const googleEventInputSchema = z
   .object({
     title: z.string().trim().min(1).max(160),
@@ -113,16 +145,23 @@ export const googleEtagSchema = z
   .max(256)
   .regex(/^(?:W\/)?"[^"\r\n]+"$/);
 
-function configFrom(env: NodeJS.ProcessEnv): GoogleOAuthConfig | null {
-  const clientId = env.GOOGLE_CLIENT_ID?.trim(),
-    clientSecret = env.GOOGLE_CLIENT_SECRET?.trim(),
-    redirectUri = env.GOOGLE_REDIRECT_URI?.trim();
-  if (!clientId || !clientSecret || !redirectUri) return null;
-  const redirect = new URL(redirectUri);
+function callbackUriFrom(env: NodeJS.ProcessEnv): string | null {
+  const explicit = env.GOOGLE_REDIRECT_URI?.trim(),
+    appOrigin = env.APP_ORIGIN?.trim();
+  if (!explicit && !appOrigin) return null;
+  const origin = appOrigin ? new URL(appOrigin) : null;
   if (
-    !clientId.endsWith('.apps.googleusercontent.com') ||
-    clientId.length > 512 ||
-    clientSecret.length > 2048 ||
+    origin &&
+    (origin.username ||
+      origin.password ||
+      origin.pathname !== '/' ||
+      origin.search ||
+      origin.hash ||
+      (origin.protocol !== 'https:' && !(origin.protocol === 'http:' && loopback(origin.hostname))))
+  )
+    throw new Error('Google OAuth requires a fixed HTTPS or localhost APP_ORIGIN.');
+  const redirect = new URL(explicit || GOOGLE_CALLBACK_PATH, origin?.origin);
+  if (
     redirect.username ||
     redirect.password ||
     redirect.search ||
@@ -136,12 +175,13 @@ function configFrom(env: NodeJS.ProcessEnv): GoogleOAuthConfig | null {
     );
   }
   if (
-    !loopback(redirect.hostname) &&
-    new URL(env.APP_ORIGIN || 'http://invalid.local').origin !== redirect.origin
+    (origin && origin.origin !== redirect.origin) ||
+    (!origin &&
+      (!loopback(redirect.hostname) || env.NODE_ENV === 'production' || env.VERCEL === '1'))
   ) {
     throw new Error('GOOGLE_REDIRECT_URI must use the configured APP_ORIGIN.');
   }
-  return { clientId, clientSecret, redirectUri: redirect.href };
+  return redirect.href;
 }
 
 function oauthClient(config: GoogleOAuthConfig) {
@@ -491,25 +531,151 @@ function inRange(event: GoogleCalendarEvent, from: string, to: string, timeZone:
 }
 
 export class GoogleCalendarService {
-  private config: GoogleOAuthConfig | null;
   private transport: GoogleTransport;
   private now: () => number;
   constructor(private options: GoogleCalendarOptions) {
-    this.config = configFrom(options.env ?? process.env);
+    callbackUriFrom(options.env ?? process.env);
     this.transport = options.transport ?? defaultGoogleTransport;
     this.now = options.now ?? Date.now;
   }
-  private configuration() {
-    if (!this.config)
+  private environmentManaged() {
+    const env = this.options.env ?? process.env;
+    return env.GOOGLE_CLIENT_ID !== undefined || env.GOOGLE_CLIENT_SECRET !== undefined;
+  }
+  private async savedConfiguration() {
+    const value = await this.options.secrets.getSecret(CONFIGURATION_SLOT);
+    if (!value) return null;
+    try {
+      return savedConfigurationSchema.parse(JSON.parse(value));
+    } catch {
+      throw new AppError(
+        500,
+        'GOOGLE_STORE_ERROR',
+        'Не удалось прочитать настройку Google. Сохраните её заново.',
+      );
+    }
+  }
+  private async resolvedConfiguration() {
+    const env = this.options.env ?? process.env,
+      managed = this.environmentManaged(),
+      redirectUri = callbackUriFrom(env),
+      credentials = managed
+        ? {
+            clientId: env.GOOGLE_CLIENT_ID?.trim() || '',
+            clientSecret: env.GOOGLE_CLIENT_SECRET?.trim() || '',
+          }
+        : await this.savedConfiguration(),
+      parsed = savedConfigurationSchema.safeParse(credentials),
+      config: GoogleOAuthConfig | null =
+        parsed.success && redirectUri ? { ...parsed.data, redirectUri } : null;
+    const setup: GoogleOAuthSetup = {
+      configured: Boolean(config),
+      source: managed ? 'environment' : credentials ? 'saved' : 'none',
+      clientId: credentials?.clientId || '',
+      hasClientSecret: Boolean(credentials?.clientSecret),
+      redirectUri,
+    };
+    return { config, setup };
+  }
+  async configuration(): Promise<GoogleOAuthSetup> {
+    return (await this.resolvedConfiguration()).setup;
+  }
+  private async oauthConfiguration() {
+    const { config } = await this.resolvedConfiguration();
+    if (!config)
       throw new AppError(
         503,
         'GOOGLE_NOT_CONFIGURED',
-        'Для Google Calendar нужно настроить серверный OAuth-клиент.',
+        'Настройте OAuth Google Calendar в разделе «Подключения».',
       );
-    return this.config;
+    return config;
   }
-  private fingerprint() {
-    return hash(JSON.stringify(this.configuration()));
+  private fingerprint(config: GoogleOAuthConfig) {
+    return hash(JSON.stringify(config));
+  }
+  private async invalidateConnection(assertActive: () => void) {
+    // Rotate first: even an interrupted write cannot revive an old OAuth flow.
+    assertActive();
+    await this.options.secrets.saveSecret(EPOCH_SLOT, randomUUID());
+    assertActive();
+    await this.options.secrets.removeSecret(TOKEN_SLOT);
+  }
+  private assertEditable() {
+    if (this.environmentManaged())
+      throw new AppError(
+        409,
+        'GOOGLE_ENVIRONMENT_CONFIGURATION',
+        'OAuth Google задан переменными сервера. Измените их, чтобы настроить подключение.',
+      );
+  }
+  async saveConfiguration(value: GoogleOAuthSetupInput): Promise<GoogleOAuthSetup> {
+    const parsed = googleOAuthSetupInputSchema.safeParse(value);
+    if (!parsed.success)
+      throw new AppError(
+        400,
+        'GOOGLE_SETUP_INVALID',
+        'Проверьте Client ID Google и Client Secret без пробелов.',
+      );
+    return this.withLease(async (assertActive) => {
+      this.assertEditable();
+      if (!callbackUriFrom(this.options.env ?? process.env))
+        throw new AppError(
+          503,
+          'GOOGLE_ORIGIN_REQUIRED',
+          'Для Google OAuth настройте на сервере APP_ORIGIN — адрес приложения.',
+        );
+      const previous = await this.savedConfiguration(),
+        clientId = parsed.data.clientId,
+        clientSecret =
+          parsed.data.clientSecret ||
+          (previous?.clientId === clientId ? previous.clientSecret : undefined);
+      if (!clientSecret)
+        throw new AppError(
+          400,
+          'GOOGLE_CLIENT_SECRET_REQUIRED',
+          'Введите Client Secret для нового Client ID Google.',
+        );
+      if (previous?.clientId !== clientId || previous.clientSecret !== clientSecret) {
+        await this.invalidateConnection(assertActive);
+        assertActive();
+        await this.options.secrets.saveSecret(
+          CONFIGURATION_SLOT,
+          JSON.stringify({ clientId, clientSecret }),
+        );
+      }
+      return this.configuration();
+    });
+  }
+  async removeConfiguration(): Promise<GoogleOAuthSetup> {
+    return this.withLease(async (assertActive) => {
+      this.assertEditable();
+      await this.invalidateConnection(assertActive);
+      assertActive();
+      await this.options.secrets.removeSecret(CONFIGURATION_SLOT);
+      return this.configuration();
+    });
+  }
+  private async assertConfiguration(config: GoogleOAuthConfig, epoch: string) {
+    const current = (await this.resolvedConfiguration()).config;
+    if (
+      !current ||
+      this.fingerprint(current) !== this.fingerprint(config) ||
+      (await this.options.secrets.getSecret(EPOCH_SLOT)) !== epoch
+    )
+      throw conflict('Настройка Google изменилась. Начните подключение заново.');
+  }
+  private async assertConnection(connection: GoogleConnection) {
+    await this.assertConfiguration(connection.config, connection.epoch);
+    const current = await this.readTokens();
+    if (
+      !current ||
+      current.connectionId !== connection.tokens.connectionId ||
+      current.configFingerprint !== this.fingerprint(connection.config) ||
+      current.epoch !== connection.epoch ||
+      current.needsReauth
+    )
+      throw conflict('Подключение Google изменилось. Обновите страницу.');
+    return current;
   }
   private async readTokens() {
     const value = await this.options.secrets.getSecret(TOKEN_SLOT);
@@ -524,29 +690,49 @@ export class GoogleCalendarService {
       );
     }
   }
-  private async withLease<T>(operation: () => Promise<T>): Promise<T> {
+  private async withLease<T>(operation: (assertActive: () => void) => Promise<T>): Promise<T> {
+    const clock = this.options.leaseClock ?? (() => performance.now()),
+      // Leave 135 seconds before expiry: enough for the bounded PostgreSQL
+      // secret transaction (connection <=10s and seven queries <=16s each).
+      deadline = clock() + 45_000;
+    const assertActive = () => {
+      if (clock() >= deadline)
+        throw new AppError(
+          503,
+          'GOOGLE_OPERATION_TIMEOUT',
+          'Обновление Google заняло слишком долго. Повторите из настроек.',
+        );
+    };
     let token: string | null = null;
     for (let attempt = 0; attempt < 21 && !token; attempt++) {
-      token = await this.options.secrets.acquireLease(CONNECTION_LEASE, 45_000);
+      assertActive();
+      token = await this.options.secrets.acquireLease(CONNECTION_LEASE, 180_000);
       if (!token && attempt < 20) await sleep(50);
     }
     if (!token)
       throw conflict('Подключение Google уже обновляется. Подождите немного и повторите.');
     try {
-      return await operation();
+      assertActive();
+      const result = await operation(assertActive);
+      assertActive();
+      return result;
     } finally {
       await this.options.secrets.releaseLease(CONNECTION_LEASE, token);
     }
   }
   async status(): Promise<GoogleCalendarStatus> {
-    const tokens = this.config ? await this.readTokens() : null;
+    const { config } = await this.resolvedConfiguration(),
+      tokens = config ? await this.readTokens() : null,
+      epoch = tokens ? await this.options.secrets.getSecret(EPOCH_SLOT) : null;
     return {
-      configured: Boolean(this.config),
-      status: !this.config
+      configured: Boolean(config),
+      status: !config
         ? 'unconfigured'
         : !tokens
           ? 'disconnected'
-          : tokens.needsReauth || tokens.configFingerprint !== this.fingerprint()
+          : tokens.needsReauth ||
+              tokens.configFingerprint !== this.fingerprint(config) ||
+              tokens.epoch !== epoch
             ? 'reauth_required'
             : 'connected',
       mode: 'readwrite',
@@ -560,23 +746,29 @@ export class GoogleCalendarService {
       !(await this.options.security.hasOwnerSession(ownerSessionHash))
     )
       throw new AppError(401, 'AUTH_REQUIRED', 'Войдите в Ritm перед подключением Google.');
-    const config = this.configuration(),
-      client = oauthClient(config),
-      verifier = await client.generateCodeVerifierAsync();
-    const state = randomBytes(32).toString('hex'),
-      correlationCookie = randomBytes(32).toString('base64url'),
-      stateHash = hash(state),
-      ownerSlot = `google.oauth.owner.${ownerSessionHash}`;
-    const expiresAt = this.now() + FLOW_TTL_MS;
-    await this.withLease(async () => {
+    return this.withLease(async (assertActive) => {
+      const config = await this.oauthConfiguration(),
+        client = oauthClient(config),
+        verifier = await client.generateCodeVerifierAsync();
+      if (!(await this.options.security.hasOwnerSession(ownerSessionHash)))
+        throw new AppError(401, 'AUTH_REQUIRED', 'Войдите в Ritm перед подключением Google.');
+      const state = randomBytes(32).toString('hex'),
+        correlationCookie = randomBytes(32).toString('base64url'),
+        stateHash = hash(state),
+        ownerSlot = `google.oauth.owner.${ownerSessionHash}`,
+        expiresAt = this.now() + FLOW_TTL_MS;
       const previous = await this.options.secrets.getSecret(ownerSlot);
-      if (previous && /^[a-f0-9]{64}$/.test(previous))
+      if (previous && /^[a-f0-9]{64}$/.test(previous)) {
+        assertActive();
         await this.options.secrets.removeSecret(`google.oauth.flow.${previous}`);
+      }
       let epoch = await this.options.secrets.getSecret(EPOCH_SLOT);
       if (!epoch) {
         epoch = randomUUID();
+        assertActive();
         await this.options.secrets.saveSecret(EPOCH_SLOT, epoch);
       }
+      assertActive();
       await this.options.secrets.saveSecret(
         `google.oauth.flow.${stateHash}`,
         JSON.stringify({
@@ -584,27 +776,29 @@ export class GoogleCalendarService {
           correlationHash: hash(correlationCookie),
           codeVerifier: verifier.codeVerifier,
           expiresAt,
-          configFingerprint: this.fingerprint(),
+          configFingerprint: this.fingerprint(config),
           epoch,
         }),
       );
+      assertActive();
       await this.options.secrets.saveSecret(ownerSlot, stateHash);
+      await this.assertConfiguration(config, epoch);
+      const authorizationUrl = client.generateAuthUrl({
+        scope: [GOOGLE_CALENDAR_SCOPE],
+        state,
+        access_type: 'offline',
+        prompt: 'consent',
+        include_granted_scopes: false,
+        code_challenge_method: CodeChallengeMethod.S256,
+        code_challenge: verifier.codeChallenge,
+      });
+      return {
+        authorizationUrl,
+        correlationCookie,
+        expiresAt,
+        secureCookie: config.redirectUri.startsWith('https://'),
+      };
     });
-    const authorizationUrl = client.generateAuthUrl({
-      scope: [GOOGLE_CALENDAR_SCOPE],
-      state,
-      access_type: 'offline',
-      prompt: 'consent',
-      include_granted_scopes: false,
-      code_challenge_method: CodeChallengeMethod.S256,
-      code_challenge: verifier.codeChallenge,
-    });
-    return {
-      authorizationUrl,
-      correlationCookie,
-      expiresAt,
-      secureCookie: config.redirectUri.startsWith('https://'),
-    };
   }
   async callback(input: {
     state: string;
@@ -612,7 +806,6 @@ export class GoogleCalendarService {
     error?: string;
     correlationCookie?: string;
   }) {
-    const config = this.configuration();
     if (
       !/^[a-f0-9]{64}$/.test(input.state) ||
       !input.correlationCookie ||
@@ -642,7 +835,6 @@ export class GoogleCalendarService {
     if (
       !validCookie ||
       flow.expiresAt <= this.now() ||
-      flow.configFingerprint !== this.fingerprint() ||
       !(await this.options.security.hasOwnerSession(flow.ownerSessionHash))
     )
       throw new AppError(
@@ -653,7 +845,10 @@ export class GoogleCalendarService {
     const consumed = await this.options.secrets.consumeSecret(slot);
     if (consumed !== value)
       throw new AppError(400, 'GOOGLE_INVALID_STATE', 'Это подключение Google уже обработано.');
-    await this.withLease(async () => {
+    await this.withLease(async (assertActive) => {
+      const config = (await this.resolvedConfiguration()).config;
+      if (!config || flow.configFingerprint !== this.fingerprint(config))
+        throw conflict('Настройка Google изменилась. Начните подключение заново.');
       if ((await this.options.secrets.getSecret(EPOCH_SLOT)) !== flow.epoch)
         throw conflict('Подключение было отменено. Начните подключение Google заново.');
       if (!(await this.options.security.hasOwnerSession(flow.ownerSessionHash)))
@@ -667,6 +862,7 @@ export class GoogleCalendarService {
         throw conflict(
           'Начато новое подключение Google. Используйте последний запрос из настроек.',
         );
+      assertActive();
       await this.options.secrets.removeSecret(ownerSlot);
       if (input.error)
         throw new AppError(
@@ -681,6 +877,8 @@ export class GoogleCalendarService {
           'Google не передал код подключения. Повторите из настроек.',
         );
       let credentials: Credentials;
+      await this.assertConfiguration(config, flow.epoch);
+      assertActive();
       try {
         credentials = await this.transport.exchangeCode(config, input.code!, flow.codeVerifier);
       } catch (error) {
@@ -711,8 +909,9 @@ export class GoogleCalendarService {
         expiresAt: credentials.expiry_date,
         scope,
         needsReauth: false,
-        configFingerprint: this.fingerprint(),
+        configFingerprint: this.fingerprint(config),
         connectionId: randomUUID(),
+        epoch: flow.epoch,
         lastFetchedAt: null,
       };
       if (!(await this.options.security.hasOwnerSession(flow.ownerSessionHash)))
@@ -721,32 +920,37 @@ export class GoogleCalendarService {
           'AUTH_REQUIRED',
           'Сессия Ritm завершилась. Войдите и подключите Google заново.',
         );
+      await this.assertConfiguration(config, flow.epoch);
+      assertActive();
       await this.options.secrets.saveSecret(TOKEN_SLOT, JSON.stringify(tokens));
     });
     return this.status();
   }
-  private async token(): Promise<StoredTokens> {
-    this.configuration();
-    const current = await this.readTokens();
-    if (!current)
-      throw new AppError(503, 'GOOGLE_NOT_CONNECTED', 'Подключите Google Calendar в настройках.');
-    if (current.needsReauth || current.configFingerprint !== this.fingerprint())
-      throw new AppError(
-        401,
-        'GOOGLE_REAUTH_REQUIRED',
-        'Подключите Google Calendar заново в настройках.',
-      );
-    if (current.accessToken && current.expiresAt > this.now() + 60_000) return current;
-    return this.withLease(async () => {
-      const latest = await this.readTokens();
-      if (!latest || latest.connectionId !== current.connectionId || latest.needsReauth)
-        throw conflict('Подключение Google изменилось. Обновите страницу.');
-      if (latest.accessToken && latest.expiresAt > this.now() + 60_000) return latest;
-      try {
-        const response = await this.transport.refreshToken(
-          this.configuration(),
-          latest.refreshToken,
+  private async token(): Promise<GoogleConnection> {
+    return this.withLease(async (assertActive) => {
+      const config = await this.oauthConfiguration(),
+        latest = await this.readTokens(),
+        epoch = await this.options.secrets.getSecret(EPOCH_SLOT);
+      if (!latest)
+        throw new AppError(503, 'GOOGLE_NOT_CONNECTED', 'Подключите Google Calendar в настройках.');
+      if (
+        latest.needsReauth ||
+        latest.configFingerprint !== this.fingerprint(config) ||
+        latest.epoch !== epoch ||
+        !epoch ||
+        !z.string().uuid().safeParse(epoch).success
+      )
+        throw new AppError(
+          401,
+          'GOOGLE_REAUTH_REQUIRED',
+          'Подключите Google Calendar заново в настройках.',
         );
+      const connection: GoogleConnection = { tokens: latest, config, epoch };
+      if (latest.accessToken && latest.expiresAt > this.now() + 60_000) return connection;
+      await this.assertConnection(connection);
+      assertActive();
+      try {
+        const response = await this.transport.refreshToken(config, latest.refreshToken);
         if (!response.access_token || !response.expiry_date)
           throw new Error('Incomplete token response');
         const updated: StoredTokens = {
@@ -768,43 +972,54 @@ export class GoogleCalendarService {
             'GOOGLE_REAUTH_REQUIRED',
             'Подключите Google Calendar заново с разрешением изменения событий.',
           );
+        await this.assertConnection(connection);
+        assertActive();
         await this.options.secrets.saveSecret(TOKEN_SLOT, JSON.stringify(updated));
-        return updated;
+        return { ...connection, tokens: updated };
       } catch (error) {
         if (
           invalidGrant(error) ||
           providerStatus(error) === 401 ||
           (error instanceof AppError && error.code === 'GOOGLE_REAUTH_REQUIRED')
-        )
+        ) {
+          await this.assertConnection(connection);
+          assertActive();
           await this.options.secrets.saveSecret(
             TOKEN_SLOT,
             JSON.stringify({ ...latest, needsReauth: true, accessToken: '' }),
           );
+        }
         throw error instanceof AppError ? error : safeProviderError(error);
       }
     });
   }
-  private async api(tokens: StoredTokens, request: GoogleRequest) {
-    try {
-      return request.signal
-        ? await withAbort(
-            () => this.transport.request(this.configuration(), tokens.accessToken, request),
-            request.signal,
-          )
-        : await this.transport.request(this.configuration(), tokens.accessToken, request);
-    } catch (error) {
-      if (providerStatus(error) === 401 || invalidGrant(error)) {
-        await this.withLease(async () => {
-          const latest = await this.readTokens();
-          if (latest?.connectionId === tokens.connectionId)
-            await this.options.secrets.saveSecret(
-              TOKEN_SLOT,
-              JSON.stringify({ ...latest, needsReauth: true, accessToken: '' }),
-            );
-        });
+  private async api(connection: GoogleConnection, request: GoogleRequest) {
+    return this.withLease(async (assertActive) => {
+      await this.assertConnection(connection);
+      assertActive();
+      try {
+        const result = request.signal
+          ? await withAbort(
+              () =>
+                this.transport.request(connection.config, connection.tokens.accessToken, request),
+              request.signal,
+            )
+          : await this.transport.request(connection.config, connection.tokens.accessToken, request);
+        await this.assertConnection(connection);
+        assertActive();
+        return result;
+      } catch (error) {
+        if (providerStatus(error) === 401 || invalidGrant(error)) {
+          const latest = await this.assertConnection(connection);
+          assertActive();
+          await this.options.secrets.saveSecret(
+            TOKEN_SLOT,
+            JSON.stringify({ ...latest, needsReauth: true, accessToken: '' }),
+          );
+        }
+        throw error instanceof AppError ? error : safeProviderError(error);
       }
-      throw safeProviderError(error);
-    }
+    });
   }
   async listEvents(
     input: {
@@ -897,11 +1112,10 @@ export class GoogleCalendarService {
       if (page === 9) partial = true;
     }
     const fetchedAt = new Date(this.now()).toISOString();
-    await this.withLease(async () => {
+    await this.withLease(async (assertActive) => {
       if (signal.aborted) throw safeProviderError(signal.reason);
-      const latest = await this.readTokens();
-      if (!latest || latest.connectionId !== tokens.connectionId || latest.needsReauth)
-        throw conflict('Подключение Google изменилось во время загрузки. Обновите страницу.');
+      const latest = await this.assertConnection(tokens);
+      assertActive();
       await this.options.secrets.saveSecret(
         TOKEN_SLOT,
         JSON.stringify({ ...latest, lastFetchedAt: fetchedAt }),
@@ -991,9 +1205,8 @@ export class GoogleCalendarService {
     return event;
   }
   async disconnect(): Promise<GoogleCalendarStatus> {
-    await this.withLease(async () => {
-      await this.options.secrets.removeSecret(TOKEN_SLOT);
-      await this.options.secrets.saveSecret(EPOCH_SLOT, randomUUID());
+    await this.withLease(async (assertActive) => {
+      await this.invalidateConnection(assertActive);
     });
     // Google revocation affects other clients in a shared Cloud project. This is local disconnection only.
     return this.status();

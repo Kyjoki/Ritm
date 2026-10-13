@@ -17,8 +17,14 @@ import {
   UserRound,
   X,
 } from 'lucide-react';
-import type { AiStatus, GoogleCalendarStatus, Settings } from '../../shared/types';
+import type {
+  AiStatus,
+  GoogleCalendarStatus,
+  GoogleOAuthSetup,
+  Settings,
+} from '../../shared/types';
 import { Dialog } from '../components/Dialog';
+import { GoogleSetupDialog } from '../components/GoogleSetupDialog';
 import '../styles/calendar-settings.css';
 
 interface SettingsPageProps {
@@ -27,6 +33,7 @@ interface SettingsPageProps {
   googleStatus: GoogleCalendarStatus;
   onConnectGoogle: () => Promise<void>;
   onDisconnectGoogle: () => Promise<void>;
+  onGoogleConfigured?: () => Promise<void>;
   onSave: (settings: Settings) => Promise<void>;
   onConfigureAI: (apiKey: string, model: string) => Promise<void>;
   onDisconnectAI: () => Promise<void>;
@@ -59,6 +66,7 @@ export function SettingsPage({
   googleStatus,
   onConnectGoogle,
   onDisconnectGoogle,
+  onGoogleConfigured,
   onSave,
   onConfigureAI,
   onDisconnectAI,
@@ -79,6 +87,10 @@ export function SettingsPage({
   const [loggingOut, setLoggingOut] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
   const [googleError, setGoogleError] = useState('');
+  const [googleNotice, setGoogleNotice] = useState('');
+  const [googleSetupOpen, setGoogleSetupOpen] = useState(false);
+  const [googleSetup, setGoogleSetup] = useState<GoogleOAuthSetup | null>(null);
+  const [googleStatusUnknown, setGoogleStatusUnknown] = useState(false);
   const [confirmGoogleDisconnect, setConfirmGoogleDisconnect] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const secretInputRef = useRef<HTMLInputElement>(null);
@@ -90,6 +102,7 @@ export function SettingsPage({
     try {
       if (disconnect) {
         await onDisconnectGoogle();
+        setGoogleStatusUnknown(false);
         setConfirmGoogleDisconnect(false);
         setConnectionNotice('Google Calendar отключён от Ritm.');
       } else await onConnectGoogle();
@@ -99,6 +112,24 @@ export function SettingsPage({
       setGoogleBusy(false);
     }
   }
+  async function googleConfigured(configuration: GoogleOAuthSetup, message: string) {
+    setGoogleSetup(configuration);
+    setGoogleError('');
+    setGoogleNotice(message);
+    try {
+      await onGoogleConfigured?.();
+      setGoogleStatusUnknown(false);
+    } catch (failure) {
+      setGoogleStatusUnknown(true);
+      setGoogleNotice(`${message} Статус подключения не обновился. Обновите страницу.`);
+      throw failure;
+    }
+  }
+  const googleConfiguredLocally = googleSetup?.configured ?? googleStatus.configured;
+  useEffect(() => {
+    setGoogleSetup(null);
+    setGoogleStatusUnknown(false);
+  }, [googleStatus]);
   useEffect(() => {
     const previous = previousSettings.current;
     previousSettings.current = settings;
@@ -506,37 +537,55 @@ export function SettingsPage({
                 <div className="settings-connection-copy">
                   <strong>Google Calendar</strong>
                   <span
-                    className={`settings-connection-status ${googleStatus.status === 'connected' ? 'settings-configured' : ''}`}
+                    className={`settings-connection-status ${!googleStatusUnknown && googleStatus.status === 'connected' ? 'settings-configured' : ''}`}
                   >
                     <i />
-                    {googleStatus.status === 'connected'
-                      ? 'Подключён'
-                      : googleStatus.status === 'reauth_required'
-                        ? 'Нужно подключить заново'
-                        : googleStatus.configured
-                          ? 'Не подключён'
-                          : 'Ожидает настройки сервера'}
+                    {googleStatusUnknown
+                      ? 'Статус подключения не обновился'
+                      : googleStatus.status === 'connected'
+                        ? 'Подключён'
+                        : googleStatus.status === 'reauth_required'
+                          ? 'Нужно подключить заново'
+                          : googleConfiguredLocally
+                            ? 'Не подключён'
+                            : 'Нужна настройка OAuth-клиента'}
                   </span>
                   <small>
-                    {googleStatus.configured
+                    {googleConfiguredLocally
                       ? 'Основной календарь · просмотр, создание и редактирование событий'
-                      : 'Добавь настройки Google OAuth на сервере'}
+                      : 'Добавьте Client ID и Client Secret из Google Cloud'}
                   </small>
                 </div>
                 <div className="settings-connection-actions">
                   <button
                     type="button"
                     className="button button-secondary"
-                    disabled={!googleStatus.configured || googleBusy}
-                    onClick={() => void googleAction()}
+                    disabled={googleBusy}
+                    onClick={() => {
+                      setGoogleError('');
+                      setGoogleNotice('');
+                      setGoogleSetupOpen(true);
+                    }}
                   >
-                    {googleBusy
-                      ? 'Подождите…'
-                      : googleStatus.status === 'connected'
-                        ? 'Переподключить'
-                        : 'Подключить'}
+                    {googleConfiguredLocally ? 'Настройки' : 'Настроить'}
                   </button>
-                  {['connected', 'reauth_required'].includes(googleStatus.status) ? (
+                  {googleConfiguredLocally ? (
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      disabled={googleBusy}
+                      onClick={() => void googleAction()}
+                    >
+                      {googleBusy
+                        ? 'Подождите…'
+                        : !googleStatusUnknown &&
+                            ['connected', 'reauth_required'].includes(googleStatus.status)
+                          ? 'Переподключить'
+                          : 'Подключить'}
+                    </button>
+                  ) : null}
+                  {googleConfiguredLocally &&
+                  ['connected', 'reauth_required'].includes(googleStatus.status) ? (
                     <button
                       type="button"
                       className="settings-text-button"
@@ -551,6 +600,12 @@ export function SettingsPage({
                   ) : null}
                 </div>
               </div>
+              {googleNotice ? (
+                <p className="settings-connection-notice" role="status">
+                  <CheckCircle2 size={16} aria-hidden="true" />
+                  {googleNotice}
+                </p>
+              ) : null}
               {googleError && !confirmGoogleDisconnect ? (
                 <p className="settings-inline-error" role="alert">
                   <AlertCircle size={16} aria-hidden="true" />
@@ -622,6 +677,9 @@ export function SettingsPage({
           </div>
         </div>
       </form>
+      {googleSetupOpen ? (
+        <GoogleSetupDialog onClose={() => setGoogleSetupOpen(false)} onChanged={googleConfigured} />
+      ) : null}
       {confirmGoogleDisconnect ? (
         <Dialog
           title="Отключить Google Calendar?"

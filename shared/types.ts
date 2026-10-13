@@ -89,6 +89,17 @@ export interface GoogleCalendarStatus {
   calendarId: 'primary';
   lastFetchedAt: string | null;
 }
+export interface GoogleOAuthSetup {
+  configured: boolean;
+  source: 'environment' | 'saved' | 'none';
+  clientId: string;
+  hasClientSecret: boolean;
+  redirectUri: string | null;
+}
+export interface GoogleOAuthSetupInput {
+  clientId: string;
+  clientSecret?: string;
+}
 export interface GoogleCalendarEvent {
   id: string;
   source: 'google';

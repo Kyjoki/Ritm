@@ -25,3 +25,230 @@
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
+.google-setup-dialog {
+  width: min(610px, calc(100% - 32px));
+}
+.google-setup-intro {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+  margin-bottom: 15px;
+}
+.google-setup-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 11px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+.google-setup-status svg {
+  flex: none;
+}
+.google-setup-help {
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.google-setup-help h3,
+.google-setup-permissions h3 {
+  font-size: 13px;
+  font-weight: 600;
+}
+.google-setup-help ol {
+  margin: 11px 0 0;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.google-setup-help li {
+  margin-top: 6px;
+  padding-left: 3px;
+}
+.google-setup-dialog a {
+  text-underline-offset: 3px;
+}
+.google-setup-dialog a svg {
+  vertical-align: middle;
+  margin-left: 2px;
+}
+.google-setup-callback {
+  display: grid;
+  gap: 9px;
+  margin: 20px 0;
+}
+.google-setup-copy-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.google-setup-copy-row input {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+}
+.google-setup-copy-row .button {
+  flex: none;
+  min-height: 44px;
+}
+.google-setup-copy-notice {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--accent);
+}
+.google-setup-form fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  display: grid;
+  gap: 18px;
+}
+.google-setup-form input,
+.google-setup-managed input {
+  font-size: 13px;
+}
+.google-setup-save-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.google-setup-remove {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.google-setup-remove-confirm {
+  margin-top: 17px;
+  padding: 16px;
+  border: 1px solid var(--danger);
+  background: var(--danger-soft);
+  border-radius: 12px;
+  font-size: 12px;
+}
+.google-setup-remove-confirm p {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 8px 0 14px;
+}
+.google-setup-dialog .error-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 16px;
+}
+.google-setup-dialog .error-note svg {
+  flex: none;
+  margin-top: 2px;
+}
+.google-setup-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 17px;
+  color: var(--accent);
+  background: var(--soft);
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.google-setup-notice svg {
+  flex: none;
+  margin-top: 2px;
+}
+.google-setup-permissions {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.google-setup-permissions ul {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+  display: grid;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.google-setup-permissions li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.google-setup-permissions li svg {
+  color: var(--accent);
+  flex: none;
+  margin-top: 2px;
+}
+.google-setup-permissions p {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.7;
+  margin-bottom: 10px;
+}
+.google-setup-permissions > a {
+  font-size: 11px;
+}
+.google-setup-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+.google-setup-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 180px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.google-setup-load-error {
+  display: grid;
+  gap: 17px;
+}
+.google-setup-load-error > .button {
+  justify-self: start;
+}
+.google-setup-managed {
+  display: grid;
+  gap: 12px;
+}
+@media (max-width: 760px) {
+  .google-setup-dialog {
+    width: 100%;
+  }
+  .google-setup-copy-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .google-setup-dialog input {
+    font-size: 16px;
+  }
+  .google-setup-save-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 5px;
+  }
+  .google-setup-save-actions .button,
+  .google-setup-footer .button,
+  .google-setup-remove-confirm .button {
+    min-height: 44px;
+  }
+  .google-setup-remove {
+    min-height: 44px;
+    justify-content: center;
+  }
+  .google-setup-footer > .button {
+    width: 100%;
+  }
+}

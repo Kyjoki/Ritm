@@ -577,6 +577,9 @@ export default function App() {
               googleStatus={google.status}
               onConnectGoogle={google.connect}
               onDisconnectGoogle={google.disconnect}
+              onGoogleConfigured={async () => {
+                await google.refreshStatus();
+              }}
               onSave={saveSettings}
               onConfigureAI={async (key, model) => {
                 const aiStatus = await api.configureAI(key, model);
