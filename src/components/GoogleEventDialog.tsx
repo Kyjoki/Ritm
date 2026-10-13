@@ -1,5 +1,5 @@
-import { useRef, useState, type FormEvent } from 'react';
-import { CalendarDays, LoaderCircle } from 'lucide-react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { CalendarDays, LoaderCircle, Trash2 } from 'lucide-react';
 import type { GoogleCalendarEvent, GoogleEventInput } from '../../shared/types';
 import { Dialog } from './Dialog';
 import { CalendarColorPicker } from './CalendarColorPicker';
@@ -15,6 +15,7 @@ export function GoogleEventDialog({
   timeZone,
   onClose,
   onSave,
+  onDelete,
 }: {
   event?: GoogleCalendarEvent;
   draft?: Partial<GoogleEventInput>;
@@ -25,6 +26,7 @@ export function GoogleEventDialog({
     requestId: string,
     event?: GoogleCalendarEvent,
   ) => Promise<void>;
+  onDelete?: (event: GoogleCalendarEvent) => Promise<void>;
 }) {
   const [value, setValue] = useState<GoogleEventInput>(() =>
     event
@@ -37,14 +39,30 @@ export function GoogleEventDialog({
           duration: 30,
           allDay: false,
           colorId: null,
+          repeat: 'none',
           ...draft,
         },
   );
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [retryLocked, setRetryLocked] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteConflict, setDeleteConflict] = useState(false);
   const attempt = useRef<{ id: string; input: GoogleEventInput } | null>(null);
+  const actionLock = useRef(false);
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
+  const keepButtonRef = useRef<HTMLButtonElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const wasConfirming = useRef(false);
   const readOnly = Boolean(event && !canEditGoogleEvent(event, timeZone));
+  useEffect(() => {
+    if (confirmDelete && !busy) keepButtonRef.current?.focus();
+    else if (!confirmDelete && wasConfirming.current) {
+      if (deleteButtonRef.current?.disabled) closeButtonRef.current?.focus();
+      else deleteButtonRef.current?.focus();
+    }
+    wasConfirming.current = confirmDelete;
+  }, [confirmDelete, busy]);
   const endpoint = (value: GoogleCalendarEvent['start']) =>
     value.date
       ? formatDate(value.date, { day: 'numeric', month: 'long', year: 'numeric' })
@@ -64,9 +82,9 @@ export function GoogleEventDialog({
   };
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (busy || readOnly) return;
+    if (actionLock.current || busy || readOnly || confirmDelete || deleteConflict) return;
     setError('');
-    const input =
+    const candidate =
       retryLocked && attempt.current
         ? attempt.current.input
         : {
@@ -75,6 +93,8 @@ export function GoogleEventDialog({
             description: value.description.trim(),
             time: value.allDay ? null : value.time,
           };
+    const { repeat: _repeat, ...existingInput } = candidate;
+    const input = event ? existingInput : candidate;
     if (
       !input.allDay &&
       (!input.time ||
@@ -85,6 +105,7 @@ export function GoogleEventDialog({
     }
     if (!attempt.current || !retryLocked)
       attempt.current = { id: attempt.current?.id ?? crypto.randomUUID(), input };
+    actionLock.current = true;
     setBusy(true);
     try {
       await onSave(input, attempt.current.id, event);
@@ -95,7 +116,7 @@ export function GoogleEventDialog({
           ? `${failure.message} Закрой форму и обнови календарь перед повторным изменением.`
           : failure instanceof Error
             ? failure.message
-            : 'Не удалось сохранить событие Google.',
+            : 'Не удалось сохранить запись.',
       );
       setRetryLocked(
         !event && (!(failure instanceof ApiError) || failure.status === 0 || failure.status >= 500),
@@ -103,27 +124,52 @@ export function GoogleEventDialog({
       if (failure instanceof ApiError && failure.status >= 400 && failure.status < 500)
         attempt.current = null;
     } finally {
+      actionLock.current = false;
+      setBusy(false);
+    }
+  }
+  async function remove() {
+    if (!event || !onDelete || readOnly || actionLock.current || deleteConflict) return;
+    actionLock.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      await onDelete(event);
+      onClose();
+    } catch (failure) {
+      const conflict = failure instanceof ApiError && failure.status === 409;
+      setDeleteConflict(conflict);
+      setError(
+        conflict
+          ? `${failure.message} Закройте форму и обновите календарь перед удалением.`
+          : failure instanceof Error
+            ? failure.message
+            : 'Не удалось удалить запись. Попробуйте ещё раз.',
+      );
+    } finally {
+      actionLock.current = false;
       setBusy(false);
     }
   }
   return (
     <Dialog
-      title={
-        readOnly ? 'Событие Google' : event ? 'Изменить событие Google' : 'Новое событие Google'
-      }
+      title={readOnly ? 'Запись' : event ? 'Редактировать запись' : 'Новая запись'}
       onClose={onClose}
       busy={busy}
       className="task-dialog"
     >
       <p className="info-note">
-        <CalendarDays size={14} />{' '}
+        <CalendarDays size={14} aria-hidden="true" />{' '}
         {readOnly
           ? (event?.readOnlyReason ??
             'Эта запись доступна для просмотра. Измени её в Google Calendar.')
-          : event?.recurring
-            ? 'Изменится только эта запись. Остальные события повторяющейся серии сохранятся.'
-            : 'Запись сохраняется в твоём основном календаре Google.'}
+          : 'Изменения синхронизируются с Google Calendar.'}
       </p>
+      {!readOnly && event?.recurring ? (
+        <p className="field-hint">
+          Изменится только этот экземпляр повторяющейся записи. Остальные события серии сохранятся.
+        </p>
+      ) : null}
       {readOnly && event ? (
         <div className="google-event-preview">
           <strong>{event.title}</strong>
@@ -140,7 +186,10 @@ export function GoogleEventDialog({
       ) : null}
       <form onSubmit={submit}>
         {!readOnly ? (
-          <fieldset className="task-form" disabled={busy || retryLocked}>
+          <fieldset
+            className="task-form"
+            disabled={busy || retryLocked || confirmDelete || deleteConflict}
+          >
             <label className="field">
               Название
               <input
@@ -203,6 +252,22 @@ export function GoogleEventDialog({
               </div>
             ) : null}
             <CalendarColorPicker value={value.colorId} onChange={(id) => set('colorId', id)} />
+            {!event ? (
+              <label className="field">
+                Повторение
+                <select
+                  value={value.repeat ?? 'none'}
+                  onChange={(change) =>
+                    set('repeat', change.target.value as GoogleEventInput['repeat'])
+                  }
+                >
+                  <option value="none">Не повторять</option>
+                  <option value="daily">Каждый день</option>
+                  <option value="weekly">Каждую неделю</option>
+                  <option value="monthly">Каждый месяц</option>
+                </select>
+              </label>
+            ) : null}
           </fieldset>
         ) : null}
         {error ? (
@@ -217,35 +282,88 @@ export function GoogleEventDialog({
             записи.
           </p>
         ) : null}
-        <div className="dialog-actions">
-          <span className="field-hint">{timeZone}</span>
-          <div className="button-row">
-            <button
-              className="button button-secondary"
-              type="button"
-              disabled={busy}
-              onClick={onClose}
-            >
-              {readOnly ? 'Закрыть' : 'Отмена'}
-            </button>
-            {!readOnly ? (
+        {confirmDelete && event ? (
+          <div className="delete-confirm" role="group" aria-label="Подтверждение удаления записи">
+            <strong>Удалить эту запись из календаря?</strong>
+            <p>«{event.title}»</p>
+            <p>
+              {event.recurring
+                ? 'Только эта встреча. Остальные события серии сохранятся.'
+                : 'Удаление синхронизируется с Google Calendar.'}
+            </p>
+            {busy ? <p role="status">Удаляем запись…</p> : null}
+            <div className="button-row">
               <button
-                className="button button-primary"
-                type="submit"
-                disabled={busy || !value.title.trim() || !value.date}
+                ref={keepButtonRef}
+                className="button button-secondary"
+                type="button"
+                disabled={busy}
+                onClick={() => setConfirmDelete(false)}
               >
-                {busy ? <LoaderCircle className="spinning" size={16} /> : null}
-                {busy
-                  ? 'Сохраняем…'
-                  : retryLocked
-                    ? 'Повторить сохранение'
-                    : event
-                      ? 'Сохранить в Google'
-                      : 'Создать в Google'}
+                Оставить
               </button>
-            ) : null}
+              <button
+                className="button button-danger"
+                type="button"
+                disabled={busy || deleteConflict}
+                onClick={() => void remove()}
+              >
+                {busy ? <LoaderCircle className="spinning" size={16} aria-hidden="true" /> : null}
+                {busy ? 'Удаляем…' : 'Удалить запись'}
+              </button>
+            </div>
           </div>
-        </div>
+        ) : (
+          <>
+            <div className="dialog-actions">
+              <span className="field-hint">{timeZone}</span>
+              <div className="button-row">
+                <button
+                  ref={closeButtonRef}
+                  className="button button-secondary"
+                  type="button"
+                  disabled={busy}
+                  onClick={onClose}
+                >
+                  {readOnly ? 'Закрыть' : 'Отмена'}
+                </button>
+                {!readOnly ? (
+                  <button
+                    className="button button-primary"
+                    type="submit"
+                    disabled={busy || deleteConflict || !value.title.trim() || !value.date}
+                  >
+                    {busy ? <LoaderCircle className="spinning" size={16} /> : null}
+                    {busy
+                      ? 'Сохраняем…'
+                      : retryLocked
+                        ? 'Повторить сохранение'
+                        : event
+                          ? 'Сохранить изменения'
+                          : 'Создать запись'}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            {event && onDelete && !readOnly ? (
+              <div className="button-row">
+                <button
+                  ref={deleteButtonRef}
+                  className="text-button danger"
+                  type="button"
+                  disabled={busy || deleteConflict}
+                  onClick={() => {
+                    setError('');
+                    setConfirmDelete(true);
+                  }}
+                >
+                  <Trash2 size={16} aria-hidden="true" />
+                  Удалить запись
+                </button>
+              </div>
+            ) : null}
+          </>
+        )}
       </form>
     </Dialog>
   );

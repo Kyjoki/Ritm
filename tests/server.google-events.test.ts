@@ -63,6 +63,9 @@ async function fixture(t: TestContext, vercel: boolean) {
     callback: unexpected,
     createEvent: unexpected,
     updateEvent: unexpected,
+    deleteEvent: unexpected,
+    connectionIdentity: async () => 'a'.repeat(64),
+    withConnectionIdentity: async (_identity, operation) => operation(() => {}),
     disconnect: unexpected,
     assertFreeSlots: unexpected,
     listEvents: async (input) => {

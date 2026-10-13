@@ -134,4 +134,9 @@ export interface GoogleEventInput {
   duration: number;
   allDay: boolean;
   colorId?: string | null;
+  repeat?: Repeat;
+}
+export interface GoogleTransferResult {
+  event: GoogleCalendarEvent;
+  transferredTaskId: string;
 }

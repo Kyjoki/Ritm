@@ -6,6 +6,8 @@ import type {
   Settings,
   Task,
   TaskInput,
+  GoogleTransferResult,
+  GoogleCalendarEvent,
 } from '../shared/types.ts';
 import { AppError } from './errors.ts';
 
@@ -39,6 +41,51 @@ export interface RateLimitResult {
   allowed: boolean;
   retryAfterMs: number;
 }
+export type GoogleTransferReceipt = {
+  task: Task;
+  timeZone: string;
+  attempted: boolean;
+  connectionIdentity: string;
+} & (
+  | { status: 'pending'; result?: never; completedAt?: never }
+  | { status: 'complete'; result: GoogleTransferResult; completedAt: string }
+);
+export const googleTransferKey = (id: string) => 'google-transfer:' + id;
+export function assertTransferTask(task: Task) {
+  if (task.completed || !task.date || task.completedDates.length > 0)
+    throw new AppError(
+      400,
+      'GOOGLE_TRANSFER_INELIGIBLE',
+      'Для переноса укажите дату незавершённой записи. Серия с историей выполнения остаётся в Ritm.',
+    );
+}
+function canonicalTransferTask(task: Task) {
+  return JSON.stringify(Object.entries(task).sort(([a], [b]) => a.localeCompare(b)));
+}
+export function assertTransferSnapshot(
+  task: Task | undefined,
+  receipt: GoogleTransferReceipt,
+  timeZone: string,
+) {
+  if (
+    !task ||
+    canonicalTransferTask(task) !== canonicalTransferTask(receipt.task) ||
+    timeZone !== receipt.timeZone
+  )
+    throw new AppError(
+      409,
+      'GOOGLE_TRANSFER_CHANGED',
+      'Запись или часовой пояс изменились во время переноса. Новые правки Ritm сохранены; проверьте созданное событие Google перед следующим действием.',
+    );
+}
+export function assertTransferConnection(receipt: GoogleTransferReceipt, identity: string) {
+  if (receipt.connectionIdentity !== identity)
+    throw new AppError(
+      409,
+      'GOOGLE_TRANSFER_CONNECTION_CHANGED',
+      'Подключение Google изменилось во время переноса. Запись Ritm сохранена; проверьте событие в прежнем аккаунте Google.',
+    );
+}
 
 /** Shared by PostgreSQL and the local durable security state. */
 export interface RuntimeStateRepository {
@@ -63,6 +110,23 @@ export interface WorkspaceRepository {
   createTask(input: TaskInput): Awaitable<Task>;
   updateTask(id: string, patch: Partial<TaskInput> & { occurrenceDate?: string }): Awaitable<Task>;
   deleteTask(id: string): Awaitable<Task>;
+  googleTransfer(id: string): Awaitable<GoogleTransferReceipt | undefined>;
+  beginGoogleTransfer(
+    id: string,
+    connectionIdentity: string,
+    assertActive?: () => void,
+  ): Awaitable<GoogleTransferReceipt>;
+  markGoogleTransferAttempt(
+    id: string,
+    assertActive?: () => void,
+  ): Awaitable<GoogleTransferReceipt>;
+  finishGoogleTransfer(
+    id: string,
+    event: GoogleCalendarEvent,
+    connectionIdentity: string,
+    assertActive?: () => void,
+  ): Awaitable<GoogleTransferResult>;
+  cancelGoogleTransfer(id: string, snapshot: Task, assertActive?: () => void): Awaitable<void>;
   restoreTask(snapshot: Task): Awaitable<Task>;
   conversations(): Awaitable<Conversation[]>;
   conversation(id: string): Awaitable<Conversation>;

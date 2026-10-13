@@ -96,12 +96,14 @@ export function DashboardPage({
           <p className="page-description">Ваши дела. Ваш темп. Один ясный план.</p>
         </div>
         <button className="button button-primary" onClick={() => onCreate({ date: today })}>
-          <CirclePlus size={18} /> Добавить задачу
+          <CirclePlus size={18} /> Добавить запись
         </button>
       </header>
       <div className="overview-grid">
         <div className="panel progress-card">
-          <span className="card-eyebrow">Твой прогресс</span>
+          <span className="card-eyebrow">
+            {googleEvents.length ? 'Твой день' : 'Твой прогресс'}
+          </span>
           <div className="progress-body">
             <div
               className="progress-ring"
@@ -115,9 +117,9 @@ export function DashboardPage({
             </div>
             <div>
               <strong>
-                {completed} из {todayEntries.length}
+                {googleEvents.length ? combined.length : `${completed} из ${todayEntries.length}`}
               </strong>
-              <span>задач выполнено</span>
+              <span>{googleEvents.length ? 'записей в календаре' : 'задач выполнено'}</span>
             </div>
           </div>
           <p className="card-footnote">
@@ -176,11 +178,36 @@ export function DashboardPage({
       <div className="day-work-grid">
         <div className="panel tasks-panel">
           <div className="section-heading">
-            <h2>Задачи на сегодня</h2>
-            <span>{todayEntries.length} в плане</span>
+            <h2>План на сегодня</h2>
+            <span>{combined.length} в плане</span>
           </div>
-          {todayEntries.length ? (
+          {combined.length ? (
             <div className="today-list">
+              {combined
+                .filter((entry) => entry.source === 'google')
+                .map((entry) => (
+                  <div className="task-row" key={entry.key}>
+                    <button
+                      className="check-target"
+                      onClick={() => openEntry(entry)}
+                      aria-label={`Открыть запись: ${entry.title}`}
+                    >
+                      <CalendarDays size={18} />
+                    </button>
+                    <button className="task-copy" onClick={() => openEntry(entry)}>
+                      <span className="task-title">{entry.title}</span>
+                      <span className="task-meta">
+                        {entry.allDay ? 'Весь день' : durationText(entry.duration)}
+                        {entry.source === 'google' && entry.event.recurring ? ' · Повторяется' : ''}
+                      </span>
+                    </button>
+                    <time>
+                      {entry.start === null
+                        ? 'Весь день'
+                        : formatTime(entry.start, { compact: true })}
+                    </time>
+                  </div>
+                ))}
               {todayEntries.map((o) => {
                 const task = o.task;
                 return (
@@ -220,12 +247,12 @@ export function DashboardPage({
               <h3>Сегодня — чистый лист</h3>
               <p>Добавьте первое дело и задайте ритм дню.</p>
               <button className="button button-secondary" onClick={() => onCreate({ date: today })}>
-                Добавить задачу
+                Добавить запись
               </button>
             </div>
           )}
           <button className="text-button list-footer" onClick={() => onCreate({ date: today })}>
-            <CirclePlus size={16} /> Добавить ещё одну задачу
+            <CirclePlus size={16} /> Добавить запись
           </button>
         </div>
         <div className="panel schedule-panel">

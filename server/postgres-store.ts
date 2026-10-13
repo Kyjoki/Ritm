@@ -9,6 +9,8 @@ import type {
   Settings,
   Task,
   TaskInput,
+  GoogleCalendarEvent,
+  GoogleTransferResult,
 } from '../shared/types.ts';
 import { AppError, conflict, missing } from './errors.ts';
 import { minutes, scheduleInPast, taskInputSchema, validSchedule } from './validation.ts';
@@ -18,7 +20,14 @@ import type {
   RuntimeStateRepository,
   WorkspaceRepository,
 } from './repository.ts';
-import { assertWorkspaceStorage } from './repository.ts';
+import {
+  assertWorkspaceStorage,
+  assertTransferTask,
+  assertTransferSnapshot,
+  assertTransferConnection,
+  googleTransferKey,
+  type GoogleTransferReceipt,
+} from './repository.ts';
 
 const { Pool } = pg;
 type Connection = Pick<PgPool | PoolClient, 'query'>;
@@ -342,19 +351,185 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
       return next;
     });
   }
+  private async deleteTaskInside(client: PoolClient, id: string, assertActive = () => {}) {
+    const task = await this.readTask(client, id, true);
+    assertActive();
+    await this.write(client, 'ritm_deleted_tasks', task);
+    assertActive();
+    await client.query('UPDATE ritm_deleted_tasks SET deleted_at = $1 WHERE id = $2', [
+      this.clock(),
+      id,
+    ]);
+    assertActive();
+    await client.query('DELETE FROM ritm_tasks WHERE id = $1', [id]);
+    assertActive();
+    await client.query(
+      'DELETE FROM ritm_deleted_tasks WHERE id NOT IN (SELECT id FROM ritm_deleted_tasks ORDER BY deleted_at DESC, id DESC LIMIT 50)',
+    );
+    assertActive();
+    return task;
+  }
   async deleteTask(id: string): Promise<Task> {
+    return this.transaction((client) => this.deleteTaskInside(client, id));
+  }
+  private async transferReceipt(
+    client: Connection,
+    id: string,
+  ): Promise<GoogleTransferReceipt | undefined> {
+    const result = await client.query('SELECT json FROM ritm_config WHERE key=$1', [
+      googleTransferKey(id),
+    ]);
+    return result.rows[0] ? decoded<GoogleTransferReceipt>(result.rows[0].json) : undefined;
+  }
+  private async transferReceipts(client: Connection) {
+    const result = await client.query(
+      "SELECT key,json FROM ritm_config WHERE key LIKE 'google-transfer:%'",
+    );
+    return result.rows.map((row) => ({
+      key: String(row.key),
+      receipt: decoded<GoogleTransferReceipt>(row.json),
+    }));
+  }
+  private async writeTransfer(client: Connection, id: string, receipt: GoogleTransferReceipt) {
+    await client.query(
+      'INSERT INTO ritm_config(key,json) VALUES($1,$2::jsonb) ON CONFLICT(key) DO UPDATE SET json=EXCLUDED.json',
+      [googleTransferKey(id), JSON.stringify(receipt)],
+    );
+  }
+  googleTransfer(id: string) {
+    return this.transferReceipt(this.pool, id);
+  }
+  async beginGoogleTransfer(
+    id: string,
+    connectionIdentity: string,
+    assertActive = () => {},
+  ): Promise<GoogleTransferReceipt> {
     return this.transaction(async (client) => {
-      const task = await this.readTask(client, id, true);
-      await this.write(client, 'ritm_deleted_tasks', task);
-      await client.query('UPDATE ritm_deleted_tasks SET deleted_at = $1 WHERE id = $2', [
-        this.clock(),
-        id,
-      ]);
-      await client.query('DELETE FROM ritm_tasks WHERE id = $1', [id]);
-      await client.query(
-        'DELETE FROM ritm_deleted_tasks WHERE id NOT IN (SELECT id FROM ritm_deleted_tasks ORDER BY deleted_at DESC, id DESC LIMIT 50)',
+      const current = await this.read<Task>(client, 'ritm_tasks', id, true),
+        existing = await this.transferReceipt(client, id);
+      if (existing?.status === 'complete') {
+        assertTransferConnection(existing, connectionIdentity);
+        if (current)
+          throw new AppError(
+            409,
+            'GOOGLE_TRANSFER_CHANGED',
+            'Эту запись уже переносили в Google. Восстановленную копию Ritm нельзя перенести повторно.',
+          );
+        return existing;
+      }
+      const task =
+          current ??
+          (() => {
+            throw missing('Задание');
+          })(),
+        timeZone = (await this.readSettings(client)).timeZone;
+      assertTransferTask(task);
+      if (existing) {
+        assertTransferSnapshot(task, existing, timeZone);
+        assertTransferConnection(existing, connectionIdentity);
+        return existing;
+      }
+      if (
+        (await this.transferReceipts(client)).filter((row) => row.receipt.status === 'pending')
+          .length >= 1000
+      )
+        throw new AppError(
+          400,
+          'GOOGLE_TRANSFER_LIMIT',
+          'Есть 1000 незавершённых переносов. Завершите синхронизацию существующих записей перед добавлением новых.',
+        );
+      const receipt: GoogleTransferReceipt = {
+        status: 'pending',
+        task,
+        timeZone,
+        attempted: false,
+        connectionIdentity,
+      };
+      assertActive();
+      await this.writeTransfer(client, id, receipt);
+      assertActive();
+      return receipt;
+    });
+  }
+  async markGoogleTransferAttempt(
+    id: string,
+    assertActive = () => {},
+  ): Promise<GoogleTransferReceipt> {
+    return this.transaction(async (client) => {
+      const receipt = await this.transferReceipt(client, id);
+      if (!receipt) throw conflict('Запрос переноса не найден. Начните заново.');
+      if (receipt.status === 'complete') return receipt;
+      assertTransferSnapshot(
+        await this.read<Task>(client, 'ritm_tasks', id, true),
+        receipt,
+        (await this.readSettings(client)).timeZone,
       );
-      return task;
+      const attempted = { ...receipt, attempted: true };
+      assertActive();
+      await this.writeTransfer(client, id, attempted);
+      assertActive();
+      return attempted;
+    });
+  }
+  async finishGoogleTransfer(
+    id: string,
+    event: GoogleCalendarEvent,
+    connectionIdentity: string,
+    assertActive = () => {},
+  ): Promise<GoogleTransferResult> {
+    return this.transaction(async (client) => {
+      const receipt = await this.transferReceipt(client, id),
+        task = await this.read<Task>(client, 'ritm_tasks', id, true);
+      if (!receipt)
+        throw conflict('Запрос переноса не найден. Запись Ritm сохранена; начните заново.');
+      assertTransferConnection(receipt, connectionIdentity);
+      if (receipt.status === 'complete') {
+        if (task) throw conflict('Перенесённая запись восстановлена. Обновите календарь.');
+        return receipt.result;
+      }
+      assertTransferSnapshot(task, receipt, (await this.readSettings(client)).timeZone);
+      assertActive();
+      await this.deleteTaskInside(client, id, assertActive);
+      const completed = (await this.transferReceipts(client)).filter(
+        (row) => row.receipt.status === 'complete',
+      );
+      const lastStamp = completed.reduce(
+        (max, row) => Math.max(max, Date.parse(row.receipt.completedAt!)),
+        0,
+      );
+      const result: GoogleTransferResult = { event, transferredTaskId: id };
+      const saved: GoogleTransferReceipt = {
+        ...receipt,
+        status: 'complete',
+        result,
+        completedAt: new Date(Math.max(this.clock(), lastStamp + 1)).toISOString(),
+      };
+      assertActive();
+      await this.writeTransfer(client, id, saved);
+      const rows = await this.transferReceipts(client);
+      const complete = rows
+        .filter((row) => row.receipt.status === 'complete')
+        .sort((a, b) => b.receipt.completedAt!.localeCompare(a.receipt.completedAt!));
+      const remove = complete.slice(100).map((row) => row.key);
+      if (remove.length) {
+        assertActive();
+        await client.query(
+          `DELETE FROM ritm_config WHERE key IN (${remove.map((_, index) => '$' + (index + 1)).join(',')})`,
+          remove,
+        );
+      }
+      assertActive();
+      return result;
+    });
+  }
+  async cancelGoogleTransfer(id: string, snapshot: Task, assertActive = () => {}) {
+    await this.transaction(async (client) => {
+      const receipt = await this.transferReceipt(client, id);
+      if (receipt?.status === 'pending' && receipt.task.updatedAt === snapshot.updatedAt) {
+        assertActive();
+        await client.query('DELETE FROM ritm_config WHERE key=$1', [googleTransferKey(id)]);
+        assertActive();
+      }
     });
   }
   async restoreTask(snapshot: Task): Promise<Task> {

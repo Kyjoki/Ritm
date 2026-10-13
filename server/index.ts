@@ -29,6 +29,7 @@ import {
   type SecurityLogger,
 } from './http-security.ts';
 import { assistantMessage, runAssistant, type AssistantRunner } from './assistant.ts';
+import { createTaskGoogleTransfer } from './task-google-transfer.ts';
 import {
   chatSchema,
   dateValue,
@@ -50,8 +51,13 @@ type AppGoogleService = Pick<
   | 'listEvents'
   | 'createEvent'
   | 'updateEvent'
+  | 'deleteEvent'
+  | 'connectionIdentity'
+  | 'withConnectionIdentity'
   | 'disconnect'
   | 'assertFreeSlots'
+  | 'connectionIdentity'
+  | 'withConnectionIdentity'
   | 'configuration'
   | 'saveConfiguration'
   | 'removeConfiguration'
@@ -122,6 +128,7 @@ export function createApp(options: AppOptions = {}) {
       transport: options.googleTransport,
     });
   const assistant = options.assistant ?? runAssistant;
+  const transferTaskToGoogle = createTaskGoogleTransfer({ store, leases: secrets, google });
   const app = express();
   const audit = createSecurityAudit(
     options.securityLogger ??
@@ -323,8 +330,19 @@ export function createApp(options: AppOptions = {}) {
     audit(res, 'google_disconnected', 200);
     res.json(result);
   });
+  app.delete('/api/integrations/google/events/:id', async (req, res) => {
+    const { etag } = z.object({ etag: googleEtagSchema }).strict().parse(req.body);
+    await security.limit(req, 'google-write', 20, 60_000);
+    res.json(await google.deleteEvent(googleEventIdSchema.parse(req.params.id), etag));
+  });
   app.post('/api/tasks', async (req, res) => {
     res.status(201).json(await store.createTask(taskInputSchema.parse(req.body)));
+  });
+  app.post('/api/tasks/:id/google', async (req, res) => {
+    z.object({}).strict().parse(req.body);
+    const id = idSchema.parse(req.params.id);
+    await security.limit(req, 'google-write', 20, 60_000);
+    res.json(await transferTaskToGoogle(id));
   });
   app.patch('/api/tasks/:id', async (req, res) => {
     res.json(

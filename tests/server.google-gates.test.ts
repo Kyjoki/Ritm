@@ -66,6 +66,11 @@ test('connected Google snapshot reaches AI; confirmation checks fresh busy slots
       throw new Error('unexpected Google write');
     },
     disconnect: async () => status,
+    deleteEvent: async () => {
+      throw new Error('unexpected Google deletion');
+    },
+    connectionIdentity: async () => 'a'.repeat(64),
+    withConnectionIdentity: async (_identity, operation) => operation(() => {}),
     assertFreeSlots: async (slots) => {
       assertions++;
       assert.equal(slots.length, 1);

@@ -47,7 +47,7 @@ export interface GoogleOAuthConfig {
   redirectUri: string;
 }
 export interface GoogleRequest {
-  method: 'GET' | 'POST' | 'PATCH';
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   eventId?: string;
   query?: Record<string, string | number | boolean>;
   body?: Record<string, unknown>;
@@ -128,6 +128,7 @@ export const googleEventInputSchema = z
     duration: z.number().int().min(5).max(720),
     allDay: z.boolean(),
     colorId: z.enum(CALENDAR_COLOR_IDS).nullable().optional(),
+    repeat: z.enum(['none', 'daily', 'weekly', 'monthly']).optional(),
   })
   .strict()
   .refine(
@@ -378,13 +379,22 @@ export function googleZonedInstant(date: string, time: string, timeZone: string)
 
 function eventBody(input: GoogleEventInput, timeZone: string) {
   const color = input.colorId === undefined ? {} : { colorId: input.colorId };
+  const frequency = { daily: 'DAILY', weekly: 'WEEKLY', monthly: 'MONTHLY' };
+  const recurrence =
+    input.repeat && input.repeat !== 'none'
+      ? { recurrence: [`RRULE:FREQ=${frequency[input.repeat]}`] }
+      : {};
   if (input.allDay)
     return {
       summary: input.title,
       description: input.description,
-      start: { date: input.date },
-      end: { date: dateShift(input.date, 1) },
+      start: { date: input.date, ...(input.repeat && input.repeat !== 'none' ? { timeZone } : {}) },
+      end: {
+        date: dateShift(input.date, 1),
+        ...(input.repeat && input.repeat !== 'none' ? { timeZone } : {}),
+      },
       ...color,
+      ...recurrence,
     };
   const start = googleZonedInstant(input.date, input.time!, timeZone),
     end = start + input.duration * 60_000;
@@ -404,6 +414,7 @@ function eventBody(input: GoogleEventInput, timeZone: string) {
     start: { dateTime: new Date(start).toISOString(), timeZone },
     end: { dateTime: new Date(end).toISOString(), timeZone },
     ...color,
+    ...recurrence,
   };
 }
 
@@ -691,6 +702,52 @@ export class GoogleCalendarService {
     )
       throw conflict('Подключение Google изменилось. Обновите страницу.');
     return current;
+  }
+  private identity(connection: GoogleConnection) {
+    return hash(
+      connection.tokens.connectionId +
+        '\0' +
+        connection.epoch +
+        '\0' +
+        connection.tokens.configFingerprint,
+    );
+  }
+  private async identitySnapshot(): Promise<GoogleConnection> {
+    const config = await this.oauthConfiguration(),
+      tokens = await this.readTokens(),
+      epoch = await this.options.secrets.getSecret(EPOCH_SLOT);
+    if (!tokens)
+      throw new AppError(503, 'GOOGLE_NOT_CONNECTED', 'Подключите Google Calendar в настройках.');
+    if (
+      !epoch ||
+      tokens.needsReauth ||
+      tokens.epoch !== epoch ||
+      tokens.configFingerprint !== this.fingerprint(config)
+    )
+      throw new AppError(
+        401,
+        'GOOGLE_REAUTH_REQUIRED',
+        'Подключите Google Calendar заново в настройках.',
+      );
+    return { config, tokens, epoch };
+  }
+  async connectionIdentity(): Promise<string> {
+    return this.withLease(async () => this.identity(await this.identitySnapshot()));
+  }
+  async withConnectionIdentity<T>(
+    identity: string,
+    operation: (assertActive: () => void) => Promise<T>,
+  ): Promise<T> {
+    return this.withLease(async (assertActive) => {
+      if (this.identity(await this.identitySnapshot()) !== identity)
+        throw new AppError(
+          409,
+          'GOOGLE_TRANSFER_CONNECTION_CHANGED',
+          'Подключение Google изменилось во время переноса. Запись Ritm сохранена; проверьте событие в прежнем аккаунте.',
+        );
+      assertActive();
+      return operation(assertActive);
+    });
   }
   private async readTokens() {
     const value = await this.options.secrets.getSecret(TOKEN_SLOT);
@@ -1138,15 +1195,44 @@ export class GoogleCalendarService {
     });
     return { events, from, to, timeZone: input.timeZone, fetchedAt, partial };
   }
-  async createEvent(value: GoogleEventInput, requestId: string): Promise<GoogleCalendarEvent> {
+  async createEvent(
+    value: GoogleEventInput,
+    requestId: string,
+    options: {
+      timeZone?: string;
+      expectedConnectionIdentity?: string;
+      transparency?: 'transparent' | 'opaque';
+    } = {},
+  ): Promise<GoogleCalendarEvent> {
     const input = googleEventInputSchema.parse(value),
       request = z.string().uuid().parse(requestId),
       tokens = await this.token(),
-      settings = await this.options.settings();
-    const fingerprint = hash(JSON.stringify({ input, timeZone: settings.timeZone })),
+      timeZone = options.timeZone ?? (await this.options.settings()).timeZone;
+    if (
+      options.expectedConnectionIdentity &&
+      this.identity(tokens) !== options.expectedConnectionIdentity
+    )
+      throw new AppError(
+        409,
+        'GOOGLE_TRANSFER_CONNECTION_CHANGED',
+        'Подключение Google изменилось. Запись Ritm сохранена; повторный перенос в другой аккаунт отменён.',
+      );
+    try {
+      new Intl.DateTimeFormat('ru', { timeZone });
+    } catch {
+      throw new AppError(400, 'GOOGLE_TIMEZONE', 'Проверьте часовой пояс календаря.');
+    }
+    const fingerprint = hash(
+        JSON.stringify({
+          input,
+          timeZone,
+          ...(options.transparency === undefined ? {} : { transparency: options.transparency }),
+        }),
+      ),
       eventId = hash(`Ritm:${request}`);
     const body = {
-      ...eventBody(input, settings.timeZone),
+      ...eventBody(input, timeZone),
+      ...(options.transparency === undefined ? {} : { transparency: options.transparency }),
       id: eventId,
       extendedProperties: { private: { ritmRequestHash: fingerprint } },
     };
@@ -1166,8 +1252,8 @@ export class GoogleCalendarService {
           'Идентификатор сохранения уже использован. Обновите календарь и начните новую запись.',
         );
     }
-    const event = mapGoogleEvent(data, settings.timeZone);
-    if (!event)
+    const event = mapGoogleEvent(data, timeZone);
+    if (!event || event.id !== eventId)
       throw new AppError(
         502,
         'GOOGLE_INVALID_EVENT',
@@ -1180,6 +1266,12 @@ export class GoogleCalendarService {
     value: GoogleEventInput,
     etag: string,
   ): Promise<GoogleCalendarEvent> {
+    if (value.repeat !== undefined)
+      throw new AppError(
+        400,
+        'GOOGLE_SERIES_READ_ONLY',
+        'Повторение задаётся при создании. Для изменения всей серии откройте Google Calendar.',
+      );
     const eventId = googleEventIdSchema.parse(id),
       input = googleEventInputSchema.parse(value),
       version = googleEtagSchema.parse(etag),
@@ -1224,6 +1316,55 @@ export class GoogleCalendarService {
         'Не удалось подтвердить изменение Google. Обновите календарь.',
       );
     return event;
+  }
+  async deleteEvent(id: string, etag: string): Promise<{ deleted: true }> {
+    const eventId = googleEventIdSchema.parse(id),
+      version = googleEtagSchema.parse(etag),
+      connection = await this.token(),
+      settings = await this.options.settings();
+    let data: unknown;
+    try {
+      data = await this.api(connection, { method: 'GET', eventId });
+    } catch (error) {
+      if (error instanceof AppError && error.code === 'GOOGLE_EVENT_NOT_FOUND')
+        return { deleted: true };
+      throw error;
+    }
+    if (data && typeof data === 'object' && (data as { status?: unknown }).status === 'cancelled') {
+      if ((data as { id?: unknown }).id !== eventId)
+        throw new AppError(
+          502,
+          'GOOGLE_INVALID_EVENT',
+          'Google вернул другую запись. Обновите календарь.',
+        );
+      return { deleted: true };
+    }
+    const original = mapGoogleEvent(data, settings.timeZone)!;
+    if (original.id !== eventId)
+      throw new AppError(
+        502,
+        'GOOGLE_INVALID_EVENT',
+        'Google вернул другую запись. Обновите календарь.',
+      );
+    if (original.readOnly)
+      throw new AppError(
+        403,
+        'GOOGLE_EVENT_READ_ONLY',
+        original.readOnlyReason || 'Это событие удаляется в Google Calendar.',
+      );
+    if (original.etag !== version)
+      throw conflict('Событие Google изменилось. Обновите календарь перед удалением.');
+    try {
+      await this.api(connection, {
+        method: 'DELETE',
+        eventId,
+        headers: { 'If-Match': version },
+        query: { sendUpdates: 'none' },
+      });
+    } catch (error) {
+      if (!(error instanceof AppError) || error.code !== 'GOOGLE_EVENT_NOT_FOUND') throw error;
+    }
+    return { deleted: true };
   }
   async disconnect(): Promise<GoogleCalendarStatus> {
     await this.withLease(async (assertActive) => {

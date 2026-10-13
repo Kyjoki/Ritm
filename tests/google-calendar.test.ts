@@ -859,6 +859,185 @@ test('AI confirmation fails closed on real busy events and reauthorization', asy
   );
 });
 
+test('new Google series use create-only RRULE and freeze migration timezone, color and transparency', async () => {
+  const records = new Map<string, Record<string, unknown>>(),
+    requests: GoogleRequest[] = [];
+  const f = fixture(
+    {
+      request: async (_config, _token, request) => {
+        requests.push(request);
+        if (request.method === 'GET') return records.get(request.eventId!);
+        const id = request.body!.id as string;
+        if (records.has(id)) throw { response: { status: 409 } };
+        const result = { ...request.body!, etag: '"v1"', organizer: { self: true } };
+        records.set(id, result);
+        return result;
+      },
+    },
+    environment,
+    { ...defaultSettings, timeZone: 'UTC' },
+  );
+  await f.connect();
+  const identity = await f.service.connectionIdentity();
+  assert.match(identity, /^[a-f0-9]{64}$/);
+  assert.equal(identity.includes(fakeAccess), false);
+  for (const repeat of ['daily', 'weekly', 'monthly'] as const) {
+    for (const allDay of [false, true]) {
+      const input = { ...eventInput, repeat, allDay, time: allDay ? null : '11:00', colorId: '10' };
+      const requestId = randomUUID(),
+        options = {
+          timeZone: 'Asia/Qyzylorda',
+          expectedConnectionIdentity: identity,
+          transparency: allDay ? ('transparent' as const) : ('opaque' as const),
+        };
+      const created = await f.service.createEvent(input, requestId, options);
+      const body = requests.at(-1)!.body!;
+      assert.deepEqual(body.recurrence, ['RRULE:FREQ=' + repeat.toUpperCase()]);
+      assert.equal((body.start as { timeZone: string }).timeZone, 'Asia/Qyzylorda');
+      assert.equal((body.end as { timeZone: string }).timeZone, 'Asia/Qyzylorda');
+      assert.equal(created.colorId, '10');
+      assert.equal(created.recurring, true);
+      assert.equal(created.busy, !allDay);
+      if (!allDay) assert.equal(created.start.dateTime, '2026-10-13T06:00:00.000Z');
+      assert.equal((await f.service.createEvent(input, requestId, options)).id, created.id);
+      await assert.rejects(
+        f.service.createEvent(input, requestId, {
+          ...options,
+          transparency: allDay ? 'opaque' : 'transparent',
+        }),
+        rejectsCode('CONFLICT'),
+      );
+    }
+  }
+  const native = await f.service.createEvent(
+    { ...eventInput, allDay: true, time: null },
+    randomUUID(),
+  );
+  assert.equal(native.busy, true);
+  assert.equal(Object.hasOwn(requests.at(-1)!.body!, 'transparency'), false);
+  assert.equal(Object.hasOwn(requests.at(-1)!.body!, 'recurrence'), false);
+  const before = requests.length;
+  for (const repeat of ['none', 'daily', 'weekly', 'monthly'] as const)
+    await assert.rejects(
+      f.service.updateEvent(native.id, { ...eventInput, repeat }, native.etag),
+      rejectsCode('GOOGLE_SERIES_READ_ONLY'),
+    );
+  assert.equal(requests.length, before, 'Recurrence changes never reach instance PATCH.');
+  await f.service.disconnect();
+  await f.connect();
+  const changed = await f.service.connectionIdentity();
+  assert.notEqual(changed, identity);
+  await assert.rejects(
+    f.service.withConnectionIdentity(identity, async () => true),
+    rejectsCode('GOOGLE_TRANSFER_CONNECTION_CHANGED'),
+  );
+  const reads = requests.length;
+  await assert.rejects(
+    f.service.createEvent(eventInput, randomUUID(), { expectedConnectionIdentity: identity }),
+    rejectsCode('GOOGLE_TRANSFER_CONNECTION_CHANGED'),
+  );
+  assert.equal(requests.length, reads);
+});
+
+test('deletion targets one editable instance with If-Match, and lost responses are retryable', async () => {
+  const id = 'instance20261013',
+    requests: GoogleRequest[] = [];
+  let deleted = false,
+    first = true;
+  const f = fixture({
+    request: async (_config, _token, request) => {
+      requests.push(request);
+      assert.equal(request.eventId, id);
+      if (request.method === 'GET') {
+        if (deleted) throw { response: { status: 404 } };
+        return rawEvent({ id, recurringEventId: 'series1234' });
+      }
+      assert.equal(request.method, 'DELETE');
+      assert.equal(request.body, undefined);
+      assert.deepEqual(request.headers, { 'If-Match': '"v1"' });
+      assert.deepEqual(request.query, { sendUpdates: 'none' });
+      deleted = true;
+      if (first) {
+        first = false;
+        throw new Error('Test-only lost deletion response');
+      }
+      return {};
+    },
+  });
+  await f.connect();
+  await assert.rejects(f.service.deleteEvent(id, '"v1"'), rejectsCode('GOOGLE_UNAVAILABLE'));
+  assert.deepEqual(await f.service.deleteEvent(id, '"v1"'), { deleted: true });
+  assert.deepEqual(
+    requests.map((request) => request.method),
+    ['GET', 'DELETE', 'GET'],
+  );
+  for (const status of [404, 410, 'cancelled'] as const) {
+    const missing = fixture({
+      request: async (_config, _token, request) => {
+        assert.equal(request.method, 'GET');
+        assert.equal(request.eventId, id);
+        if (typeof status === 'number') throw { response: { status } };
+        return { id, status };
+      },
+    });
+    await missing.connect();
+    assert.deepEqual(await missing.service.deleteEvent(id, '"v1"'), { deleted: true });
+  }
+});
+
+test('Google deletion preserves series, ownership, locks and stale-version barriers', async () => {
+  for (const patch of [
+    { recurrence: ['RRULE:FREQ=DAILY'] },
+    { organizer: { self: false } },
+    { attendees: [{ self: false }] },
+    { locked: true },
+    { eventType: 'outOfOffice' },
+  ]) {
+    let writes = 0;
+    const f = fixture({
+      request: async (_config, _token, request) => {
+        if (request.method !== 'GET') writes++;
+        return rawEvent(patch);
+      },
+    });
+    await f.connect();
+    await assert.rejects(
+      f.service.deleteEvent('event12345', '"v1"'),
+      rejectsCode('GOOGLE_EVENT_READ_ONLY'),
+    );
+    assert.equal(writes, 0);
+  }
+  for (const changed of ['preflight', 'provider', 'identity'] as const) {
+    let writes = 0;
+    const f = fixture({
+      request: async (_config, _token, request) => {
+        if (request.method === 'GET')
+          return rawEvent(
+            changed === 'preflight'
+              ? { etag: '"v2"' }
+              : changed === 'identity'
+                ? { id: 'wrong-instance' }
+                : {},
+          );
+        writes++;
+        throw { response: { status: 412 } };
+      },
+    });
+    await f.connect();
+    await assert.rejects(
+      f.service.deleteEvent('event12345', '"v1"'),
+      rejectsCode(changed === 'identity' ? 'GOOGLE_INVALID_EVENT' : 'CONFLICT'),
+    );
+    assert.equal(writes, changed === 'provider' ? 1 : 0);
+  }
+  const f = fixture({ request: async () => ({ id: 'wrong-instance', status: 'cancelled' }) });
+  await f.connect();
+  await assert.rejects(
+    f.service.deleteEvent('event12345', '"v1"'),
+    rejectsCode('GOOGLE_INVALID_EVENT'),
+  );
+});
+
 test('read deadline aborts the transport and never returns stale availability', async () => {
   let signal: AbortSignal | undefined;
   const f = fixture({

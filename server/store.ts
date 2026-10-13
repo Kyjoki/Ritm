@@ -11,10 +11,19 @@ import type {
   Settings,
   Task,
   TaskInput,
+  GoogleCalendarEvent,
+  GoogleTransferResult,
 } from '../shared/types.ts';
 import { AppError, conflict, missing } from './errors.ts';
 import { minutes, scheduleInPast, taskInputSchema, validSchedule } from './validation.ts';
-import { assertWorkspaceStorage } from './repository.ts';
+import {
+  assertWorkspaceStorage,
+  assertTransferTask,
+  assertTransferSnapshot,
+  assertTransferConnection,
+  googleTransferKey,
+  type GoogleTransferReceipt,
+} from './repository.ts';
 
 export const defaultSettings: Settings = {
   displayName: 'Максим',
@@ -263,16 +272,149 @@ export class Store {
     this.write('tasks', next);
     return next;
   }
+  private deleteTaskInside(id: string, assertActive = () => {}) {
+    const task = this.task(id);
+    assertActive();
+    this.write('deleted_tasks', task);
+    assertActive();
+    this.db.prepare('DELETE FROM tasks WHERE id=?').run(id);
+    // Keep a bounded undo journal; it never includes provider credentials.
+    this.db.exec(
+      'DELETE FROM deleted_tasks WHERE rowid NOT IN (SELECT rowid FROM deleted_tasks ORDER BY rowid DESC LIMIT 50)',
+    );
+    assertActive();
+    return task;
+  }
   deleteTask(id: string): Task {
+    return this.transaction(() => this.deleteTaskInside(id));
+  }
+  private transferReceipts() {
+    return this.db
+      .prepare("SELECT key,json FROM config WHERE key LIKE 'google-transfer:%'")
+      .all()
+      .map((row) => ({
+        key: String(row.key),
+        receipt: JSON.parse(String(row.json)) as GoogleTransferReceipt,
+      }));
+  }
+  private transferReceipt(id: string): GoogleTransferReceipt | undefined {
+    const row = this.db.prepare('SELECT json FROM config WHERE key=?').get(googleTransferKey(id));
+    return row ? (JSON.parse(String(row.json)) as GoogleTransferReceipt) : undefined;
+  }
+  googleTransfer(id: string) {
+    return this.transferReceipt(id);
+  }
+  beginGoogleTransfer(
+    id: string,
+    connectionIdentity: string,
+    assertActive = () => {},
+  ): GoogleTransferReceipt {
     return this.transaction(() => {
-      const task = this.task(id);
-      this.write('deleted_tasks', task);
-      this.db.prepare('DELETE FROM tasks WHERE id=?').run(id);
-      // Keep a bounded undo journal; it never includes provider credentials.
-      this.db.exec(
-        'DELETE FROM deleted_tasks WHERE rowid NOT IN (SELECT rowid FROM deleted_tasks ORDER BY rowid DESC LIMIT 50)',
+      const current = this.read<Task>('tasks', id),
+        existing = this.transferReceipt(id);
+      if (existing?.status === 'complete') {
+        assertTransferConnection(existing, connectionIdentity);
+        if (current)
+          throw new AppError(
+            409,
+            'GOOGLE_TRANSFER_CHANGED',
+            'Эту запись уже переносили в Google. Восстановленную копию Ritm нельзя перенести повторно.',
+          );
+        return existing;
+      }
+      const task = this.task(id),
+        timeZone = this.settings().timeZone;
+      assertTransferTask(task);
+      if (existing) {
+        assertTransferSnapshot(task, existing, timeZone);
+        assertTransferConnection(existing, connectionIdentity);
+        return existing;
+      }
+      if (this.transferReceipts().filter((row) => row.receipt.status === 'pending').length >= 1000)
+        throw new AppError(
+          400,
+          'GOOGLE_TRANSFER_LIMIT',
+          'Есть 1000 незавершённых переносов. Завершите синхронизацию существующих записей перед добавлением новых.',
+        );
+      const receipt: GoogleTransferReceipt = {
+        status: 'pending',
+        task,
+        timeZone,
+        attempted: false,
+        connectionIdentity,
+      };
+      assertActive();
+      this.writeConfig(googleTransferKey(id), receipt);
+      assertActive();
+      return receipt;
+    });
+  }
+  markGoogleTransferAttempt(id: string, assertActive = () => {}): GoogleTransferReceipt {
+    return this.transaction(() => {
+      const receipt = this.transferReceipt(id);
+      if (!receipt) throw conflict('Запрос переноса не найден. Начните заново.');
+      if (receipt.status === 'complete') return receipt;
+      assertTransferSnapshot(this.read<Task>('tasks', id), receipt, this.settings().timeZone);
+      const attempted = { ...receipt, attempted: true };
+      assertActive();
+      this.writeConfig(googleTransferKey(id), attempted);
+      assertActive();
+      return attempted;
+    });
+  }
+  finishGoogleTransfer(
+    id: string,
+    event: GoogleCalendarEvent,
+    connectionIdentity: string,
+    assertActive = () => {},
+  ): GoogleTransferResult {
+    return this.transaction(() => {
+      const receipt = this.transferReceipt(id),
+        task = this.read<Task>('tasks', id);
+      if (!receipt)
+        throw conflict('Запрос переноса не найден. Запись Ritm сохранена; начните заново.');
+      assertTransferConnection(receipt, connectionIdentity);
+      if (receipt.status === 'complete') {
+        if (task) throw conflict('Перенесённая запись восстановлена. Обновите календарь.');
+        return receipt.result;
+      }
+      assertTransferSnapshot(task, receipt, this.settings().timeZone);
+      assertActive();
+      this.deleteTaskInside(id, assertActive);
+      const completed = this.transferReceipts().filter((row) => row.receipt.status === 'complete');
+      const lastStamp = completed.reduce(
+        (max, row) => Math.max(max, Date.parse(row.receipt.completedAt!)),
+        0,
       );
-      return task;
+      const result: GoogleTransferResult = { event, transferredTaskId: id };
+      const saved: GoogleTransferReceipt = {
+        ...receipt,
+        status: 'complete',
+        result,
+        completedAt: new Date(Math.max(Date.now(), lastStamp + 1)).toISOString(),
+      };
+      assertActive();
+      this.writeConfig(googleTransferKey(id), saved);
+      const rows = this.transferReceipts();
+      const complete = rows
+        .filter((row) => row.receipt.status === 'complete')
+        .sort((a, b) => b.receipt.completedAt!.localeCompare(a.receipt.completedAt!));
+      for (const row of complete.slice(100)) {
+        assertActive();
+        this.db.prepare('DELETE FROM config WHERE key=?').run(row.key);
+      }
+      assertActive();
+      return result;
+    });
+  }
+  cancelGoogleTransfer(id: string, snapshot: Task, assertActive = () => {}) {
+    return this.transaction(() => {
+      const receipt = this.transferReceipt(id);
+      if (receipt?.status === 'pending' && receipt.task.updatedAt === snapshot.updatedAt) {
+        assertActive();
+        this.db.prepare('DELETE FROM config WHERE key=?').run(googleTransferKey(id));
+        assertActive();
+      }
     });
   }
   restoreTask(snapshot: Task): Task {

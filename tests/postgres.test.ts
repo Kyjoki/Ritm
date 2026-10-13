@@ -6,8 +6,8 @@ import { DataType, newDb } from 'pg-mem';
 import { PostgresStore } from '../server/postgres-store.ts';
 import { migrate } from '../migrations/migrate.ts';
 import { AppError } from '../server/errors.ts';
-import { MAX_WORKSPACE_BYTES } from '../server/repository.ts';
-import type { ChatMessage, TaskInput } from '../shared/types.ts';
+import { MAX_WORKSPACE_BYTES, googleTransferKey } from '../server/repository.ts';
+import type { ChatMessage, TaskInput, GoogleCalendarEvent } from '../shared/types.ts';
 
 const base: TaskInput = {
   title: 'Подготовить презентацию',
@@ -30,6 +30,20 @@ function assistant(): ChatMessage {
     createdAt: new Date().toISOString(),
   };
 }
+const transferredEvent: GoogleCalendarEvent = {
+  id: 'testgoogleevent',
+  source: 'google',
+  calendarId: 'primary',
+  title: base.title,
+  description: '',
+  etag: '"v1"',
+  start: { dateTime: '2099-10-14T06:00:00Z' },
+  end: { dateTime: '2099-10-14T07:00:00Z' },
+  timeZone: 'Asia/Qyzylorda',
+  allDay: false,
+  busy: true,
+  readOnly: false,
+};
 
 /**
  * SQL/contract emulator, NOT PostgreSQL or Neon. pg-mem does not implement real
@@ -375,6 +389,103 @@ test('pg-mem: event colors survive updates, another repository and restore witho
   assert.equal((await other.task(created.id)).colorId, null);
   await assert.rejects(h.store.updateTask(created.id, { colorId: '99' }));
   assert.equal((await other.task(created.id)).colorId, null);
+});
+
+test('pg-mem: Google transfer receipts survive instances and replay only for the current connection', async (t) => {
+  const h = await fixture(t),
+    identity = 'a'.repeat(64);
+  const task = await h.store.createTask({ ...base, colorId: '10', repeat: 'weekly' });
+  const receipt = await h.store.beginGoogleTransfer(task.id, identity);
+  assert.equal(receipt.task.repeat, 'weekly');
+  assert.equal(receipt.task.colorId, '10');
+  assert.equal(receipt.timeZone, 'Asia/Qyzylorda');
+  await h.store.markGoogleTransferAttempt(task.id);
+  const second = new PostgresStore(h.pool, { now: h.now });
+  assert.equal((await second.googleTransfer(task.id))?.attempted, true);
+  const result = await second.finishGoogleTransfer(task.id, transferredEvent, identity);
+  assert.deepEqual(result, { event: transferredEvent, transferredTaskId: task.id });
+  assert.deepEqual(await h.store.tasks(), []);
+  const completed = await h.store.beginGoogleTransfer(task.id, identity);
+  assert.equal(completed.status, 'complete');
+  assert.deepEqual(completed.result, result);
+  for (const action of [
+    () => h.store.beginGoogleTransfer(task.id, 'b'.repeat(64)),
+    () => h.store.finishGoogleTransfer(task.id, transferredEvent, 'b'.repeat(64)),
+  ])
+    await assert.rejects(
+      action,
+      (error: unknown) =>
+        error instanceof AppError && error.code === 'GOOGLE_TRANSFER_CONNECTION_CHANGED',
+    );
+  await h.store.restoreTask(task);
+  await assert.rejects(
+    h.store.beginGoogleTransfer(task.id, identity),
+    (error: unknown) => error instanceof AppError && error.status === 409,
+  );
+  assert.equal((await h.store.task(task.id)).id, task.id);
+});
+
+test('pg-mem serial rollback fixture: Google-confirmed transfer deletion and receipt are atomic', async (t) => {
+  const h = await fixture(t),
+    identity = 'a'.repeat(64),
+    task = await h.store.createTask(base);
+  await h.store.beginGoogleTransfer(task.id, identity);
+  await h.store.markGoogleTransferAttempt(task.id);
+  h.injectFailure(
+    (text, values) =>
+      text.startsWith('INSERT INTO ritm_config') &&
+      values[0] === googleTransferKey(task.id) &&
+      JSON.parse(values[1] as string).status === 'complete',
+  );
+  await assert.rejects(
+    h.store.finishGoogleTransfer(task.id, transferredEvent, identity),
+    /Injected storage failure/,
+  );
+  h.injectFailure();
+  assert.equal((await h.store.task(task.id)).id, task.id);
+  assert.equal((await h.store.googleTransfer(task.id))?.status, 'pending');
+  await h.store.updateTask(task.id, { title: 'Новая редакция' });
+  await assert.rejects(
+    h.store.finishGoogleTransfer(task.id, transferredEvent, identity),
+    (error: unknown) => error instanceof AppError && error.code === 'GOOGLE_TRANSFER_CHANGED',
+  );
+  assert.equal((await h.store.task(task.id)).title, 'Новая редакция');
+});
+
+test('pg-mem: completed Google receipts are bounded while uncertain deleted receipts retain identity', async (t) => {
+  const h = await fixture(t),
+    identity = 'a'.repeat(64),
+    unknown = await h.store.createTask(base);
+  const pending = await h.store.beginGoogleTransfer(unknown.id, identity);
+  await h.store.markGoogleTransferAttempt(unknown.id);
+  const snapshot = await h.store.deleteTask(unknown.id);
+  const table = h.db.public.getTable('ritm_config');
+  for (let index = 0; index < 101; index++) {
+    const id = randomUUID();
+    table.insert({
+      key: googleTransferKey(id),
+      json: {
+        ...pending,
+        status: 'complete',
+        task: { ...pending.task, id },
+        completedAt: new Date(h.now() + index).toISOString(),
+        result: { event: transferredEvent, transferredTaskId: id },
+      },
+    });
+  }
+  const fresh = await h.store.createTask(base);
+  await h.store.beginGoogleTransfer(fresh.id, identity);
+  await h.store.finishGoogleTransfer(fresh.id, transferredEvent, identity);
+  const rows = (
+    await h.raw.query("SELECT json FROM ritm_config WHERE key LIKE 'google-transfer:%'")
+  ).rows;
+  assert.equal(rows.filter((row) => row.json.status === 'complete').length, 100);
+  assert.equal((await h.store.googleTransfer(unknown.id))?.attempted, true);
+  await h.store.restoreTask(snapshot);
+  await assert.rejects(
+    h.store.beginGoogleTransfer(unknown.id, 'b'.repeat(64)),
+    (error: unknown) => error instanceof AppError && error.status === 409,
+  );
 });
 
 test('pg-mem serial rollback fixture: a storage failure rolls back partial proposal writes', async (t) => {

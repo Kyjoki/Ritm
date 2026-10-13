@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { GoogleCalendarStatus, GoogleCalendarResult } from '../../shared/types';
+import type {
+  GoogleCalendarStatus,
+  GoogleCalendarResult,
+  GoogleCalendarEvent,
+} from '../../shared/types';
 import { api } from './api';
 import { addDays } from '../features/calendar-utils';
 import { googleAuthorizationUrl } from './navigation';
@@ -19,6 +23,9 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
   const [range, setRangeState] = useState({ from: today, to: addDays(today, 1) });
   const [revision, setRevision] = useState(0);
   const requestVersion = useRef(0);
+  const activeRead = useRef<AbortController | null>(null);
+  const readBusy = useRef(false);
+  const refreshBusy = useRef(false);
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
   const refreshStatus = useCallback(async () => {
@@ -68,9 +75,12 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
       old?.from === range.from && old.to === range.to && old.timeZone === timeZone ? old : null,
     );
     setLoading(true);
+    readBusy.current = true;
+    const controller = new AbortController();
+    activeRead.current = controller;
     setError('');
     api
-      .googleEvents(range.from, range.to, timeZone)
+      .googleEvents(range.from, range.to, timeZone, controller.signal)
       .then((next) => {
         if (version === requestVersion.current) {
           setResult(next);
@@ -86,14 +96,24 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
         }
       })
       .finally(() => {
-        if (version === requestVersion.current) setLoading(false);
+        if (version === requestVersion.current) {
+          setLoading(false);
+          readBusy.current = false;
+          if (activeRead.current === controller) activeRead.current = null;
+        }
       });
     return () => {
       requestVersion.current++;
+      controller.abort();
+      if (activeRead.current === controller) {
+        activeRead.current = null;
+        readBusy.current = false;
+      }
     };
   }, [enabled, status.status, range.from, range.to, timeZone, revision, refreshStatus]);
   const refresh = useCallback(() => {
-    if (!enabledRef.current) return;
+    if (!enabledRef.current || refreshBusy.current || readBusy.current) return;
+    refreshBusy.current = true;
     setLoading(true);
     void refreshStatus()
       .then(() => {
@@ -106,8 +126,52 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
           );
           setLoading(false);
         }
+      })
+      .finally(() => {
+        refreshBusy.current = false;
       });
   }, [refreshStatus]);
+  useEffect(() => {
+    if (!enabled) return;
+    const refreshVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    const interval = window.setInterval(refreshVisible, 30_000);
+    window.addEventListener('focus', refreshVisible);
+    document.addEventListener('visibilitychange', refreshVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshVisible);
+      document.removeEventListener('visibilitychange', refreshVisible);
+    };
+  }, [enabled, refresh]);
+  const invalidateRead = useCallback(() => {
+    requestVersion.current++;
+    activeRead.current?.abort();
+    activeRead.current = null;
+    readBusy.current = false;
+    setLoading(false);
+  }, []);
+  const upsertEvent = useCallback(
+    (event: GoogleCalendarEvent) => {
+      invalidateRead();
+      setResult((old) =>
+        old && !(event.recurring && event.readOnly)
+          ? { ...old, events: [...old.events.filter((item) => item.id !== event.id), event] }
+          : old,
+      );
+    },
+    [invalidateRead],
+  );
+  const removeEvent = useCallback(
+    (id: string) => {
+      invalidateRead();
+      setResult((old) =>
+        old ? { ...old, events: old.events.filter((item) => item.id !== id) } : old,
+      );
+    },
+    [invalidateRead],
+  );
   const connect = useCallback(async () => {
     const { authorizationUrl } = await api.connectGoogle();
     const url = googleAuthorizationUrl(authorizationUrl);
@@ -118,5 +182,17 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
     setResult(null);
     setError('');
   }, []);
-  return { status, result, loading, error, setRange, refresh, connect, disconnect, refreshStatus };
+  return {
+    status,
+    result,
+    loading,
+    error,
+    setRange,
+    refresh,
+    connect,
+    disconnect,
+    refreshStatus,
+    upsertEvent,
+    removeEvent,
+  };
 }

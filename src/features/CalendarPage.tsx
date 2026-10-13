@@ -164,7 +164,6 @@ export function CalendarPage({
   onOpenSettings,
 }: CalendarPageProps) {
   const [selectedDate, setSelectedDate] = useState(today);
-  const [creationSource, setCreationSource] = useState<'ritm' | 'google'>('ritm');
   const googleConnected = googleStatus?.status === 'connected';
   const sourceAvailable = googleConnected && Boolean(onGoogleCreate);
   const rangeCallback = useRef(onRangeChange);
@@ -173,9 +172,6 @@ export function CalendarPage({
   useEffect(() => {
     rangeCallback.current = onRangeChange;
   }, [onRangeChange]);
-  useEffect(() => {
-    if (!sourceAvailable) setCreationSource('ritm');
-  }, [sourceAvailable]);
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches,
   );
@@ -258,7 +254,7 @@ export function CalendarPage({
 
   function addEntry(date: string, time: string | null = null, duration = 60) {
     const boundedDuration = time ? Math.min(duration, 1440 - timeMinutes(time)) : duration;
-    if (creationSource === 'google' && sourceAvailable)
+    if (sourceAvailable)
       onGoogleCreate?.({ date, time, duration: boundedDuration, allDay: time === null });
     else onCreate({ date, time, duration: boundedDuration, kind: 'event' });
   }
@@ -341,32 +337,6 @@ export function CalendarPage({
         </div>
       </div>
 
-      {sourceAvailable ? (
-        <div
-          className="cal-create-destination"
-          role="group"
-          aria-label="Куда добавить новую запись"
-        >
-          <span>Новая запись:</span>
-          <button
-            type="button"
-            className={creationSource === 'ritm' ? 'cal-destination-active' : ''}
-            aria-pressed={creationSource === 'ritm'}
-            onClick={() => setCreationSource('ritm')}
-          >
-            Ritm
-          </button>
-          <button
-            type="button"
-            className={creationSource === 'google' ? 'cal-destination-active' : ''}
-            aria-pressed={creationSource === 'google'}
-            onClick={() => setCreationSource('google')}
-          >
-            Google Calendar
-          </button>
-        </div>
-      ) : null}
-
       {googleStatus || googleLoading || googleError ? (
         <div
           className={`cal-google-status ${googleError || googlePartial || googleStatus?.status === 'reauth_required' ? 'cal-google-status-warning' : ''}`}
@@ -390,7 +360,7 @@ export function CalendarPage({
                     : googlePartial
                       ? 'Загружена часть событий Google'
                       : googleConnected
-                        ? 'Основной календарь Google'
+                        ? 'Календарь синхронизирован'
                         : 'Google Calendar пока не подключён'}
             </strong>
             <span>
@@ -399,15 +369,18 @@ export function CalendarPage({
                 : googlePartial
                   ? 'Часть событий не загружена. Свободное время нужно уточнить в Google Calendar.'
                   : googleLoading
-                    ? 'Обновляем выбранный период. План Ritm остаётся доступен.'
+                    ? 'Обновляем выбранный период и синхронизируем записи.'
                     : googleStatus?.status === 'reauth_required'
                       ? 'Разрешение нужно обновить в настройках.'
                       : googleConnected
-                        ? 'События Google и задачи Ritm в одном расписании.'
-                        : 'Подключи его в настройках, чтобы видеть встречи рядом со своим планом.'}
+                        ? 'Изменения сохраняются в Google Calendar. Расписание обновляется автоматически.'
+                        : 'Подключи Google Calendar в настройках, чтобы работать с единым расписанием.'}
             </span>
             {fetchedLabel ? (
-              <small className="cal-google-updated">Последнее обновление: {fetchedLabel}</small>
+              <small className="cal-google-updated">
+                Последнее обновление:{' '}
+                <time dateTime={googleFetchedAt ?? undefined}>{fetchedLabel}</time>
+              </small>
             ) : null}
           </div>
           <div className="cal-google-status-actions">
@@ -686,18 +659,7 @@ export function CalendarPage({
             </div>
           </div>
           <footer className="cal-calendar-foot">
-            <span>
-              <i className="cal-legend-task" />
-              Задачи
-              <i className="cal-legend-event" />
-              События Ritm
-              {googleConnected || googleEvents.length ? (
-                <>
-                  <i className="cal-legend-google" />
-                  Google Calendar
-                </>
-              ) : null}
-            </span>
+            <span>Одно расписание · Google Calendar</span>
             <span>Выбери свободный интервал, чтобы добавить запись</span>
           </footer>
         </section>
@@ -726,12 +688,12 @@ export function CalendarPage({
                 Оставь немного времени для себя.
               </>
             ) : uncertainGoogle ? (
-              'План Ritm доступен. События Google ещё нужно уточнить.'
+              'Обновляем расписание. Дождись синхронизации.'
             ) : (
               'Пока всё свободно. Начни с одного важного дела.'
             )}
           </p>
-          <small>Повторяющаяся запись редактируется целой серией.</small>
+          <small>При редактировании повторения изменится только выбранная запись.</small>
         </section>
         <section className="panel cal-backlog">
           <div className="cal-section-head">

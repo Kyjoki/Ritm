@@ -19,6 +19,7 @@ import type {
   Conversation,
   GoogleCalendarEvent,
   GoogleEventInput,
+  GoogleTransferResult,
   Settings,
   Task,
   TaskInput,
@@ -62,6 +63,12 @@ export default function App() {
     event?: GoogleCalendarEvent;
     draft?: Partial<GoogleEventInput>;
   } | null>(null);
+  const transferRequests = useRef(new Map<string, Promise<GoogleTransferResult>>());
+  const failedTransfers = useRef(new Set<string>());
+  const migrationRunning = useRef(false);
+  const [migrationLoading, setMigrationLoading] = useState(false);
+  const [migrationError, setMigrationError] = useState('');
+  const [migrationRevision, setMigrationRevision] = useState(0);
   const [toast, setToast] = useState<Toast | null>(null),
     [undoBusy, setUndoBusy] = useState(false),
     [busyIds, setBusyIds] = useState<Set<string>>(new Set());
@@ -118,6 +125,9 @@ export default function App() {
       setTaskDialog(null);
       setGoogleDialog(null);
       setToast(null);
+      failedTransfers.current.clear();
+      setMigrationLoading(false);
+      setMigrationError('');
     };
     window.addEventListener('ritm:auth-required', expired);
     return () => window.removeEventListener('ritm:auth-required', expired);
@@ -174,6 +184,84 @@ export default function App() {
     data?.settings.timeZone ?? 'Asia/Qyzylorda',
     today,
   );
+  const synchronizeTask = useCallback(
+    (id: string) => {
+      const pending = transferRequests.current.get(id);
+      if (pending) return pending;
+      const generation = loadGeneration.current;
+      const request = api
+        .transferTaskToGoogle(id)
+        .then((result) => {
+          if (generation === loadGeneration.current) {
+            setData((old) =>
+              old
+                ? {
+                    ...old,
+                    tasks: old.tasks.filter((task) => task.id !== result.transferredTaskId),
+                  }
+                : old,
+            );
+            google.upsertEvent(result.event);
+            google.refresh();
+          }
+          return result;
+        })
+        .finally(() => transferRequests.current.delete(id));
+      transferRequests.current.set(id, request);
+      return request;
+    },
+    [google.upsertEvent, google.refresh],
+  );
+  useEffect(() => {
+    if (!data || google.status.status !== 'connected' || migrationRunning.current) return;
+    const records = data.tasks.filter(
+      (task) =>
+        task.date &&
+        !task.completed &&
+        !task.completedDates.length &&
+        !failedTransfers.current.has(task.id),
+    );
+    if (!records.length) return;
+    const generation = loadGeneration.current;
+    migrationRunning.current = true;
+    setMigrationLoading(true);
+    setMigrationError('');
+    void (async () => {
+      for (const [index, task] of records.entries()) {
+        if (generation !== loadGeneration.current) break;
+        try {
+          await synchronizeTask(task.id);
+        } catch (failure) {
+          if (generation !== loadGeneration.current) break;
+          failedTransfers.current.add(task.id);
+          setMigrationError(
+            failure instanceof Error
+              ? failure.message
+              : 'Не удалось синхронизировать запись. Нажми «Обновить», чтобы повторить.',
+          );
+          // Pause the whole batch during an outage/auth/rate failure; retry explicitly.
+          if (
+            !(failure instanceof ApiError) ||
+            failure.status === 0 ||
+            failure.status === 401 ||
+            failure.status === 403 ||
+            failure.status === 429 ||
+            failure.status >= 500
+          ) {
+            for (const remaining of records.slice(index + 1))
+              failedTransfers.current.add(remaining.id);
+            break;
+          }
+        }
+      }
+    })().finally(() => {
+      migrationRunning.current = false;
+      if (generation === loadGeneration.current) {
+        setMigrationLoading(false);
+      }
+      setMigrationRevision((value) => value + 1);
+    });
+  }, [data, google.status.status, synchronizeTask, migrationRevision]);
   useEffect(() => {
     if (page !== 'calendar') google.setRange(today, addDays(today, 1));
   }, [page, today, google.setRange]);
@@ -288,9 +376,17 @@ export default function App() {
         : old,
     );
   const saveTask = async (value: TaskInput, id?: string) => {
+    if (value.date && google.status.status !== 'connected')
+      throw new Error('Подключи Google Calendar в настройках, чтобы назначить дату записи.');
     const task = id ? await api.updateTask(id, value) : await api.createTask(value);
     putTask(task);
-    notify(id ? 'Изменения сохранены' : 'Задача добавлена');
+    notify(
+      value.date
+        ? 'Синхронизируем запись с календарём'
+        : id
+          ? 'Изменения сохранены'
+          : 'Задача добавлена',
+    );
   };
   const deleteTask = async (task: Task) => {
     const result = await api.deleteTask(task.id);
@@ -345,6 +441,9 @@ export default function App() {
     setToast(null);
     setTaskDialog(null);
     setGoogleDialog(null);
+    failedTransfers.current.clear();
+    setMigrationLoading(false);
+    setMigrationError('');
   };
   const themeToggle = async () => {
     if (!data) return;
@@ -470,6 +569,8 @@ export default function App() {
               tasks={data.tasks}
               googleEvents={google.result?.events ?? []}
               googleUncertain={
+                migrationLoading ||
+                Boolean(migrationError) ||
                 Boolean(google.error) ||
                 google.status.status === 'reauth_required' ||
                 (google.status.status === 'connected' &&
@@ -483,8 +584,33 @@ export default function App() {
               today={today}
               now={now}
               busyIds={busyIds}
-              onEdit={(task) => setTaskDialog({ task })}
-              onCreate={(draft) => setTaskDialog({ draft })}
+              onEdit={(task) => {
+                if (
+                  task.date &&
+                  !task.completed &&
+                  !task.completedDates.length &&
+                  google.status.status === 'connected'
+                )
+                  void synchronizeTask(task.id)
+                    .then((result) => setGoogleDialog({ event: result.event }))
+                    .catch(handleError);
+                else setTaskDialog({ task });
+              }}
+              onCreate={(draft) => {
+                if (google.status.status !== 'connected') {
+                  notify('Подключи Google Calendar в настройках, чтобы добавить запись.', true);
+                  go('settings');
+                  return;
+                }
+                setGoogleDialog({
+                  draft: {
+                    date: draft?.date ?? today,
+                    time: draft?.time === null ? null : (draft?.time ?? '09:00'),
+                    allDay: draft?.time === null,
+                    duration: draft?.duration ?? 30,
+                  },
+                });
+              }}
               onToggle={(task, date, completed) => void toggleTask(task, date, completed)}
               onAI={ai}
               onCalendar={() => go('calendar')}
@@ -492,21 +618,29 @@ export default function App() {
           ) : null}
           <Activity mode={page === 'calendar' ? 'visible' : 'hidden'}>
             <CalendarPage
-              tasks={data.tasks}
+              tasks={data.tasks.filter((task) => !task.date)}
               today={today}
               timeZone={data.settings.timeZone}
               onEdit={(task) => setTaskDialog({ task })}
-              onCreate={(draft) => setTaskDialog({ draft })}
+              onCreate={() => {
+                notify('Подключи Google Calendar в настройках, чтобы добавить запись.', true);
+                go('settings');
+              }}
               googleStatus={google.status}
               googleEvents={google.result?.events ?? []}
-              googleLoading={google.loading}
-              googleError={google.error}
+              googleLoading={google.loading || migrationLoading}
+              googleError={google.error || migrationError}
               googlePartial={google.result?.partial ?? false}
               googleFetchedAt={google.result?.fetchedAt ?? null}
               onGoogleEdit={(event) => setGoogleDialog({ event })}
               onGoogleCreate={(draft) => setGoogleDialog({ draft })}
               onRangeChange={google.setRange}
-              onGoogleRefresh={google.refresh}
+              onGoogleRefresh={() => {
+                failedTransfers.current.clear();
+                setMigrationError('');
+                setMigrationRevision((value) => value + 1);
+                google.refresh();
+              }}
               onOpenSettings={() => go('settings')}
             />
           </Activity>
@@ -628,10 +762,18 @@ export default function App() {
             google.refresh();
           }}
           onSave={async (input, requestId, event) => {
-            if (event) await api.updateGoogleEvent(event.id, input, event.etag);
-            else await api.createGoogleEvent(input, requestId);
+            const saved = event
+              ? await api.updateGoogleEvent(event.id, input, event.etag)
+              : await api.createGoogleEvent(input, requestId);
+            google.upsertEvent(saved);
             google.refresh();
-            notify(event ? 'Событие Google обновлено' : 'Событие добавлено в Google Calendar');
+            notify(event ? 'Изменения синхронизированы' : 'Запись добавлена в календарь');
+          }}
+          onDelete={async (event) => {
+            await api.deleteGoogleEvent(event.id, event.etag);
+            google.removeEvent(event.id);
+            google.refresh();
+            notify('Запись удалена из календаря');
           }}
         />
       ) : null}
