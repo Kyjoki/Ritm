@@ -184,6 +184,8 @@ export function CalendarPage({
   useEffect(() => {
     const media = window.matchMedia('(max-width: 760px)');
     const listener = () => setIsMobile(media.matches);
+    // Activity pauses listeners while hidden; reconcile the current viewport on return.
+    listener();
     media.addEventListener('change', listener);
     return () => media.removeEventListener('change', listener);
   }, []);
