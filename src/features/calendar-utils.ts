@@ -16,6 +16,11 @@ export function isTimedOccurrence(
 }
 
 const DAY = 86_400_000;
+const recordPlural = new Intl.PluralRules('ru-RU');
+export function recordWord(count: number): string {
+  const category = recordPlural.select(count);
+  return category === 'one' ? 'запись' : category === 'few' ? 'записи' : 'записей';
+}
 
 export function parseDate(date: string): Date {
   return new Date(`${date}T12:00:00Z`);

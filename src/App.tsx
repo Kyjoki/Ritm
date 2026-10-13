@@ -573,15 +573,21 @@ export default function App() {
               tasks={data.tasks}
               googleEvents={google.result?.events ?? []}
               googleUncertain={
+                google.checkingStatus ||
                 migrationLoading ||
                 Boolean(migrationError) ||
                 Boolean(google.error) ||
                 google.status.status === 'reauth_required' ||
                 (google.status.status === 'connected' &&
-                  (google.loading ||
+                  ((google.loading && !google.result) ||
                     Boolean(google.error) ||
                     !google.result ||
                     google.result.partial))
+              }
+              googlePending={
+                google.checkingStatus ||
+                migrationLoading ||
+                (google.status.status === 'connected' && !google.result && !google.error)
               }
               onGoogleEdit={(event) => setGoogleDialog({ event })}
               settings={data.settings}
@@ -632,7 +638,7 @@ export default function App() {
               }}
               googleStatus={google.status}
               googleEvents={google.result?.events ?? []}
-              googleLoading={google.loading || migrationLoading}
+              googleLoading={google.checkingStatus || google.loading || migrationLoading}
               googleError={google.error || migrationError}
               googlePartial={google.result?.partial ?? false}
               googleFetchedAt={google.result?.fetchedAt ?? null}

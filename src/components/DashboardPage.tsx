@@ -7,10 +7,12 @@ import {
   CirclePlus,
   Clock3,
   ListTodo,
+  LoaderCircle,
+  CircleAlert,
   Sparkles,
 } from 'lucide-react';
 import type { GoogleCalendarEvent, Settings, Task, TaskInput } from '../../shared/types';
-import { getDayOccurrences } from '../features/calendar-utils';
+import { getDayOccurrences, recordWord } from '../features/calendar-utils';
 import { calendarOccurrences, type CalendarOccurrence } from '../features/google-occurrences';
 import { durationText, formatDate, formatTime, greeting } from '../lib/date';
 import { calendarEntryStyle } from '../lib/calendar-colors';
@@ -20,6 +22,7 @@ interface Props {
   tasks: Task[];
   googleEvents: GoogleCalendarEvent[];
   googleUncertain: boolean;
+  googlePending: boolean;
   onGoogleEdit: (event: GoogleCalendarEvent) => void;
   settings: Settings;
   today: string;
@@ -35,6 +38,7 @@ export function DashboardPage({
   tasks,
   googleEvents,
   googleUncertain,
+  googlePending,
   onGoogleEdit,
   settings,
   today,
@@ -52,6 +56,7 @@ export function DashboardPage({
   );
   const completed = todayEntries.filter((t) => t.completed).length;
   const combined = calendarOccurrences(tasks, googleEvents, today, settings.timeZone);
+  const waitingForPlan = googlePending && !combined.length;
   const timed = combined.filter(
     (o): o is CalendarOccurrence & { start: number; end: number } =>
       o.start !== null && o.end !== null,
@@ -117,9 +122,27 @@ export function DashboardPage({
             </div>
             <div>
               <strong>
-                {googleEvents.length ? combined.length : `${completed} из ${todayEntries.length}`}
+                {waitingForPlan
+                  ? '…'
+                  : googleEvents.length
+                    ? combined.length
+                    : todayEntries.length
+                      ? `${completed} из ${todayEntries.length}`
+                      : googleUncertain
+                        ? '—'
+                        : 'Нет записей'}
               </strong>
-              <span>{googleEvents.length ? 'записей в календаре' : 'задач выполнено'}</span>
+              <span>
+                {waitingForPlan
+                  ? 'Уточняем план'
+                  : googleEvents.length
+                    ? `${recordWord(combined.length)} в календаре`
+                    : todayEntries.length
+                      ? 'задач выполнено'
+                      : googleUncertain
+                        ? 'Расписание не проверено'
+                        : 'на сегодня'}
+              </span>
             </div>
           </div>
           <p className="card-footnote">
@@ -144,7 +167,13 @@ export function DashboardPage({
                 : 'Ближайшее событие'}
           </span>
           <strong className="focus-time">
-            {upcoming ? formatTime(upcoming.start) : 'Без спешки'}
+            {upcoming
+              ? formatTime(upcoming.start)
+              : waitingForPlan
+                ? 'Проверяем…'
+                : googleUncertain
+                  ? 'Нет данных'
+                  : 'Без спешки'}
           </strong>
           <span className="focus-name">
             {upcoming?.title ??
@@ -179,7 +208,13 @@ export function DashboardPage({
         <div className="panel tasks-panel">
           <div className="section-heading">
             <h2>План на сегодня</h2>
-            <span>{combined.length} в плане</span>
+            <span>
+              {waitingForPlan
+                ? 'Загружаем…'
+                : googleUncertain && !combined.length
+                  ? 'Не проверено'
+                  : `${combined.length} ${recordWord(combined.length)} в плане`}
+            </span>
           </div>
           {combined.length ? (
             <div className="today-list">
@@ -241,6 +276,25 @@ export function DashboardPage({
                 );
               })}
             </div>
+          ) : googleUncertain ? (
+            <div className="empty-inline" role={waitingForPlan ? 'status' : undefined}>
+              {waitingForPlan ? (
+                <LoaderCircle size={28} className="spinning" aria-hidden="true" />
+              ) : (
+                <CircleAlert size={28} aria-hidden="true" />
+              )}
+              <h3>{waitingForPlan ? 'Загружаем расписание' : 'Расписание пока недоступно'}</h3>
+              <p>
+                {waitingForPlan
+                  ? 'Проверяем записи Google Calendar.'
+                  : 'Открой календарь, чтобы проверить подключение и обновить записи.'}
+              </p>
+              {!waitingForPlan ? (
+                <button className="text-button" onClick={onCalendar}>
+                  Открыть календарь
+                </button>
+              ) : null}
+            </div>
           ) : (
             <div className="empty-inline">
               <CheckCheck size={32} />
@@ -291,7 +345,7 @@ export function DashboardPage({
           ) : (
             <div className="empty-schedule">
               <CalendarDays size={26} />
-              <p>Свободное расписание</p>
+              <p>{googleUncertain ? 'Уточняем расписание' : 'Свободное расписание'}</p>
               <button
                 className="text-button"
                 onClick={() => onAI('Найди свободное время в моём расписании на сегодня.')}

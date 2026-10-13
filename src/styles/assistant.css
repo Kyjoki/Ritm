@@ -387,6 +387,40 @@
   font-size: 13px;
   color: var(--text);
 }
+.assistant-message-copy {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 9px;
+}
+.assistant-message-copy > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.assistant-message-copy > button:hover {
+  background: var(--soft);
+  color: var(--accent);
+}
+.assistant-message-copy > button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.assistant-copy-error {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
 .assistant-message--pending > small {
   display: block;
   color: var(--muted);
@@ -976,7 +1010,7 @@
     max-height: 240px;
   }
   .assistant-chat.panel {
-    min-height: 600px;
+    min-height: 0;
     height: calc(100dvh - 220px);
   }
   .assistant-welcome-prompts {
@@ -1016,7 +1050,7 @@
     min-height: 44px;
   }
   .assistant-chat.panel {
-    min-height: 620px;
+    min-height: 0;
     height: calc(100dvh - 255px);
     border-radius: 17px;
   }
@@ -1122,6 +1156,10 @@
   .assistant-message-text {
     font-size: 13px;
   }
+  .assistant-message-copy > button {
+    min-height: 44px;
+    font-size: 12px;
+  }
   .assistant-proposals {
     padding: 12px;
     border-radius: 13px;
@@ -1186,6 +1224,31 @@
   .assistant-page-error > button {
     min-height: 44px;
     width: 44px;
+  }
+}
+@media (max-width: 760px) {
+  .assistant-page {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - 144px - env(safe-area-inset-bottom));
+  }
+  .assistant-page > :not(.assistant-layout) {
+    flex-shrink: 0;
+  }
+  .assistant-layout {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    flex: 1;
+    min-height: 0;
+  }
+  .assistant-history.panel {
+    flex: none;
+  }
+  .assistant-chat.panel {
+    flex: 1;
+    min-height: 280px;
+    height: auto;
   }
 }
 @media (prefers-reduced-motion: reduce) {

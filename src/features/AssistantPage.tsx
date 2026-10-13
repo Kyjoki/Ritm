@@ -7,6 +7,7 @@ import {
   CheckCheck,
   ChevronDown,
   Clock3,
+  Copy,
   History,
   LoaderCircle,
   MessageSquare,
@@ -55,6 +56,12 @@ interface SendRequest {
   error?: string;
 }
 
+interface ComposerFocusRequest {
+  requestId: string;
+  conversationId: string | undefined;
+  pageHash: string;
+}
+
 const prompts = [
   { title: 'Что у меня сегодня?', subtitle: 'Собрать дела в один план', icon: CalendarDays },
   { title: 'Спланируй неделю', subtitle: 'Оставить место для отдыха', icon: Clock3 },
@@ -95,6 +102,77 @@ const proposalStatus: Record<ScheduleProposal['status'], string> = {
   rejected: 'Отклонено',
   undone: 'Изменение отменено',
 };
+
+function MessageCopyButton({ message }: { message: ChatMessage }) {
+  const [status, setStatus] = useState<'idle' | 'copied' | 'error'>('idle');
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyAttempt = useRef(0);
+
+  useEffect(() => {
+    setStatus('idle');
+    return () => {
+      copyAttempt.current += 1;
+      if (resetTimer.current) clearTimeout(resetTimer.current);
+    };
+  }, []);
+
+  async function copyAnswer() {
+    const attempt = ++copyAttempt.current;
+    if (resetTimer.current) clearTimeout(resetTimer.current);
+    const steps = message.steps.length
+      ? `Понятные шаги\n${message.steps.map((step, index) => `${index + 1}. ${step}`).join('\n')}`
+      : '';
+    const proposals = message.proposals.length
+      ? `Предлагаемые изменения\n${message.proposals
+          .map((proposal) => {
+            const before = formatSchedule(proposal.before);
+            const after = formatSchedule(proposal.after);
+            return [
+              `${proposal.title} — ${proposalStatus[proposal.status]}`,
+              `Было: ${before.date}, ${before.time}, ${before.duration}`,
+              `Станет: ${after.date}, ${after.time}, ${after.duration}`,
+              proposal.reason,
+            ]
+              .filter(Boolean)
+              .join('\n');
+          })
+          .join('\n\n')}`
+      : '';
+    try {
+      await navigator.clipboard.writeText(
+        [message.text, steps, proposals].filter(Boolean).join('\n\n'),
+      );
+      if (copyAttempt.current !== attempt) return;
+      setStatus('copied');
+      resetTimer.current = setTimeout(() => setStatus('idle'), 3000);
+    } catch {
+      if (copyAttempt.current === attempt) setStatus('error');
+    }
+  }
+
+  return (
+    <div className="assistant-message-copy">
+      <button type="button" onClick={() => void copyAnswer()}>
+        {status === 'copied' ? (
+          <Check size={14} aria-hidden="true" />
+        ) : (
+          <Copy size={14} aria-hidden="true" />
+        )}
+        {status === 'copied' ? 'Скопировано' : 'Копировать ответ'}
+      </button>
+      <span
+        role="status"
+        className={status === 'error' ? 'assistant-copy-error' : 'assistant-sr-only'}
+      >
+        {status === 'copied'
+          ? 'Ответ скопирован'
+          : status === 'error'
+            ? 'Не удалось скопировать. Выделите текст и скопируйте вручную.'
+            : ''}
+      </span>
+    </div>
+  );
+}
 
 interface ProposalCardProps {
   conversationId: string;
@@ -375,6 +453,8 @@ export function AssistantPage({
   const deleteLock = useRef(false);
   const nearBottom = useRef(true);
   const consumedPrompt = useRef('');
+  const composerFocusRequest = useRef<ComposerFocusRequest | null>(null);
+  const focusAfterHistory = useRef(false);
   const conversation = conversations.find((item) => item.id === selectedId);
   const messages = conversation?.messages ?? [];
   const sending = request?.status === 'sending';
@@ -383,6 +463,64 @@ export function AssistantPage({
   const orderedConversations = [...conversations].sort((a, b) =>
     b.updatedAt.localeCompare(a.updatedAt),
   );
+
+  useEffect(() => {
+    // Activity also cleans up effects when the page is hidden.
+    return () => {
+      composerFocusRequest.current = null;
+      focusAfterHistory.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!sending || !composerFocusRequest.current) return;
+    const cancelFocus = () => {
+      composerFocusRequest.current = null;
+    };
+    const trackFocus = (event: FocusEvent) => {
+      if (event.target !== inputRef.current && event.target !== document.body) cancelFocus();
+    };
+    const trackKey = (event: globalThis.KeyboardEvent) => {
+      if (event.target !== inputRef.current || event.key !== 'Enter') cancelFocus();
+    };
+    document.addEventListener('focusin', trackFocus);
+    document.addEventListener('pointerdown', cancelFocus);
+    document.addEventListener('keydown', trackKey);
+    document.addEventListener('visibilitychange', cancelFocus);
+    window.addEventListener('hashchange', cancelFocus);
+    return () => {
+      document.removeEventListener('focusin', trackFocus);
+      document.removeEventListener('pointerdown', cancelFocus);
+      document.removeEventListener('keydown', trackKey);
+      document.removeEventListener('visibilitychange', cancelFocus);
+      window.removeEventListener('hashchange', cancelFocus);
+    };
+  }, [sending]);
+
+  useEffect(() => {
+    const pendingFocus = composerFocusRequest.current;
+    if (sending || !pendingFocus) return;
+    composerFocusRequest.current = null;
+    const input = inputRef.current;
+    if (
+      pendingFocus.conversationId === selectedId &&
+      pendingFocus.pageHash === window.location.hash &&
+      document.visibilityState === 'visible' &&
+      input &&
+      !input.disabled &&
+      input.getClientRects().length > 0 &&
+      (document.activeElement === document.body || document.activeElement === input)
+    )
+      input.focus({ preventScroll: true });
+  }, [sending, selectedId]);
+
+  useEffect(() => {
+    if (historyOpen || !focusAfterHistory.current) return;
+    focusAfterHistory.current = false;
+    const input = inputRef.current;
+    if (input && !input.disabled && input.getClientRects().length > 0)
+      input.focus({ preventScroll: true });
+  }, [historyOpen, selectedId]);
 
   useEffect(() => {
     if (deleteTarget) deleteCancelRef.current?.focus();
@@ -423,6 +561,7 @@ export function AssistantPage({
 
   function chooseConversation(id: string) {
     if (sending) return;
+    focusAfterHistory.current = historyOpen && window.matchMedia('(max-width: 800px)').matches;
     setSelectedId(id);
     setHistoryOpen(false);
     setPageError('');
@@ -499,6 +638,14 @@ export function AssistantPage({
           requestId: crypto.randomUUID(),
           status: 'sending',
         };
+    composerFocusRequest.current =
+      document.activeElement === inputRef.current
+        ? {
+            requestId: next.requestId,
+            conversationId: next.conversationId,
+            pageHash: window.location.hash,
+          }
+        : null;
     sendLock.current = true;
     setRequest(next);
     setSelectedId(next.conversationId);
@@ -507,6 +654,8 @@ export function AssistantPage({
     nearBottom.current = true;
     try {
       const result = await onSend(next.conversationId, next.message, next.requestId);
+      if (composerFocusRequest.current?.requestId === next.requestId)
+        composerFocusRequest.current.conversationId = result.id;
       setSelectedId(result.id);
       setRequest(null);
     } catch (error) {
@@ -608,6 +757,7 @@ export function AssistantPage({
                   <button
                     className="assistant-conversation-button"
                     data-conversation-id={item.id}
+                    title={item.title || 'Новый диалог'}
                     aria-current={selectedId === item.id ? 'true' : undefined}
                     type="button"
                     disabled={sending || deleting}
@@ -775,6 +925,7 @@ export function AssistantPage({
                       onUndo={onUndo}
                     />
                   ) : null}
+                  {message.role === 'assistant' ? <MessageCopyButton message={message} /> : null}
                 </article>
               ))}
               {visibleRequest ? (

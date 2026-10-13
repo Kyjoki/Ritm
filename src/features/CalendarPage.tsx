@@ -29,6 +29,7 @@ import {
   parseDate,
   startOfWeek,
   timeMinutes,
+  recordWord,
 } from './calendar-utils';
 import {
   calendarOccurrences,
@@ -252,6 +253,22 @@ export function CalendarPage({
     );
   }
 
+  function showNow() {
+    scrolledPeriodRef.current = `${view}:${today}`;
+    setSelectedDate(today);
+    window.requestAnimationFrame(() =>
+      gridScrollRef.current?.scrollTo({
+        top: Math.max(
+          0,
+          (minutesInZone(timeZone, new Date()) / 60) * HOUR_HEIGHT - HOUR_HEIGHT * 2,
+        ),
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? 'instant'
+          : 'smooth',
+      }),
+    );
+  }
+
   function addEntry(date: string, time: string | null = null, duration = 60) {
     const boundedDuration = time ? Math.min(duration, 1440 - timeMinutes(time)) : duration;
     if (sourceAvailable)
@@ -263,12 +280,13 @@ export function CalendarPage({
     else onEdit(entry.task);
   }
   const uncertainGoogle =
-    googleLoading ||
+    (googleLoading && !googleFetchedAt) ||
     Boolean(googleError) ||
     googlePartial ||
     googleStatus?.status === 'reauth_required' ||
     (googleConnected && !googleFetchedAt);
   const fetchedDate = googleFetchedAt ? new Date(googleFetchedAt) : null;
+  const initialGoogleLoading = googleLoading && !googleFetchedAt;
   const fetchedLabel =
     fetchedDate && Number.isFinite(fetchedDate.getTime())
       ? new Intl.DateTimeFormat('ru-RU', {
@@ -321,6 +339,16 @@ export function CalendarPage({
           >
             Сегодня
           </button>
+          {!isMobile && view !== 'month' ? (
+            <button
+              className="button button-secondary"
+              type="button"
+              onClick={showNow}
+              aria-label="Показать текущее время"
+            >
+              <Clock3 size={15} aria-hidden="true" /> Сейчас
+            </button>
+          ) : null}
         </div>
         <div className="cal-segment" role="group" aria-label="Вид календаря">
           {(Object.keys(VIEW_LABELS) as CalendarView[]).map((value) => (
@@ -340,7 +368,7 @@ export function CalendarPage({
       {googleStatus || googleLoading || googleError ? (
         <div
           className={`cal-google-status ${googleError || googlePartial || googleStatus?.status === 'reauth_required' ? 'cal-google-status-warning' : ''}`}
-          role={googleError ? 'alert' : 'status'}
+          role={googleError ? 'alert' : initialGoogleLoading ? 'status' : undefined}
         >
           {googleLoading ? (
             <LoaderCircle size={18} className="spinning" aria-hidden="true" />
@@ -351,7 +379,7 @@ export function CalendarPage({
           )}
           <div className="cal-google-status-copy">
             <strong>
-              {googleLoading
+              {initialGoogleLoading
                 ? 'Загружаем Google Calendar…'
                 : googleError
                   ? 'Google Calendar требует внимания'
@@ -368,7 +396,7 @@ export function CalendarPage({
                 ? `${googleError} Показанные события могут быть неактуальны.`
                 : googlePartial
                   ? 'Часть событий не загружена. Свободное время нужно уточнить в Google Calendar.'
-                  : googleLoading
+                  : initialGoogleLoading
                     ? 'Обновляем выбранный период и синхронизируем записи.'
                     : googleStatus?.status === 'reauth_required'
                       ? 'Разрешение нужно обновить в настройках.'
@@ -380,6 +408,7 @@ export function CalendarPage({
               <small className="cal-google-updated">
                 Последнее обновление:{' '}
                 <time dateTime={googleFetchedAt ?? undefined}>{fetchedLabel}</time>
+                {googleLoading ? ' · Обновляем…' : ''}
               </small>
             ) : null}
           </div>
@@ -429,9 +458,7 @@ export function CalendarPage({
                 >
                   <span>{parseDate(date).getUTCDate()}</span>
                   <small>
-                    {entries.length
-                      ? `${entries.length} ${entries.length === 1 ? 'запись' : entries.length < 5 ? 'записи' : 'записей'}`
-                      : ''}
+                    {entries.length ? `${entries.length} ${recordWord(entries.length)}` : ''}
                   </small>
                 </button>
                 <div className="cal-month-events">
@@ -453,6 +480,7 @@ export function CalendarPage({
                           type="button"
                           onClick={() => editEntry(entry)}
                           aria-label={occurrenceLabel(entry)}
+                          title={occurrenceLabel(entry)}
                           style={calendarEntryStyle(entry)}
                         >
                           {entry.start === null ? '' : `${entryTime(entry, 'start')} `}
@@ -684,8 +712,9 @@ export function CalendarPage({
             {(view === 'month' ? selectedEntries.length : visibleCount) ? (
               <>
                 {uncertainGoogle ? 'Показано' : 'В плане'}{' '}
-                <strong>{view === 'month' ? selectedEntries.length : visibleCount}</strong> записей.
-                Оставь немного времени для себя.
+                <strong>{view === 'month' ? selectedEntries.length : visibleCount}</strong>{' '}
+                {recordWord(view === 'month' ? selectedEntries.length : visibleCount)}. Оставь
+                немного времени для себя.
               </>
             ) : uncertainGoogle ? (
               'Обновляем расписание. Дождись синхронизации.'

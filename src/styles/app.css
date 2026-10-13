@@ -830,6 +830,8 @@ textarea::placeholder {
   gap: 20px;
 }
 .dialog {
+  --dialog-padding-x: 25px;
+  --dialog-padding-y: 25px;
   padding: 25px;
   border: 1px solid var(--line);
   border-radius: 22px;
@@ -838,6 +840,7 @@ textarea::placeholder {
   width: min(490px, calc(100% - 32px));
   max-height: calc(100dvh - 40px);
   overflow: auto;
+  scroll-padding-block: 95px;
   box-shadow: 0 30px 100px #110e254a;
   animation: dialog-enter 0.2s ease both;
 }
@@ -846,11 +849,17 @@ textarea::placeholder {
   backdrop-filter: blur(5px);
 }
 .dialog-head {
+  position: sticky;
+  top: calc(-1 * var(--dialog-padding-y));
+  z-index: 2;
+  background: var(--panel);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  margin-bottom: 24px;
+  margin: calc(-1 * var(--dialog-padding-y)) calc(-1 * var(--dialog-padding-x)) 24px;
+  padding: 18px var(--dialog-padding-x);
+  border-bottom: 1px solid var(--line);
 }
 .dialog-head .page-eyebrow {
   font-size: 9px;
@@ -866,12 +875,18 @@ textarea::placeholder {
   background: var(--soft);
 }
 .dialog-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  background: var(--panel);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   border-top: 1px solid var(--line);
-  padding-top: 20px;
+  margin-inline: calc(-1 * var(--dialog-padding-x));
+  padding: 16px var(--dialog-padding-x);
+  box-shadow: 0 -7px 14px color-mix(in srgb, var(--panel) 80%, transparent);
 }
 .disclosure {
   background: transparent;
@@ -1486,6 +1501,8 @@ textarea::placeholder {
     background: var(--soft);
   }
   .dialog {
+    --dialog-padding-x: 20px;
+    --dialog-padding-y: 23px;
     position: fixed;
     inset: auto 0 0;
     width: 100%;

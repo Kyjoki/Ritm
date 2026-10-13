@@ -17,6 +17,7 @@ export const unconfiguredGoogle: GoogleCalendarStatus = {
 };
 export function useGoogleCalendar(enabled: boolean, timeZone: string, today: string) {
   const [status, setStatus] = useState<GoogleCalendarStatus>(unconfiguredGoogle);
+  const [statusChecked, setStatusChecked] = useState(false);
   const [result, setResult] = useState<GoogleCalendarResult | null>(null),
     [loading, setLoading] = useState(false),
     [error, setError] = useState('');
@@ -38,6 +39,7 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
   }, []);
   useEffect(() => {
     if (!enabled) {
+      setStatusChecked(false);
       setStatus(unconfiguredGoogle);
       setResult(null);
       setError('');
@@ -54,6 +56,9 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
           setError(
             failure instanceof Error ? failure.message : 'Не удалось проверить подключение Google.',
           );
+      })
+      .finally(() => {
+        if (active) setStatusChecked(true);
       });
     return () => {
       active = false;
@@ -186,6 +191,7 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
     status,
     result,
     loading,
+    checkingStatus: enabled && !statusChecked,
     error,
     setRange,
     refresh,

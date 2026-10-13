@@ -21,9 +21,18 @@ export function Dialog({
     const dialog = ref.current!;
     const previous = document.activeElement as HTMLElement | null;
     dialog.showModal();
+    dialog
+      .querySelector<HTMLElement>(
+        'input:not([type="hidden"]):not([type="radio"]):not([type="checkbox"]):not(:disabled), textarea:not(:disabled), select:not(:disabled)',
+      )
+      ?.focus({ preventScroll: true });
     return () => {
       dialog.close();
-      previous?.focus();
+      const target =
+        previous?.isConnected && previous.getClientRects().length
+          ? previous
+          : document.getElementById('main-content');
+      target?.focus({ preventScroll: true });
     };
   }, []);
   return (
