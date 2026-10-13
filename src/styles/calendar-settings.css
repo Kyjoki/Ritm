@@ -1611,6 +1611,7 @@
 
 /* Seven days stay in one viewport; only the hours scroll inside the timetable. */
 @media (max-width: 760px) {
+  .page-container:has(.cal-mobile-week),
   .cal-mobile-week {
     animation: none;
   }
