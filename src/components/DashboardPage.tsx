@@ -13,6 +13,7 @@ import type { GoogleCalendarEvent, Settings, Task, TaskInput } from '../../share
 import { getDayOccurrences } from '../features/calendar-utils';
 import { calendarOccurrences, type CalendarOccurrence } from '../features/google-occurrences';
 import { durationText, formatDate, formatTime, greeting } from '../lib/date';
+import { calendarEntryStyle } from '../lib/calendar-colors';
 import { Orb } from './Orb';
 
 interface Props {
@@ -242,6 +243,7 @@ export function DashboardPage({
                   <time>{formatTime(o.start)}</time>
                   <button
                     className={`schedule-event${o.completed ? ' is-complete' : ''}`}
+                    style={calendarEntryStyle(o)}
                     onClick={() => openEntry(o)}
                   >
                     <strong>{o.title}</strong>

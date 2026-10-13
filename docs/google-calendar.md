@@ -113,6 +113,19 @@ CRUD задач их не изменяет. Запись выполняется 
 Редактирование сверяет ETag, передаёт If-Match, а конфликт версии возвращает 409.
 [Версии ресурсов](https://developers.google.com/workspace/calendar/api/guides/version-resources).
 
+Личные экземпляры повторяющихся событий редактируются по их собственному ID.
+Форма сообщает, что изменяется только выбранная запись; сервер перед PATCH
+повторно получает именно этот экземпляр. Родительская серия с recurrence
+через этот маршрут не изменяется.
+[Отдельные экземпляры](https://developers.google.com/workspace/calendar/api/guides/recurringevents#modify_or_delete_instances).
+
+Цвет читается из Google colorId и отображается мягким полупрозрачным оттенком.
+В форме можно выбрать один из 11 цветов либо «По умолчанию». Выбранный цвет
+сохраняется в Google; отсутствие colorId в запросе сохраняет прежний цвет,
+а null сбрасывает переопределение. Остальные поля, включая напоминания,
+участников и служебные данные серии, в PATCH не передаются.
+[Частичное изменение](https://developers.google.com/workspace/calendar/api/v3/reference/events/patch).
+
 Первая форма поддерживает личное событие одного дня либо временной интервал
 до 12 часов, завершающийся до полуночи. Время, отсутствующее или повторяющееся
 при переводе часов, отклоняется с понятным сообщением. Сложные многодневные
@@ -139,7 +152,8 @@ CRUD задач их не изменяет. Запись выполняется 
 - `PATCH /api/integrations/google/events/:id` — `{ event, etag }`;
 - `DELETE /api/integrations/google/connection` — локальное отключение.
 
-У `event` поля `title`, `description`, `date`, `time`, `duration`, `allDay`.
+У `event` поля `title`, `description`, `date`, `time`, `duration`, `allDay`,
+необязательный `colorId` (строки 1–11 либо null).
 При `allDay=true` время равно null. Произвольные calendar ID и OAuth endpoints
 не принимаются. Ошибки Google не возвращаются сырыми: они могут содержать
 credential headers, authorization code и тело запроса.

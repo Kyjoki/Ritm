@@ -356,6 +356,27 @@ test('pg-mem: proposals validate whole plan, reject stale state and preserve man
   );
 });
 
+test('pg-mem: event colors survive updates, another repository and restore without changing the schedule', async (t) => {
+  const h = await fixture(t);
+  const created = await h.store.createTask({ ...base, colorId: '9' });
+  await h.store.updateTask(created.id, { colorId: '11' });
+  const other = new PostgresStore(h.pool);
+  const saved = await other.task(created.id);
+  assert.equal(saved.colorId, '11');
+  assert.equal(saved.time, base.time);
+  assert.equal(saved.duration, base.duration);
+  await other.updateTask(created.id, { title: 'Новое название' });
+  assert.equal((await h.store.task(created.id)).colorId, '11');
+  const deleted = await h.store.deleteTask(created.id);
+  const restored = await h.store.restoreTask(deleted);
+  assert.equal(restored.colorId, '11');
+  assert.equal(restored.title, 'Новое название');
+  await h.store.updateTask(created.id, { colorId: null });
+  assert.equal((await other.task(created.id)).colorId, null);
+  await assert.rejects(h.store.updateTask(created.id, { colorId: '99' }));
+  assert.equal((await other.task(created.id)).colorId, null);
+});
+
 test('pg-mem serial rollback fixture: a storage failure rolls back partial proposal writes', async (t) => {
   const h = await fixture(t);
   const one = await h.store.createTask(base);

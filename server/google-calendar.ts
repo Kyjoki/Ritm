@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { performance } from 'node:perf_hooks';
 import { CodeChallengeMethod, OAuth2Client, type Credentials } from 'google-auth-library';
 import { z } from 'zod';
+import { CALENDAR_COLOR_IDS } from '../shared/calendar-colors.ts';
 import type {
   GoogleCalendarEvent,
   GoogleCalendarResult,
@@ -126,6 +127,7 @@ export const googleEventInputSchema = z
     time: timeValue.nullable(),
     duration: z.number().int().min(5).max(720),
     allDay: z.boolean(),
+    colorId: z.enum(CALENDAR_COLOR_IDS).nullable().optional(),
   })
   .strict()
   .refine(
@@ -375,12 +377,14 @@ export function googleZonedInstant(date: string, time: string, timeZone: string)
 }
 
 function eventBody(input: GoogleEventInput, timeZone: string) {
+  const color = input.colorId === undefined ? {} : { colorId: input.colorId };
   if (input.allDay)
     return {
       summary: input.title,
       description: input.description,
       start: { date: input.date },
       end: { date: dateShift(input.date, 1) },
+      ...color,
     };
   const start = googleZonedInstant(input.date, input.time!, timeZone),
     end = start + input.duration * 60_000;
@@ -399,6 +403,7 @@ function eventBody(input: GoogleEventInput, timeZone: string) {
     description: input.description,
     start: { dateTime: new Date(start).toISOString(), timeZone },
     end: { dateTime: new Date(end).toISOString(), timeZone },
+    ...color,
   };
 }
 
@@ -407,6 +412,7 @@ const eventSchema = z
     id: googleEventIdSchema,
     etag: z.string().max(256),
     summary: z.string().optional(),
+    colorId: z.string().max(64).optional(),
     description: z.string().optional(),
     status: z.string().optional(),
     start: z.object({
@@ -423,7 +429,7 @@ const eventSchema = z
     organizer: z.object({ self: z.boolean().optional() }).optional(),
     attendees: z.array(z.object({ self: z.boolean().optional() })).optional(),
     recurrence: z.array(z.string()).optional(),
-    recurringEventId: z.string().max(1024).optional(),
+    recurringEventId: z.string().min(1).max(1024).optional(),
   })
   .passthrough();
 
@@ -492,18 +498,24 @@ export function mapGoogleEvent(
   }
   const title = event.summary?.trim() || 'Событие без названия',
     description = event.description ?? '';
-  const readOnly =
-    !['writer', 'owner'].includes(accessRole) ||
-    Boolean(event.locked) ||
-    !representable ||
-    (event.eventType !== undefined && event.eventType !== 'default') ||
-    event.organizer?.self === false ||
-    Boolean(event.attendees?.some((attendee) => attendee.self !== true)) ||
-    Boolean(event.recurrence?.length) ||
-    Boolean(event.recurringEventId) ||
-    title.length > 160 ||
-    description.length > 4000 ||
-    !googleEtagSchema.safeParse(event.etag).success;
+  const readOnlyReason = !['writer', 'owner'].includes(accessRole)
+    ? 'В этом календаре доступно только чтение. Измените событие в Google Calendar.'
+    : event.locked
+      ? 'Google заблокировал изменение этой записи. Откройте её в Google Calendar.'
+      : !representable
+        ? 'Событие занимает несколько дней, имеет сложное время или связано с переводом часов. Измените его в Google Calendar.'
+        : event.eventType !== undefined && event.eventType !== 'default'
+          ? 'Это специальное событие Google. Измените его в Google Calendar.'
+          : event.organizer?.self === false ||
+              event.attendees?.some((attendee) => attendee.self !== true)
+            ? 'У встречи есть другие участники или организатор. Измените её в Google Calendar.'
+            : event.recurrence !== undefined
+              ? 'Это вся повторяющаяся серия. В Ritm можно изменить отдельную запись, а серию — в Google Calendar.'
+              : title.length > 160 || description.length > 4000
+                ? 'У события длинное название или описание. Измените его в Google Calendar.'
+                : !googleEtagSchema.safeParse(event.etag).success
+                  ? 'Не удалось определить версию события. Обновите календарь перед изменением.'
+                  : undefined;
   return {
     id: event.id,
     source: 'google',
@@ -516,7 +528,10 @@ export function mapGoogleEvent(
     timeZone,
     allDay,
     busy: event.transparency !== 'transparent',
-    readOnly,
+    readOnly: Boolean(readOnlyReason),
+    recurring: Boolean(event.recurringEventId || event.recurrence !== undefined),
+    ...(event.colorId ? { colorId: event.colorId } : {}),
+    ...(readOnlyReason ? { readOnlyReason } : {}),
   };
 }
 
@@ -1067,7 +1082,7 @@ export class GoogleCalendarService {
           timeZone: input.timeZone,
           maxResults: 250,
           fields:
-            'items(id,summary,description,etag,status,start,end,transparency,locked,eventType,organizer(self),attendees(self),recurrence,recurringEventId),nextPageToken,accessRole',
+            'items(id,summary,description,colorId,etag,status,start,end,transparency,locked,eventType,organizer(self),attendees(self),recurrence,recurringEventId),nextPageToken,accessRole',
           ...(pageToken ? { pageToken } : {}),
         },
       });
@@ -1180,11 +1195,17 @@ export class GoogleCalendarService {
         'GOOGLE_EVENT_NOT_FOUND',
         'Событие Google удалено. Обновите календарь.',
       );
+    if (original.id !== eventId)
+      throw new AppError(
+        502,
+        'GOOGLE_INVALID_EVENT',
+        'Google вернул другую запись. Обновите календарь перед изменением.',
+      );
     if (original.readOnly)
       throw new AppError(
         403,
         'GOOGLE_EVENT_READ_ONLY',
-        'Это событие изменяется в Google Calendar: встреча с участниками, специальное или сложное событие.',
+        original.readOnlyReason || 'Это событие изменяется в Google Calendar.',
       );
     if (original.etag !== version)
       throw conflict('Событие Google изменилось. Обновите календарь перед сохранением.');
@@ -1196,7 +1217,7 @@ export class GoogleCalendarService {
       query: { sendUpdates: 'none' },
     });
     const event = mapGoogleEvent(data, settings.timeZone);
-    if (!event)
+    if (!event || event.id !== eventId)
       throw new AppError(
         502,
         'GOOGLE_INVALID_EVENT',

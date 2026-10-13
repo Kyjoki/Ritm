@@ -13,6 +13,7 @@ export interface TaskInput {
   repeat: Repeat;
   kind: TaskKind;
   completed: boolean;
+  colorId?: string | null;
 }
 export interface Task extends TaskInput {
   id: string;
@@ -113,6 +114,9 @@ export interface GoogleCalendarEvent {
   allDay: boolean;
   busy: boolean;
   readOnly: boolean;
+  colorId?: string;
+  recurring?: boolean;
+  readOnlyReason?: string;
 }
 export interface GoogleCalendarResult {
   events: GoogleCalendarEvent[];
@@ -129,4 +133,5 @@ export interface GoogleEventInput {
   time: string | null;
   duration: number;
   allDay: boolean;
+  colorId?: string | null;
 }

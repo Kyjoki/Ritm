@@ -2,13 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Credentials } from 'google-auth-library';
-import type { GoogleEventInput } from '../shared/types.ts';
+import type { GoogleEventInput, Settings } from '../shared/types.ts';
+import { CALENDAR_COLOR_IDS } from '../shared/calendar-colors.ts';
 import { AppError } from '../server/errors.ts';
 import { defaultSettings } from '../server/store.ts';
 import {
   createGoogleCalendarService,
   GOOGLE_CALLBACK_PATH,
   GOOGLE_CALENDAR_SCOPE,
+  googleEventInputSchema,
   googleZonedInstant,
   mapGoogleEvent,
   type GoogleRequest,
@@ -71,7 +73,11 @@ class MemorySecrets implements GoogleSecretStorage {
     if (this.leases.get(name) === token) this.leases.delete(name);
   }
 }
-function fixture(overrides: Partial<GoogleTransport> = {}, env: NodeJS.ProcessEnv = environment) {
+function fixture(
+  overrides: Partial<GoogleTransport> = {},
+  env: NodeJS.ProcessEnv = environment,
+  settings: Settings = defaultSettings,
+) {
   const secrets = new MemorySecrets();
   let ownerActive = true,
     clock = now,
@@ -102,7 +108,7 @@ function fixture(overrides: Partial<GoogleTransport> = {}, env: NodeJS.ProcessEn
   const service = createGoogleCalendarService({
     secrets,
     security: { hasOwnerSession: async (hash) => hash === owner && ownerActive },
-    settings: async () => defaultSettings,
+    settings: async () => settings,
     env,
     transport,
     now: () => clock,
@@ -556,8 +562,8 @@ test('timezone conversion is independent of server zone and rejects DST gaps and
   );
 });
 
-test('expanded repeats and DST folds remain read-only on both mapping and direct update', async () => {
-  const recurring = rawEvent({ recurringEventId: 'series1234' });
+test('master series and DST folds remain read-only on both mapping and direct update', async () => {
+  const recurring = rawEvent({ recurrence: ['RRULE:FREQ=WEEKLY'] });
   assert.equal(mapGoogleEvent(recurring, 'Asia/Qyzylorda')!.readOnly, true);
   const fold = rawEvent({
     start: { dateTime: '2026-10-25T02:15:00+02:00' },
@@ -583,6 +589,246 @@ test('expanded repeats and DST folds remain read-only on both mapping and direct
     rejectsCode('GOOGLE_EVENT_READ_ONLY'),
   );
   assert.equal(patches, 0);
+});
+
+test('an expanded recurring instance is read and patched by its exact ID with version protection', async () => {
+  const id = 'series1234_20261013T060000Z';
+  const metadata = {
+    location: 'Переговорная',
+    visibility: 'private',
+    reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 15 }] },
+    conferenceData: { conferenceId: 'test-only-conference-id' },
+    extendedProperties: { private: { keep: 'test-only-metadata' } },
+    attendees: [{ self: true }],
+  };
+  let record: Record<string, unknown> = rawEvent({
+    ...metadata,
+    id,
+    recurringEventId: 'series1234',
+    originalStartTime: { dateTime: '2026-10-13T11:00:00+05:00' },
+    colorId: '2',
+  });
+  const requests: GoogleRequest[] = [];
+  const f = fixture({
+    request: async (_config, _token, request) => {
+      requests.push(request);
+      assert.equal(request.eventId, id, 'Only the selected instance may be addressed.');
+      if (request.method === 'GET') return record;
+      assert.equal(request.method, 'PATCH');
+      assert.equal(request.headers?.['If-Match'], record.etag);
+      assert.equal(request.body?.recurrence, undefined);
+      assert.equal(request.body?.recurringEventId, undefined);
+      assert.deepEqual(Object.keys(request.body!).sort(), [
+        'colorId',
+        'description',
+        'end',
+        'start',
+        'summary',
+      ]);
+      record = { ...record, ...request.body, etag: '"v2"' };
+      return record;
+    },
+  });
+  await f.connect();
+  const mapped = mapGoogleEvent(record, 'Asia/Qyzylorda')!;
+  assert.equal(mapped.recurring, true);
+  assert.equal(mapped.readOnly, false);
+  assert.equal(mapped.readOnlyReason, undefined);
+  const updated = await f.service.updateEvent(
+    id,
+    { ...eventInput, title: 'Перенесённая презентация', time: '14:00', colorId: '11' },
+    '"v1"',
+  );
+  assert.equal(updated.id, id);
+  assert.equal(updated.recurring, true);
+  assert.equal(updated.readOnly, false);
+  assert.equal(updated.colorId, '11');
+  assert.equal(updated.start.dateTime, '2026-10-13T09:00:00.000Z');
+  assert.deepEqual(
+    requests.map((request) => request.method),
+    ['GET', 'PATCH'],
+  );
+  assert.equal(requests[1].query?.sendUpdates, 'none');
+  for (const [field, value] of Object.entries(metadata)) assert.deepEqual(record[field], value);
+  await assert.rejects(f.service.updateEvent(id, eventInput, '"v1"'), rejectsCode('CONFLICT'));
+  assert.equal(requests.filter((request) => request.method === 'PATCH').length, 1);
+});
+
+test('instance ownership, master recurrence, guest, special, locked and complex event constraints stay protected', async () => {
+  for (const patch of [
+    { recurrence: ['RRULE:FREQ=DAILY'] },
+    { recurrence: [] },
+    { organizer: { self: false } },
+    { attendees: [{ self: true }, { self: false }] },
+    { locked: true },
+    { eventType: 'outOfOffice' },
+    {
+      start: { dateTime: '2026-10-13T23:30:00+05:00' },
+      end: { dateTime: '2026-10-14T01:00:00+05:00' },
+    },
+    { start: { date: '2026-10-13' }, end: { date: '2026-10-15' } },
+  ]) {
+    let patches = 0;
+    const record = rawEvent({ recurringEventId: 'series1234', ...patch });
+    const mapped = mapGoogleEvent(record, 'Asia/Qyzylorda')!;
+    assert.equal(mapped.readOnly, true);
+    assert.ok(mapped.readOnlyReason);
+    const f = fixture({
+      request: async (_config, _token, request) => {
+        if (request.method === 'GET') return record;
+        patches++;
+        return record;
+      },
+    });
+    await f.connect();
+    await assert.rejects(
+      f.service.updateEvent('event12345', eventInput, '"v1"'),
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.code === 'GOOGLE_EVENT_READ_ONLY' &&
+        error.message === mapped.readOnlyReason,
+    );
+    assert.equal(patches, 0);
+  }
+  const fold = rawEvent({
+    recurringEventId: 'series1234',
+    start: { dateTime: '2026-10-25T02:15:00+02:00' },
+    end: { dateTime: '2026-10-25T02:45:00+02:00' },
+  });
+  const dst = fixture(
+    {
+      request: async (_config, _token, request) => {
+        assert.equal(request.method, 'GET', 'No write may happen to a DST-ambiguous instance.');
+        return fold;
+      },
+    },
+    environment,
+    { ...defaultSettings, timeZone: 'Europe/Berlin' },
+  );
+  await dst.connect();
+  await assert.rejects(
+    dst.service.updateEvent('event12345', eventInput, '"v1"'),
+    rejectsCode('GOOGLE_EVENT_READ_ONLY'),
+  );
+});
+
+test('colors are read from list metadata, written to Google and preserved or reset explicitly', async () => {
+  const records = new Map<string, Record<string, unknown>>(),
+    requests: GoogleRequest[] = [];
+  const f = fixture({
+    request: async (_config, _token, request) => {
+      requests.push(request);
+      if (request.method === 'POST') {
+        const id = request.body!.id as string;
+        if (records.has(id)) throw { response: { status: 409 } };
+        const record = { ...request.body!, etag: '"v1"', organizer: { self: true } };
+        records.set(id, record);
+        return record;
+      }
+      if (request.method === 'GET' && request.eventId) return records.get(request.eventId);
+      if (request.method === 'GET') {
+        assert.ok(String(request.query?.fields).includes('colorId'));
+        return { accessRole: 'owner', items: [...records.values()] };
+      }
+      const record: Record<string, unknown> = {
+        ...records.get(request.eventId!)!,
+        ...request.body!,
+        etag: '"v2"',
+      };
+      if (record.colorId === null) delete record.colorId;
+      records.set(request.eventId!, record);
+      return record;
+    },
+  });
+  await f.connect();
+  const requestId = randomUUID();
+  const created = await f.service.createEvent({ ...eventInput, colorId: '5' }, requestId);
+  assert.equal(created.colorId, '5');
+  const listed = await f.service.listEvents({
+    from: '2026-10-13',
+    to: '2026-10-14',
+    timeZone: 'Asia/Qyzylorda',
+  });
+  assert.equal(listed.events[0].colorId, '5');
+  assert.equal(
+    (await f.service.createEvent({ ...eventInput, colorId: '5' }, requestId)).id,
+    created.id,
+  );
+  await assert.rejects(
+    f.service.createEvent({ ...eventInput, colorId: '6' }, requestId),
+    rejectsCode('CONFLICT'),
+  );
+  const recolored = await f.service.updateEvent(
+    created.id,
+    { ...eventInput, colorId: '11' },
+    created.etag,
+  );
+  assert.equal(recolored.colorId, '11');
+  const preserved = await f.service.updateEvent(
+    created.id,
+    { ...eventInput, title: 'Новое название' },
+    recolored.etag,
+  );
+  assert.equal(preserved.colorId, '11');
+  const lastPatch = requests.filter((request) => request.method === 'PATCH').at(-1)!;
+  assert.equal(Object.hasOwn(lastPatch.body!, 'colorId'), false);
+  const reset = await f.service.updateEvent(
+    created.id,
+    { ...eventInput, colorId: null },
+    preserved.etag,
+  );
+  assert.equal(reset.colorId, undefined);
+  assert.equal(
+    requests.filter((request) => request.method === 'PATCH').at(-1)!.body!.colorId,
+    null,
+  );
+  const allDay = await f.service.createEvent(
+    { ...eventInput, allDay: true, time: null, colorId: '3' },
+    randomUUID(),
+  );
+  assert.equal(allDay.colorId, '3');
+  assert.equal(allDay.allDay, true);
+});
+
+test('unknown color IDs and event identity mismatches are rejected before writing', async () => {
+  for (const colorId of CALENDAR_COLOR_IDS)
+    assert.equal(googleEventInputSchema.safeParse({ ...eventInput, colorId }).success, true);
+  for (const colorId of ['0', '12', '01', '', 'violet', '#ff0000', ' 1', 1])
+    assert.equal(googleEventInputSchema.safeParse({ ...eventInput, colorId }).success, false);
+  assert.equal(googleEventInputSchema.safeParse({ ...eventInput, colorId: null }).success, true);
+  assert.equal(googleEventInputSchema.safeParse(eventInput).success, true);
+  for (const duration of [4, 721])
+    assert.equal(
+      googleEventInputSchema.safeParse({ ...eventInput, duration, colorId: '1' }).success,
+      false,
+    );
+  assert.equal(
+    googleEventInputSchema.safeParse({ ...eventInput, time: '23:30', colorId: '1' }).success,
+    false,
+  );
+  let writes = 0,
+    reads = 0;
+  const f = fixture({
+    request: async (_config, _token, request) => {
+      if (request.method === 'GET') {
+        reads++;
+        return rawEvent({ id: 'another-instance', recurringEventId: 'series1234' });
+      }
+      writes++;
+      return rawEvent();
+    },
+  });
+  await f.connect();
+  await assert.rejects(
+    f.service.updateEvent('event12345', eventInput, '"v1"'),
+    rejectsCode('GOOGLE_INVALID_EVENT'),
+  );
+  assert.equal(writes, 0);
+  const before = reads;
+  await assert.rejects(
+    f.service.updateEvent('event12345', { ...eventInput, colorId: '12' }, '"v1"'),
+  );
+  assert.equal(reads, before);
 });
 
 test('AI confirmation fails closed on real busy events and reauthorization', async () => {

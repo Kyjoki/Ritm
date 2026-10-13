@@ -37,6 +37,7 @@ import {
   type CalendarOccurrence,
 } from './google-occurrences';
 import { formatTime, minutesInZone } from '../lib/date';
+import { calendarEntryStyle } from '../lib/calendar-colors';
 import '../styles/calendar-settings.css';
 
 interface CalendarPageProps {
@@ -63,7 +64,8 @@ const VIEW_LABELS: Record<CalendarView, string> = { day: 'День', week: 'Не
 const WEEKDAYS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 const GRID_TIME_COLUMN = 62;
-const HOUR_HEIGHT = 62;
+const HOUR_HEIGHT = 48;
+const INITIAL_HOUR = 9;
 const EMPTY_GOOGLE_EVENTS: GoogleCalendarEvent[] = [];
 
 function freeIntervals(entries: CalendarOccurrence[]): { start: number; end: number }[] {
@@ -90,6 +92,13 @@ function occurrenceLabel(entry: CalendarOccurrence): string {
   return `${entry.title}, ${time}${entry.source === 'google' ? ', Google Calendar' : ', Ritm'}${entry.completed ? ', выполнено' : ''}${entry.source === 'ritm' && entry.task.repeat !== 'none' ? ', повторяющаяся запись, редактировать серию' : ''}${entry.source === 'google' && entry.event.readOnly ? ', только просмотр' : ''}${entry.clockChange ? ', перевод часов' : ''}`;
 }
 
+function entryTime(entry: CalendarOccurrence, edge: 'start' | 'end'): string {
+  const label = edge === 'start' ? entry.startLabel : entry.endLabel;
+  return label
+    ? label.replace(/:00(?=\s[AP]M$)/, '')
+    : formatTime(entry[edge] ?? 0, { compact: true });
+}
+
 function AgendaEntry({
   entry,
   onEdit,
@@ -103,13 +112,10 @@ function AgendaEntry({
       className={`cal-agenda-entry ${entry.completed ? 'cal-completed' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''}`}
       onClick={() => onEdit(entry)}
       aria-label={occurrenceLabel(entry)}
+      style={calendarEntryStyle(entry)}
     >
       <span className="cal-agenda-time">
-        {entry.start === null ? (
-          <Clock3 size={18} aria-hidden="true" />
-        ) : (
-          (entry.startLabel ?? formatTime(entry.start))
-        )}
+        {entry.start === null ? <Clock3 size={18} aria-hidden="true" /> : entryTime(entry, 'start')}
       </span>
       <span className="cal-agenda-copy">
         <strong>{entry.title}</strong>
@@ -230,16 +236,9 @@ export function CalendarPage({
     }
     const period = `${view}:${selectedDate}`;
     if (!gridScrollRef.current || scrolledPeriodRef.current === period) return;
-    let firstStart = Infinity;
-    for (const day of occurrencesByDay)
-      for (const entry of day.entries)
-        if (entry.start !== null) firstStart = Math.min(firstStart, entry.start);
-    const firstHour = Number.isFinite(firstStart)
-      ? Math.max(0, Math.floor(firstStart / 60) - 1)
-      : 8;
-    gridScrollRef.current.scrollTop = firstHour * HOUR_HEIGHT;
+    gridScrollRef.current.scrollTop = INITIAL_HOUR * HOUR_HEIGHT;
     scrolledPeriodRef.current = period;
-  }, [isMobile, view, selectedDate, occurrencesByDay]);
+  }, [isMobile, view, selectedDate]);
   const visibleCount = occurrencesByDay.reduce((total, day) => total + day.entries.length, 0);
   const noDateTasks = tasks.filter((task) => task.date === null && !task.completed);
   const periodLabel =
@@ -470,6 +469,7 @@ export function CalendarPage({
                           <span
                             key={entry.key}
                             className={`cal-month-dot ${entry.source === 'google' ? 'cal-google-dot' : ''}`}
+                            style={calendarEntryStyle(entry)}
                             aria-hidden="true"
                           />
                         ))
@@ -480,15 +480,9 @@ export function CalendarPage({
                           type="button"
                           onClick={() => editEntry(entry)}
                           aria-label={occurrenceLabel(entry)}
+                          style={calendarEntryStyle(entry)}
                         >
-                          {entry.start === null
-                            ? ''
-                            : `${entry.startLabel ?? formatTime(entry.start)} `}
-                          {entry.source === 'google' ? (
-                            <span className="cal-google-mark" aria-hidden="true">
-                              G
-                            </span>
-                          ) : null}
+                          {entry.start === null ? '' : `${entryTime(entry, 'start')} `}
                           {entry.title}
                         </button>
                       ))}
@@ -549,7 +543,8 @@ export function CalendarPage({
                     <Plus size={16} aria-hidden="true" />
                     <span>
                       {googleConnected ? 'Свободно' : 'Свободно в Ritm'}{' '}
-                      {formatTime(interval.start)}–{formatTime(interval.end)}
+                      {formatTime(interval.start, { compact: true })}–
+                      {formatTime(interval.end, { compact: true })}
                     </span>
                   </button>
                 ))}
@@ -613,12 +608,8 @@ export function CalendarPage({
                         className={`cal-all-day-event ${entry.source === 'google' ? 'cal-google-entry' : ''}`}
                         onClick={() => editEntry(entry)}
                         aria-label={occurrenceLabel(entry)}
+                        style={calendarEntryStyle(entry)}
                       >
-                        {entry.source === 'google' ? (
-                          <span className="cal-google-mark" aria-hidden="true">
-                            G
-                          </span>
-                        ) : null}
                         {entry.title}
                       </button>
                     ))}
@@ -637,7 +628,7 @@ export function CalendarPage({
               <div className="cal-hour-labels">
                 {HOURS.map((hour) => (
                   <span key={hour} style={{ height: HOUR_HEIGHT }}>
-                    {formatTime(hour * 60, { compact: true })}
+                    {formatTime(hour * 60, { compact: true }).replace(' ', '')}
                   </span>
                 ))}
               </div>
@@ -669,8 +660,9 @@ export function CalendarPage({
                       <button
                         key={entry.key}
                         type="button"
-                        className={`cal-grid-event ${entry.source === 'google' || entry.task.kind === 'event' ? 'cal-event-kind' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''} ${entry.completed ? 'cal-completed' : ''} ${duration < 40 ? 'cal-compact-event' : ''}`}
+                        className={`cal-grid-event ${entry.source === 'google' || entry.task.kind === 'event' ? 'cal-event-kind' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''} ${entry.completed ? 'cal-completed' : ''} ${duration < 75 ? 'cal-compact-event' : ''}`}
                         style={{
+                          ...calendarEntryStyle(entry),
                           top: ((entry.start ?? 0) / 60) * HOUR_HEIGHT + 2,
                           height: Math.max(22, (duration / 60) * HOUR_HEIGHT - 4),
                           width: `calc(${100 / entry.lanes}% - 7px)`,
@@ -680,17 +672,9 @@ export function CalendarPage({
                         title={occurrenceLabel(entry)}
                         aria-label={occurrenceLabel(entry)}
                       >
-                        <strong>
-                          {entry.source === 'google' ? (
-                            <span className="cal-google-mark" aria-hidden="true">
-                              G
-                            </span>
-                          ) : null}
-                          {entry.title}
-                        </strong>
+                        <strong>{entry.title}</strong>
                         <span>
-                          {entry.startLabel ?? formatTime(entry.start ?? 0)}–
-                          {entry.endLabel ?? formatTime(entry.end ?? 0)}
+                          {entryTime(entry, 'start')}–{entryTime(entry, 'end')}
                           {entry.source === 'ritm' && entry.task.repeat !== 'none' ? ' · ↻' : ''}
                           {entry.clockChange ? ' · Перевод часов' : ''}
                         </span>

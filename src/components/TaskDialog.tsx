@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ChevronDown, LoaderCircle, Trash2 } from 'lucide-react';
 import type { Task, TaskInput } from '../../shared/types';
 import { Dialog } from './Dialog';
+import { CalendarColorPicker } from './CalendarColorPicker';
 
 interface Props {
   task?: Task;
@@ -23,6 +24,7 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
       repeat: source?.repeat ?? 'none',
       kind: source?.kind ?? 'task',
       completed: source?.completed ?? false,
+      colorId: source?.colorId ?? null,
     };
   });
   const [busy, setBusy] = useState(false),
@@ -177,6 +179,7 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
               </select>
             </label>
           </div>
+          <CalendarColorPicker value={value.colorId} onChange={(id) => set('colorId', id)} />
           <button
             className="disclosure"
             type="button"

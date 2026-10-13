@@ -2,6 +2,7 @@ import { useRef, useState, type FormEvent } from 'react';
 import { CalendarDays, LoaderCircle } from 'lucide-react';
 import type { GoogleCalendarEvent, GoogleEventInput } from '../../shared/types';
 import { Dialog } from './Dialog';
+import { CalendarColorPicker } from './CalendarColorPicker';
 import { canEditGoogleEvent, googleEventDraft } from '../features/google-occurrences';
 import { ApiError } from '../lib/api';
 import { addDays, formatDate } from '../features/calendar-utils';
@@ -27,7 +28,7 @@ export function GoogleEventDialog({
 }) {
   const [value, setValue] = useState<GoogleEventInput>(() =>
     event
-      ? googleEventDraft(event, timeZone)
+      ? { ...googleEventDraft(event, timeZone), colorId: event.colorId ?? null }
       : {
           title: '',
           description: '',
@@ -35,6 +36,7 @@ export function GoogleEventDialog({
           time: '09:00',
           duration: 30,
           allDay: false,
+          colorId: null,
           ...draft,
         },
   );
@@ -116,8 +118,11 @@ export function GoogleEventDialog({
       <p className="info-note">
         <CalendarDays size={14} />{' '}
         {readOnly
-          ? 'Эта запись доступна для просмотра. Измени её в Google Calendar.'
-          : 'Запись сохраняется в твоём основном календаре Google.'}
+          ? (event?.readOnlyReason ??
+            'Эта запись доступна для просмотра. Измени её в Google Calendar.')
+          : event?.recurring
+            ? 'Изменится только эта запись. Остальные события повторяющейся серии сохранятся.'
+            : 'Запись сохраняется в твоём основном календаре Google.'}
       </p>
       {readOnly && event ? (
         <div className="google-event-preview">
@@ -197,6 +202,7 @@ export function GoogleEventDialog({
                 </label>
               </div>
             ) : null}
+            <CalendarColorPicker value={value.colorId} onChange={(id) => set('colorId', id)} />
           </fieldset>
         ) : null}
         {error ? (

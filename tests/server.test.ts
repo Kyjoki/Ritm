@@ -381,6 +381,28 @@ test('selected AI changes apply atomically, undo is safe, stale/colliding plans 
   assert.equal(h.store.task(two.id).date, '2099-10-14');
 });
 
+test('task color API persists across reload and restore, rejects injected colors and supports default reset', async (t) => {
+  const h = await harness(t);
+  const created = await h.call('/tasks', 'POST', { ...baseTask, colorId: '8' });
+  assert.equal(created.status, 201);
+  const id = created.body.id;
+  const changed = await h.call(`/tasks/${id}`, 'PATCH', { colorId: '10' });
+  assert.equal(changed.status, 200);
+  const bootstrap = await h.call('/bootstrap');
+  assert.equal(bootstrap.body.tasks[0].colorId, '10');
+  assert.equal(bootstrap.body.tasks[0].time, baseTask.time);
+  assert.equal((await h.call(`/tasks/${id}`, 'PATCH', { colorId: '#ff0000' })).status, 400);
+  assert.equal((await h.call(`/tasks/${id}`, 'PATCH', { colorId: '99' })).status, 400);
+  assert.equal((await h.call(`/tasks/${id}`, 'PATCH', { colorId: { style: 'red' } })).status, 400);
+  assert.equal(h.store.task(id).colorId, '10');
+  const deleted = await h.call(`/tasks/${id}`, 'DELETE');
+  assert.equal(
+    (await h.call('/tasks/restore', 'POST', { task: deleted.body.deletedTask })).body.colorId,
+    '10',
+  );
+  assert.equal((await h.call(`/tasks/${id}`, 'PATCH', { colorId: null })).body.colorId, null);
+});
+
 test('malformed AI proposals never enter history; past/no-op/types are rejected', async (t) => {
   const h = await harness(t);
   const task = h.store.createTask(baseTask);

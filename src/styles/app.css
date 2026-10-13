@@ -670,10 +670,10 @@ textarea::placeholder {
   text-align: left;
   padding: 12px;
   border: 0;
-  border-left: 2px solid var(--accent);
+  border-left: 2px solid var(--calendar-event-border, var(--accent));
   border-radius: 0 9px 9px 0;
-  background: var(--soft);
-  color: var(--accent);
+  background: var(--calendar-event-bg, var(--soft));
+  color: var(--calendar-event-text, var(--accent));
   min-height: 55px;
   width: 100%;
 }

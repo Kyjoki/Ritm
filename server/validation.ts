@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CALENDAR_COLOR_IDS } from '../shared/calendar-colors.ts';
 
 export const dateValue = z
   .string()
@@ -24,6 +25,7 @@ const taskFields = z
     repeat: z.enum(['none', 'daily', 'weekly', 'monthly']),
     kind: z.enum(['task', 'event']),
     completed: z.boolean(),
+    colorId: z.enum(CALENDAR_COLOR_IDS).nullable().optional(),
   })
   .strict();
 
