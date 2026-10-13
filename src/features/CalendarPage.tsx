@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import {
   CalendarDays,
   Check,
@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import { Dialog } from '../components/Dialog';
 import { mobileCalendarGroups } from './mobile-calendar-groups';
+import { calendarWeekSwipe, type SwipePoint } from './calendar-swipe';
+import { EventPreviewDialog } from './EventPreviewDialog';
 import type {
   GoogleCalendarEvent,
   GoogleCalendarStatus,
@@ -173,6 +175,8 @@ export function CalendarPage({
   const rangeCallback = useRef(onRangeChange);
   const gridScrollRef = useRef<HTMLDivElement>(null);
   const scrolledPeriodRef = useRef<string | null>(null);
+  const weekGesture = useRef<(SwipePoint & { pointerId: number; date: string }) | null>(null);
+  const suppressSwipeClick = useRef(0);
   useEffect(() => {
     rangeCallback.current = onRangeChange;
   }, [onRangeChange]);
@@ -181,6 +185,14 @@ export function CalendarPage({
   );
   const [view, setView] = useState<CalendarView>('week');
   const [eventPicker, setEventPicker] = useState<{ date: string; keys: string[] } | null>(null);
+  const [preview, setPreview] = useState<{ date: string; key: string } | null>(null);
+  useEffect(
+    () => () => {
+      weekGesture.current = null;
+      suppressSwipeClick.current = 0;
+    },
+    [isMobile, view],
+  );
   useEffect(() => {
     if (!isMobile || view !== 'week') setEventPicker(null);
   }, [isMobile, view]);
@@ -298,8 +310,58 @@ export function CalendarPage({
     else onCreate({ date, time, duration: boundedDuration, kind: 'event' });
   }
   function editEntry(entry: CalendarOccurrence) {
+    setPreview({ date: entry.date, key: entry.key });
+  }
+  function beginEditing(entry: CalendarOccurrence) {
+    setPreview(null);
     if (entry.source === 'google') onGoogleEdit?.(entry.event);
     else onEdit(entry.task);
+  }
+  const previewEntry = preview
+    ? (calendarOccurrences(tasks, googleEvents, preview.date, timeZone).find(
+        (entry) => entry.key === preview.key,
+      ) ?? null)
+    : null;
+  function startWeekGesture(event: PointerEvent<HTMLDivElement>) {
+    if (!isMobile || view !== 'week' || event.pointerType !== 'touch' || !event.isPrimary) {
+      weekGesture.current = null;
+      return;
+    }
+    weekGesture.current = {
+      x: event.clientX,
+      y: event.clientY,
+      time: event.timeStamp,
+      pointerId: event.pointerId,
+      date: selectedDate,
+    };
+  }
+  function moveWeekGesture(event: PointerEvent<HTMLDivElement>) {
+    const start = weekGesture.current;
+    if (!start || event.pointerId !== start.pointerId) return;
+    const dx = Math.abs(event.clientX - start.x),
+      dy = Math.abs(event.clientY - start.y);
+    if (dy > 12 && dy > dx * 1.2) weekGesture.current = null;
+  }
+  function finishWeekGesture(event: PointerEvent<HTMLDivElement>) {
+    const start = weekGesture.current;
+    weekGesture.current = null;
+    if (
+      !start ||
+      event.pointerId !== start.pointerId ||
+      start.date !== selectedDate ||
+      !isMobile ||
+      view !== 'week'
+    )
+      return;
+    const direction = calendarWeekSwipe(
+      start,
+      { x: event.clientX, y: event.clientY, time: event.timeStamp },
+      event.currentTarget.clientWidth,
+    );
+    if (direction) {
+      suppressSwipeClick.current = performance.now() + 450;
+      navigate(direction);
+    }
   }
   const pickerEntries = eventPicker
     ? calendarOccurrences(tasks, googleEvents, eventPicker.date, timeZone).filter((entry) =>
@@ -611,7 +673,23 @@ export function CalendarPage({
               ))}
             </div>
           ) : null}
-          <div ref={gridScrollRef} className="cal-grid-scroll">
+          <div
+            ref={gridScrollRef}
+            className={`cal-grid-scroll ${isMobile && view === 'week' ? 'cal-swipe-week' : ''}`}
+            onPointerDown={startWeekGesture}
+            onPointerMove={moveWeekGesture}
+            onPointerUp={finishWeekGesture}
+            onPointerCancel={() => {
+              weekGesture.current = null;
+            }}
+            onClickCapture={(event) => {
+              if (event.detail > 0 && performance.now() < suppressSwipeClick.current) {
+                suppressSwipeClick.current = 0;
+                event.preventDefault();
+                event.stopPropagation();
+              }
+            }}
+          >
             <div
               className="cal-grid"
               style={{
@@ -867,6 +945,15 @@ export function CalendarPage({
             </button>
           </div>
         </Dialog>
+      ) : null}
+      {preview ? (
+        <EventPreviewDialog
+          entry={previewEntry}
+          date={preview.date}
+          timeZone={timeZone}
+          onClose={() => setPreview(null)}
+          onEdit={beginEditing}
+        />
       ) : null}
     </div>
   );

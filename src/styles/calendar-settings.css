@@ -127,6 +127,9 @@
   scrollbar-width: thin;
   scrollbar-color: var(--line) transparent;
 }
+.cal-swipe-week {
+  touch-action: pan-y pinch-zoom;
+}
 .cal-grid {
   display: grid;
   position: relative;
