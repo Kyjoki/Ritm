@@ -11,6 +11,7 @@ import {
   AlertCircle,
   LoaderCircle,
   RefreshCw,
+  Layers2,
 } from 'lucide-react';
 import { Dialog } from '../components/Dialog';
 import { mobileCalendarGroups } from './mobile-calendar-groups';
@@ -222,6 +223,16 @@ export function CalendarPage({
   const selectedEntries = useMemo(
     () => calendarOccurrences(tasks, googleEvents, selectedDate, timeZone),
     [tasks, googleEvents, selectedDate, timeZone],
+  );
+  const overlapsByDay = useMemo(
+    () =>
+      occurrencesByDay.map(({ date, entries }) => ({
+        date,
+        entries: mobileCalendarGroups(entries)
+          .filter((group) => group.entries.length > 1)
+          .flatMap((group) => group.entries),
+      })),
+    [occurrencesByDay],
   );
   const monthDays = useMemo(() => {
     const month = parseDate(selectedDate);
@@ -607,6 +618,40 @@ export function CalendarPage({
               </button>
             ))}
           </div>
+          {isMobile && view === 'week' && overlapsByDay.some((day) => day.entries.length) ? (
+            <div
+              className="cal-overlap-row"
+              style={{ gridTemplateColumns: `40px repeat(7, minmax(0, 1fr))` }}
+            >
+              <span
+                className="cal-overlap-row-label"
+                title="Пересекающиеся записи"
+                aria-hidden="true"
+              >
+                <Layers2 size={13} />
+              </span>
+              {overlapsByDay.map(({ date, entries }) =>
+                entries.length ? (
+                  <button
+                    key={date}
+                    type="button"
+                    className="cal-overlap-day-button"
+                    onClick={() =>
+                      setEventPicker({ date, keys: entries.map((entry) => entry.key) })
+                    }
+                    aria-haspopup="dialog"
+                    aria-label={`${formatDate(date, { day: 'numeric', month: 'long' })}: ${entries.length} ${recordWord(entries.length)} с пересечением. Выбрать событие`}
+                    title="Открыть пересекающиеся записи"
+                  >
+                    <Layers2 size={11} aria-hidden="true" />
+                    <span>{entries.length}</span>
+                  </button>
+                ) : (
+                  <span key={date} />
+                ),
+              )}
+            </div>
+          ) : null}
           {occurrencesByDay.some((day) => day.entries.some((entry) => entry.start === null)) ? (
             <div
               className="cal-all-day"
@@ -672,84 +717,33 @@ export function CalendarPage({
                       </button>
                     )),
                   )}
-                  {isMobile && view === 'week'
-                    ? mobileCalendarGroups(entries).map((group) => {
-                        const entry = group.entries[0];
-                        const multiple = group.entries.length > 1;
-                        return (
-                          <button
-                            key={group.key}
-                            type="button"
-                            className={`cal-grid-event cal-mobile-event ${multiple ? 'cal-overlap-group' : ''} ${entry.completed ? 'cal-completed' : ''}`}
-                            style={{
-                              ...calendarEntryStyle(entry),
-                              top: (group.start / 60) * HOUR_HEIGHT + 2,
-                              height: Math.max(
-                                22,
-                                ((group.end - group.start) / 60) * HOUR_HEIGHT - 4,
-                              ),
-                              width: 'calc(100% - 2px)',
-                              left: 1,
-                            }}
-                            onClick={() =>
-                              multiple
-                                ? setEventPicker({
-                                    date,
-                                    keys: group.entries.map((item) => item.key),
-                                  })
-                                : editEntry(entry)
-                            }
-                            aria-haspopup={multiple ? 'dialog' : undefined}
-                            aria-label={
-                              multiple
-                                ? `${group.entries.length} ${recordWord(group.entries.length)} с пересечением, ${formatDate(date, { day: 'numeric', month: 'long' })}, ${formatTime(group.start)}–${formatTime(group.end)}. Выбрать событие`
-                                : occurrenceLabel(entry)
-                            }
-                            title={group.entries.map(occurrenceLabel).join('\n')}
-                          >
-                            <strong>{entry.title}</strong>
-                            {multiple ? (
-                              <>
-                                <span className="cal-overlap-count">{group.entries.length}</span>
-                                <span className="cal-overlap-colors" aria-hidden="true">
-                                  {group.entries.slice(0, 4).map((item) => (
-                                    <i key={item.key} style={calendarEntryStyle(item)} />
-                                  ))}
-                                </span>
-                              </>
-                            ) : null}
-                          </button>
-                        );
-                      })
-                    : layoutCalendarOccurrences(entries).map((entry) => {
-                        const duration = (entry.end ?? 0) - (entry.start ?? 0);
-                        return (
-                          <button
-                            key={entry.key}
-                            type="button"
-                            className={`cal-grid-event ${entry.source === 'google' || entry.task.kind === 'event' ? 'cal-event-kind' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''} ${entry.completed ? 'cal-completed' : ''} ${duration < 75 ? 'cal-compact-event' : ''}`}
-                            style={{
-                              ...calendarEntryStyle(entry),
-                              top: ((entry.start ?? 0) / 60) * HOUR_HEIGHT + 2,
-                              height: Math.max(22, (duration / 60) * HOUR_HEIGHT - 4),
-                              width: `calc(${100 / entry.lanes}% - ${isMobile ? 2 : 7}px)`,
-                              left: `calc(${(entry.lane * 100) / entry.lanes}% + ${isMobile ? 1 : 4}px)`,
-                            }}
-                            onClick={() => editEntry(entry)}
-                            title={occurrenceLabel(entry)}
-                            aria-label={occurrenceLabel(entry)}
-                          >
-                            <strong>{entry.title}</strong>
-                            <span className="cal-event-time">
-                              {entryTime(entry, 'start')}–{entryTime(entry, 'end')}
-                              {entry.source === 'ritm' && entry.task.repeat !== 'none'
-                                ? ' · ↻'
-                                : ''}
-                              {entry.clockChange ? ' · Перевод часов' : ''}
-                            </span>
-                          </button>
-                        );
-                      })}
+                  {layoutCalendarOccurrences(entries).map((entry) => {
+                    const duration = (entry.end ?? 0) - (entry.start ?? 0);
+                    return (
+                      <button
+                        key={entry.key}
+                        type="button"
+                        className={`cal-grid-event ${entry.source === 'google' || entry.task.kind === 'event' ? 'cal-event-kind' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''} ${entry.completed ? 'cal-completed' : ''} ${duration < 75 ? 'cal-compact-event' : ''}`}
+                        style={{
+                          ...calendarEntryStyle(entry),
+                          top: ((entry.start ?? 0) / 60) * HOUR_HEIGHT + 2,
+                          height: Math.max(22, (duration / 60) * HOUR_HEIGHT - 4),
+                          width: `calc(${100 / entry.lanes}% - ${isMobile ? 2 : 7}px)`,
+                          left: `calc(${(entry.lane * 100) / entry.lanes}% + ${isMobile ? 1 : 4}px)`,
+                        }}
+                        onClick={() => editEntry(entry)}
+                        title={occurrenceLabel(entry)}
+                        aria-label={occurrenceLabel(entry)}
+                      >
+                        <strong>{entry.title}</strong>
+                        <span className="cal-event-time">
+                          {entryTime(entry, 'start')}–{entryTime(entry, 'end')}
+                          {entry.source === 'ritm' && entry.task.repeat !== 'none' ? ' · ↻' : ''}
+                          {entry.clockChange ? ' · Перевод часов' : ''}
+                        </span>
+                      </button>
+                    );
+                  })}
                   {date === today ? (
                     <div
                       className="cal-now-line"
