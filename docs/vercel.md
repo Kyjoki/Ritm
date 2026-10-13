@@ -4,9 +4,10 @@ Ritm сохраняет React/Vite, Express и одно личное прост�
 13 октября PR #1 объединён в main, выпуск разрешён владельцем. Созданы проект
 Vercel `maksimcoj697-3405/ritm` и Neon Free `ritm-db` во Франкфурте, подключена
 production-база и применена миграция `001-postgres.sql`. Приложение опубликовано
-на [ritm-eta-hazel.vercel.app](https://ritm-eta-hazel.vercel.app). Deployment
-`dpl_Cuy6uzfeAtcpwJ27eJ2j4THkuPcz` из `main` commit `84bcf4c` — READY;
-сначала проверен staged production, затем опубликован тот же build.
+на [ritm-eta-hazel.vercel.app](https://ritm-eta-hazel.vercel.app).
+Первый выпуск через CLI — `dpl_Cuy6uzfeAtcpwJ27eJ2j4THkuPcz` из `main`
+commit `84bcf4c`, READY: сначала проверен staged production, затем опубликован
+тот же build. После этого включена и проверена автопубликация из GitHub.
 Доказательства HTTP/API и ограничения проверки находятся в [отчёте](verification.md).
 
 ## Автопубликация из GitHub
@@ -16,8 +17,12 @@ push в `main` собирается и публикуется в production. В�
 GitHub Login Connection и предоставил приложению Vercel доступ к Ritm.
 Git connect выполнен; API проекта подтвердил `Kyjoki/Ritm`,
 `productionBranch=main`, `createDeployments=enabled` и
-`autoAssignCustomDomains=true`. Проверка первого Git-выпуска выполняется
-новым commit документации; код приложения не изменён.
+`autoAssignCustomDomains=true`. Первый автоматический Git-выпуск проверен:
+commit `4329073b4337b7e841eac33c8432c00cfd20909b` создал deployment
+`dpl_CQ81K6M1daa26UtEoeNkAkCXXKk6`, `source=git`, `target=production`,
+READY, автор Kyjoki. Vercel автоматически назначил основной домен.
+Девять публичных HTTP-проверок ассетов, входа, защищённого API и выхода прошли;
+код приложения в этом commit не изменён.
 
 После подключения проверьте репозиторий, production branch `main` и успешный
 deployment конкретного commit. Перед push выполняйте `npm run build`,
