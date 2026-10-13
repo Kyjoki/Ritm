@@ -431,7 +431,7 @@ export function createApp(options: AppOptions = {}) {
         'Подключите OpenAI в настройках, чтобы начать разговор.',
       );
     await security.limit(req, 'chat', 10, 60_000);
-    if (reviewingIdea) await security.limit(req, 'idea-review', 2, 60_000);
+    if (reviewingIdea) await security.limit(req, 'idea-review', 6, 60_000);
     const conversation = input.conversationId
       ? await store.conversation(input.conversationId)
       : undefined;
@@ -593,7 +593,19 @@ export function createApp(options: AppOptions = {}) {
     ))
       audit(res, 'server_error', 500);
     if (error instanceof AppError) {
-      res.status(error.status).json({ error: error.message, code: error.code });
+      const retryAfterSeconds =
+        error.status === 429 &&
+        Number.isInteger(error.retryAfterSeconds) &&
+        error.retryAfterSeconds! > 0 &&
+        error.retryAfterSeconds! <= 3600
+          ? error.retryAfterSeconds
+          : undefined;
+      if (retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(retryAfterSeconds));
+      res.status(error.status).json({
+        error: error.message,
+        code: error.code,
+        ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+      });
       return;
     }
     if (error instanceof z.ZodError) {

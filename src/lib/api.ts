@@ -21,6 +21,7 @@ export class ApiError extends Error {
     message: string,
     public status: number,
     public code?: string,
+    public retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -51,12 +52,23 @@ async function request<T>(
   }
   const data = await response.json().catch(() => null);
   if (!response.ok) {
+    const bodyDelay = data?.retryAfterSeconds;
+    const headerDelay = response.headers.get('Retry-After');
+    const delay =
+      typeof bodyDelay === 'number'
+        ? bodyDelay
+        : headerDelay && /^\d+$/.test(headerDelay)
+          ? Number(headerDelay)
+          : undefined;
     if (data?.code === 'AUTH_REQUIRED' && typeof window !== 'undefined')
       window.dispatchEvent(new Event('ritm:auth-required'));
     throw new ApiError(
       data?.error ?? 'Не удалось выполнить действие.',
       response.status,
       data?.code,
+      response.status === 429 && Number.isInteger(delay) && delay! > 0 && delay! <= 3600
+        ? delay
+        : undefined,
     );
   }
   if (data === null || typeof data !== 'object')

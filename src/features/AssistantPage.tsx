@@ -29,6 +29,7 @@ import type {
   ScheduleTime,
 } from '../../shared/types';
 import { formatTime } from '../lib/date';
+import { ApiError } from '../lib/api';
 import { IdeaReviewPanel, ideaExpertRoles, ideaReviewCopyText } from './IdeaReviewPanel';
 import '../styles/assistant.css';
 
@@ -58,6 +59,7 @@ interface SendRequest {
   mode: ChatMode;
   status: 'sending' | 'failed';
   error?: string;
+  retryAt?: number;
 }
 
 interface ComposerFocusRequest {
@@ -84,8 +86,10 @@ function getErrorMessage(error: unknown): string {
     return 'Задача уже изменилась. Попросите Ritm составить новый план, чтобы использовать актуальное расписание.';
   if (/not_configured|missing_key/i.test(code))
     return 'Подключите OpenAI в настройках и повторите запрос.';
-  if (/rate_limit/i.test(code))
-    return 'Сервис временно ограничил запросы. Повторите отправку чуть позже.';
+  if (error instanceof ApiError && error.retryAfterSeconds && /rate_limit/i.test(code))
+    return code === 'IDEA_REVIEW_RATE_LIMIT'
+      ? 'Достигнут лимит частоты разбора идей в Ritm. Повтор станет доступен после паузы.'
+      : 'Достигнут лимит частоты запросов в Ritm. Повтор станет доступен после паузы.';
   if (error instanceof Error && error.message) return error.message;
   return 'Не удалось выполнить действие. Проверьте соединение и попробуйте ещё раз.';
 }
@@ -443,6 +447,7 @@ export function AssistantPage({
   const [draft, setDraft] = useState('');
   const [mode, setMode] = useState<ChatMode>('assistant');
   const [request, setRequest] = useState<SendRequest | null>(null);
+  const [retryClock, setRetryClock] = useState(() => Date.now());
   const [historyOpen, setHistoryOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
@@ -465,11 +470,28 @@ export function AssistantPage({
   const conversation = conversations.find((item) => item.id === selectedId);
   const messages = conversation?.messages ?? [];
   const sending = request?.status === 'sending';
+  const retryRemaining =
+    request?.status === 'failed' && request.retryAt
+      ? Math.max(0, Math.ceil((request.retryAt - retryClock) / 1000))
+      : 0;
   const requestIsVisible = !!request && request.conversationId === selectedId;
   const visibleRequest = requestIsVisible ? request : null;
   const orderedConversations = [...conversations].sort((a, b) =>
     b.updatedAt.localeCompare(a.updatedAt),
   );
+
+  useEffect(() => {
+    if (request?.status !== 'failed' || !request.retryAt) return;
+    const retryAt = request.retryAt;
+    setRetryClock(Date.now());
+    if (Date.now() >= retryAt) return;
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setRetryClock(now);
+      if (now >= retryAt) clearInterval(timer);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [request?.status, request?.retryAt]);
 
   useEffect(() => {
     // Activity also cleans up effects when the page is hidden.
@@ -635,11 +657,12 @@ export function AssistantPage({
       !aiStatus.configured ||
       creating ||
       deleting ||
-      (!retry && request?.status === 'failed')
+      (!retry && request?.status === 'failed') ||
+      (retry?.retryAt !== undefined && retry.retryAt > Date.now())
     )
       return;
     const next: SendRequest = retry
-      ? { ...retry, status: 'sending', error: undefined }
+      ? { ...retry, status: 'sending', error: undefined, retryAt: undefined }
       : {
           conversationId: selectedId,
           message: text,
@@ -668,7 +691,17 @@ export function AssistantPage({
       setSelectedId(result.id);
       setRequest(null);
     } catch (error) {
-      setRequest({ ...next, status: 'failed', error: getErrorMessage(error) });
+      const now = Date.now();
+      setRetryClock(now);
+      setRequest({
+        ...next,
+        status: 'failed',
+        error: getErrorMessage(error),
+        retryAt:
+          error instanceof ApiError && error.retryAfterSeconds
+            ? now + error.retryAfterSeconds * 1000
+            : undefined,
+      });
     } finally {
       sendLock.current = false;
     }
@@ -1009,11 +1042,11 @@ export function AssistantPage({
                         <button
                           type="button"
                           className="button button-secondary"
-                          disabled={!aiStatus.configured || sending}
+                          disabled={!aiStatus.configured || sending || retryRemaining > 0}
                           onClick={() => void sendMessage(visibleRequest)}
                         >
                           <RefreshCw size={15} aria-hidden="true" />
-                          Повторить
+                          {retryRemaining > 0 ? `Повторить через ${retryRemaining} с` : 'Повторить'}
                         </button>
                         <button
                           type="button"

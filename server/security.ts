@@ -237,12 +237,17 @@ export class Security {
       bucket = digest('ritm:owner:' + key);
     }
     const result = await this.state.consumeRateLimit(bucket, maximum, windowMs);
-    if (!result.allowed)
+    if (!result.allowed) {
+      const retryAfterSeconds = Math.max(1, Math.ceil(result.retryAfterMs / 1000));
       throw new AppError(
         429,
-        'RATE_LIMIT',
-        'Слишком много запросов. Подождите немного и повторите.',
+        key === 'idea-review' ? 'IDEA_REVIEW_RATE_LIMIT' : 'RATE_LIMIT',
+        key === 'idea-review'
+          ? `Ritm временно ограничил частоту разбора идей. Повторите через ${retryAfterSeconds} с.`
+          : `Слишком много запросов в Ritm. Повторите через ${retryAfterSeconds} с.`,
+        retryAfterSeconds,
       );
+    }
   }
   async login(req: Request, res: Response, login: string, password: string) {
     await this.limit(req, 'login', 10, 15 * 60_000);

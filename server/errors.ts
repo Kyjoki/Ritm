@@ -3,6 +3,7 @@ export class AppError extends Error {
     public status: number,
     public code: string,
     message: string,
+    public retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = 'AppError';

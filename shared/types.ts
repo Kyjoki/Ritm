@@ -111,6 +111,7 @@ export interface ProposalResult {
 export interface ApiErrorBody {
   error: string;
   code?: string;
+  retryAfterSeconds?: number;
 }
 
 export interface GoogleCalendarStatus {

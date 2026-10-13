@@ -60,7 +60,7 @@ async function harness(t: TestContext, options: AppOptions = {}) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    return { status: response.status, body: await response.json() };
+    return { status: response.status, body: await response.json(), headers: response.headers };
   };
   return { ...instance, dir, call };
 }
@@ -170,4 +170,32 @@ test('unknown modes are rejected before model generation and old assistant finge
   assert.equal(first.status, 200);
   assert.equal((await h.call({ ...input, mode: 'assistant' })).body.id, first.body.id);
   assert.equal(calls, 1);
+});
+
+test('six sequential reviews are allowed; the next is bounded with accurate retry delay and no paid generation', async (t) => {
+  let calls = 0;
+  const h = await harness(t, {
+    ideaReviewer: async () => {
+      calls++;
+      return structuredClone(report);
+    },
+  });
+  let firstInput: { requestId: string; message: string; mode: string } | undefined;
+  for (let i = 0; i < 6; i++) {
+    const input = { requestId: randomUUID(), message: `Идея ${i}`, mode: 'idea_review' };
+    firstInput ??= input;
+    assert.equal((await h.call(input)).status, 200);
+  }
+  const blockedInput = { requestId: randomUUID(), message: 'Следующая идея', mode: 'idea_review' };
+  const blocked = await h.call(blockedInput);
+  assert.equal(blocked.status, 429);
+  assert.equal(blocked.body.code, 'IDEA_REVIEW_RATE_LIMIT');
+  assert.ok(Number.isInteger(blocked.body.retryAfterSeconds));
+  assert.ok(blocked.body.retryAfterSeconds > 0 && blocked.body.retryAfterSeconds <= 60);
+  assert.equal(blocked.headers.get('Retry-After'), String(blocked.body.retryAfterSeconds));
+  assert.equal(calls, 6);
+  assert.equal(await h.store.request(blockedInput.requestId), undefined);
+  // A saved response stays available even while new reviews are limited.
+  assert.equal((await h.call(firstInput)).status, 200);
+  assert.equal(calls, 6);
 });
