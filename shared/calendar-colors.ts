@@ -25,3 +25,31 @@ export const CALENDAR_COLORS = [
   { id: '10', name: 'Базилик', hex: '#63a377' },
   { id: '11', name: 'Томат', hex: '#c85d55' },
 ] as const;
+
+// Full swatch palette. Legacy IDs remain valid; extra colors use native Google labels.
+export const CALENDAR_PALETTE = [
+  { id: '#b71c50', name: 'Малина', hex: '#b71c50' },
+  { id: '#e91e63', name: 'Роза', hex: '#e91e63' },
+  { id: '4', name: 'Фламинго', hex: '#e67c73' },
+  { id: '11', name: 'Томат', hex: '#d50000' },
+  { id: '6', name: 'Мандарин', hex: '#f4511e' },
+  { id: '#ef6c00', name: 'Тыква', hex: '#ef6c00' },
+  { id: '#f09300', name: 'Янтарь', hex: '#f09300' },
+  { id: '5', name: 'Банан', hex: '#f6bf26' },
+  { id: '#e4c441', name: 'Золото', hex: '#e4c441' },
+  { id: '#c0ca33', name: 'Лайм', hex: '#c0ca33' },
+  { id: '#7cb342', name: 'Авокадо', hex: '#7cb342' },
+  { id: '10', name: 'Базилик', hex: '#0b8043' },
+  { id: '2', name: 'Шалфей', hex: '#33b679' },
+  { id: '#009688', name: 'Мята', hex: '#009688' },
+  { id: '7', name: 'Бирюза', hex: '#039be5' },
+  { id: '#4285f4', name: 'Небо', hex: '#4285f4' },
+  { id: '1', name: 'Лаванда', hex: '#7986cb' },
+  { id: '9', name: 'Черника', hex: '#3f51b5' },
+  { id: '#b39ddb', name: 'Сирень', hex: '#b39ddb' },
+  { id: '#9e69af', name: 'Аметист', hex: '#9e69af' },
+  { id: '3', name: 'Виноград', hex: '#8e24aa' },
+  { id: '#795548', name: 'Какао', hex: '#795548' },
+  { id: '8', name: 'Графит', hex: '#616161' },
+  { id: '#a79b8e', name: 'Песок', hex: '#a79b8e' },
+] as const;

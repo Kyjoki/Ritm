@@ -89,8 +89,12 @@ export const api = {
   removeGoogleConfiguration: () =>
     request<GoogleOAuthSetup>('/integrations/google/configuration', 'DELETE'),
   googleStatus: () => request<GoogleCalendarStatus>('/integrations/google/status'),
-  connectGoogle: () =>
-    request<{ authorizationUrl: string }>('/integrations/google/connect', 'POST', {}),
+  connectGoogle: (extendedColors?: boolean) =>
+    request<{ authorizationUrl: string }>(
+      '/integrations/google/connect',
+      'POST',
+      extendedColors === undefined ? {} : { extendedColors },
+    ),
   disconnectGoogle: () =>
     request<GoogleCalendarStatus>('/integrations/google/connection', 'DELETE'),
   googleEvents: (from: string, to: string, timeZone: string, signal?: AbortSignal) =>

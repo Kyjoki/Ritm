@@ -9,6 +9,7 @@ import { createApp } from '../server/index.ts';
 import {
   GOOGLE_CALLBACK_PATH,
   GOOGLE_CALENDAR_SCOPE,
+  GOOGLE_CALENDAR_LABELS_SCOPE,
   GOOGLE_OAUTH_COOKIE,
 } from '../server/google-calendar.ts';
 
@@ -154,6 +155,7 @@ test('OAuth setup API is owner-only, strict, CSRF protected and never returns or
   const authorization = new URL(connected.body.authorizationUrl);
   assert.equal(authorization.searchParams.get('client_id'), clientId);
   assert.equal(authorization.searchParams.get('redirect_uri'), saved.body.redirectUri);
+  assert.equal(authorization.searchParams.get('scope'), GOOGLE_CALENDAR_SCOPE);
   const flowCookie = connected.response.headers.get('set-cookie')!.split(';')[0];
   const callback =
     '/integrations/google/callback?state=' +
@@ -180,6 +182,30 @@ test('OAuth setup API is owner-only, strict, CSRF protected and never returns or
   assert.equal(
     (await call('/integrations/google/status', 'GET', undefined, ownerCookie)).body.status,
     'connected',
+  );
+  const connectPath = '/integrations/google/connect';
+  assert.equal((await call(connectPath, 'POST', { extendedColors: true })).response.status, 401);
+  assert.equal(
+    (
+      await call(connectPath, 'POST', { extendedColors: true }, ownerCookie, {
+        Origin: 'https://evil.example',
+      })
+    ).response.status,
+    403,
+  );
+  for (const body of [
+    { extendedColors: 'true' },
+    { extendedColors: true, scope: 'https://evil.example' },
+  ])
+    assert.equal((await call(connectPath, 'POST', body, ownerCookie)).response.status, 400);
+  const extended = await call(connectPath, 'POST', { extendedColors: true }, ownerCookie);
+  assert.equal(extended.response.status, 200);
+  const scopes = new URL(extended.body.authorizationUrl).searchParams.get('scope')!.split(' ');
+  assert.deepEqual(scopes.sort(), [GOOGLE_CALENDAR_SCOPE, GOOGLE_CALENDAR_LABELS_SCOPE].sort());
+  assert.equal(
+    (await call('/integrations/google/status', 'GET', undefined, ownerCookie)).body.status,
+    'connected',
+    'An opt-in request must preserve the current usable grant before consent completes.',
   );
   assert.equal((await call(path, 'DELETE', undefined, undefined)).response.status, 401);
   assert.equal(

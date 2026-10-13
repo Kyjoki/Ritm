@@ -16,6 +16,8 @@ export function GoogleEventDialog({
   onClose,
   onSave,
   onDelete,
+  extendedColorsEnabled = false,
+  onEnableExtendedColors,
 }: {
   event?: GoogleCalendarEvent;
   draft?: Partial<GoogleEventInput>;
@@ -27,6 +29,8 @@ export function GoogleEventDialog({
     event?: GoogleCalendarEvent,
   ) => Promise<void>;
   onDelete?: (event: GoogleCalendarEvent) => Promise<void>;
+  extendedColorsEnabled?: boolean;
+  onEnableExtendedColors?: () => Promise<void>;
 }) {
   const [value, setValue] = useState<GoogleEventInput>(() =>
     event
@@ -55,6 +59,11 @@ export function GoogleEventDialog({
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const wasConfirming = useRef(false);
   const readOnly = Boolean(event && !canEditGoogleEvent(event, timeZone));
+  const needsColorPermission = Boolean(
+    value.colorId?.startsWith('#') &&
+    !extendedColorsEnabled &&
+    (!event || value.colorId !== event.colorId),
+  );
   useEffect(() => {
     if (confirmDelete && !busy) keepButtonRef.current?.focus();
     else if (!confirmDelete && wasConfirming.current) {
@@ -82,7 +91,15 @@ export function GoogleEventDialog({
   };
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (actionLock.current || busy || readOnly || confirmDelete || deleteConflict) return;
+    if (
+      actionLock.current ||
+      busy ||
+      readOnly ||
+      confirmDelete ||
+      deleteConflict ||
+      needsColorPermission
+    )
+      return;
     setError('');
     const candidate =
       retryLocked && attempt.current
@@ -94,7 +111,13 @@ export function GoogleEventDialog({
             time: value.allDay ? null : value.time,
           };
     const { repeat: _repeat, ...existingInput } = candidate;
-    const input = event ? existingInput : candidate;
+    // Preserve the provider's current color unless the user actually changes it.
+    const input =
+      event && candidate.colorId === (event.colorId ?? null)
+        ? (({ colorId: _color, ...unchangedColor }) => unchangedColor)(existingInput)
+        : event
+          ? existingInput
+          : candidate;
     if (
       !input.allDay &&
       (!input.time ||
@@ -252,6 +275,43 @@ export function GoogleEventDialog({
               </div>
             ) : null}
             <CalendarColorPicker value={value.colorId} onChange={(id) => set('colorId', id)} />
+            {!extendedColorsEnabled && onEnableExtendedColors ? (
+              <div className="calendar-color-permission">
+                <p className="field-hint">
+                  Для новых оттенков Google попросит разрешение на управление календарями. С ним
+                  цвет будет одинаковым в Ritm и Google.
+                </p>
+                <button
+                  className="text-button"
+                  type="button"
+                  disabled={busy}
+                  onClick={async () => {
+                    actionLock.current = true;
+                    setBusy(true);
+                    setError('');
+                    try {
+                      await onEnableExtendedColors();
+                    } catch (failure) {
+                      setError(
+                        failure instanceof Error
+                          ? failure.message
+                          : 'Не удалось открыть разрешение Google.',
+                      );
+                    } finally {
+                      actionLock.current = false;
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Разрешить новые цвета
+                </button>
+                {needsColorPermission ? (
+                  <p className="field-hint" role="status">
+                    Чтобы сохранить этот оттенок, сначала разреши новые цвета в Google.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             {!event ? (
               <label className="field">
                 Повторение
@@ -331,7 +391,13 @@ export function GoogleEventDialog({
                   <button
                     className="button button-primary"
                     type="submit"
-                    disabled={busy || deleteConflict || !value.title.trim() || !value.date}
+                    disabled={
+                      busy ||
+                      deleteConflict ||
+                      needsColorPermission ||
+                      !value.title.trim() ||
+                      !value.date
+                    }
                   >
                     {busy ? <LoaderCircle className="spinning" size={16} /> : null}
                     {busy

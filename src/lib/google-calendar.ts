@@ -172,8 +172,8 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
     },
     [invalidateRead],
   );
-  const connect = useCallback(async () => {
-    const { authorizationUrl } = await api.connectGoogle();
+  const connect = useCallback(async (extendedColors?: boolean) => {
+    const { authorizationUrl } = await api.connectGoogle(extendedColors);
     const url = googleAuthorizationUrl(authorizationUrl);
     window.location.assign(url.href);
   }, []);

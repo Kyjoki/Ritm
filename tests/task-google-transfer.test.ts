@@ -201,6 +201,25 @@ test('cached replay rechecks the connection after its database read to close rec
   assert.equal(f.store.tasks().length, 0);
 });
 
+test('custom-color migration can gain explicit Google permission after a pre-create refusal', async (t) => {
+  const f = fixture(t),
+    task = f.store.createTask({ ...base, colorId: '#B71C50' });
+  const create = f.google.createEvent;
+  f.google.createEvent = async () => {
+    throw new AppError(403, 'GOOGLE_EXTENDED_COLORS_REQUIRED', 'Разрешите новые цвета.');
+  };
+  await assert.rejects(f.runner(task.id), code('GOOGLE_EXTENDED_COLORS_REQUIRED'));
+  assert.equal(f.store.task(task.id).colorId, '#b71c50');
+  assert.equal(f.store.googleTransfer(task.id), undefined);
+  assert.equal(f.records.size, 0);
+  f.google.createEvent = create;
+  f.setIdentity('b'.repeat(64));
+  const result = await f.runner(task.id);
+  assert.equal(result.event.colorId, '#b71c50');
+  assert.equal(f.records.size, 1);
+  assert.equal(f.store.tasks().length, 0);
+});
+
 test('unknown Google outcome keeps the original snapshot and stable request ID across retries', async (t) => {
   const f = fixture(t),
     task = f.store.createTask(base),

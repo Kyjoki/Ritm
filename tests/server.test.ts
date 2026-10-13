@@ -391,14 +391,20 @@ test('task color API persists across reload and restore, rejects injected colors
   const bootstrap = await h.call('/bootstrap');
   assert.equal(bootstrap.body.tasks[0].colorId, '10');
   assert.equal(bootstrap.body.tasks[0].time, baseTask.time);
-  assert.equal((await h.call(`/tasks/${id}`, 'PATCH', { colorId: '#ff0000' })).status, 400);
+  const custom = await h.call(`/tasks/${id}`, 'PATCH', { colorId: '#E91E63' });
+  assert.equal(custom.status, 200);
+  assert.equal(custom.body.colorId, '#e91e63');
+  assert.equal(
+    (await h.call(`/tasks/${id}`, 'PATCH', { colorId: '#ff0000; color:red' })).status,
+    400,
+  );
   assert.equal((await h.call(`/tasks/${id}`, 'PATCH', { colorId: '99' })).status, 400);
   assert.equal((await h.call(`/tasks/${id}`, 'PATCH', { colorId: { style: 'red' } })).status, 400);
-  assert.equal(h.store.task(id).colorId, '10');
+  assert.equal(h.store.task(id).colorId, '#e91e63');
   const deleted = await h.call(`/tasks/${id}`, 'DELETE');
   assert.equal(
     (await h.call('/tasks/restore', 'POST', { task: deleted.body.deletedTask })).body.colorId,
-    '10',
+    '#e91e63',
   );
   assert.equal((await h.call(`/tasks/${id}`, 'PATCH', { colorId: null })).body.colorId, null);
 });

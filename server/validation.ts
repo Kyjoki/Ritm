@@ -9,6 +9,13 @@ export const dateValue = z
     return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
   }, 'Укажите существующую дату.');
 export const timeValue = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
+export const calendarColorSchema = z.union([
+  z.enum(CALENDAR_COLOR_IDS),
+  z
+    .string()
+    .regex(/^#[0-9a-f]{6}$/i)
+    .transform((value) => value.toLowerCase()),
+]);
 export const minutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
 
 export const scheduleShape = {
@@ -25,7 +32,7 @@ const taskFields = z
     repeat: z.enum(['none', 'daily', 'weekly', 'monthly']),
     kind: z.enum(['task', 'event']),
     completed: z.boolean(),
-    colorId: z.enum(CALENDAR_COLOR_IDS).nullable().optional(),
+    colorId: calendarColorSchema.nullable().optional(),
   })
   .strict();
 

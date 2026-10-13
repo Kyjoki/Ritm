@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Credentials } from 'google-auth-library';
 import type { GoogleEventInput, Settings } from '../shared/types.ts';
-import { CALENDAR_COLOR_IDS } from '../shared/calendar-colors.ts';
+import { CALENDAR_COLOR_IDS, CALENDAR_PALETTE } from '../shared/calendar-colors.ts';
 import { AppError } from '../server/errors.ts';
 import { defaultSettings } from '../server/store.ts';
 import {
   createGoogleCalendarService,
   GOOGLE_CALLBACK_PATH,
   GOOGLE_CALENDAR_SCOPE,
+  GOOGLE_CALENDAR_LABELS_SCOPE,
   googleEventInputSchema,
   googleZonedInstant,
   mapGoogleEvent,
@@ -113,12 +114,12 @@ function fixture(
     transport,
     now: () => clock,
   });
-  const start = async () => {
-    const flow = await service.connect(owner);
+  const start = async (options?: { extendedColors?: boolean }) => {
+    const flow = await service.connect(owner, options);
     return { ...flow, state: new URL(flow.authorizationUrl).searchParams.get('state')! };
   };
-  const connect = async () => {
-    const flow = await start();
+  const connect = async (options?: { extendedColors?: boolean }) => {
+    const flow = await start(options);
     await service.callback({
       state: flow.state,
       code: 'test-code',
@@ -143,6 +144,112 @@ function fixture(
 }
 const rejectsCode = (code: string) => (error: unknown) =>
   error instanceof AppError && error.code === code;
+
+const fullCredentials = (
+  scope = GOOGLE_CALENDAR_SCOPE + ' ' + GOOGLE_CALENDAR_LABELS_SCOPE,
+): Credentials => ({
+  access_token: fakeAccess,
+  refresh_token: fakeRefresh,
+  expiry_date: now + 3_600_000,
+  scope,
+});
+function labelFixture() {
+  type Label = { id: string; backgroundColor: string; name?: string };
+  const labels: Label[] = [],
+    records = new Map<string, Record<string, unknown>>(),
+    requests: GoogleRequest[] = [];
+  let calendarVersion = 1,
+    eventVersion = 1,
+    conflicts = 0,
+    addConcurrent = false,
+    failPost = false;
+  const f = fixture({
+    exchangeCode: async () => fullCredentials(),
+    refreshToken: async () => fullCredentials(),
+    request: async (_config, _token, request) => {
+      requests.push(structuredClone({ ...request, signal: undefined }));
+      if (request.resource === 'calendar') {
+        if (request.method === 'GET') {
+          assert.equal(request.query?.eventLabelVersion, undefined);
+          return {
+            etag: '"calendar-' + calendarVersion + '"',
+            summary: 'Не менять',
+            timeZone: 'Europe/London',
+            labelProperties: { eventLabels: structuredClone(labels) },
+          };
+        }
+        assert.equal(request.method, 'PATCH');
+        assert.deepEqual(Object.keys(request.body!), ['labelProperties']);
+        assert.equal(request.headers?.['If-Match'], '"calendar-' + calendarVersion + '"');
+        if (conflicts > 0) {
+          conflicts--;
+          calendarVersion++;
+          if (addConcurrent) {
+            addConcurrent = false;
+            labels.push({ id: randomUUID(), backgroundColor: '#abcdef', name: 'Чужая метка' });
+          }
+          throw { response: { status: 412 } };
+        }
+        labels.splice(
+          0,
+          labels.length,
+          ...(request.body!.labelProperties as { eventLabels: Label[] }).eventLabels,
+        );
+        calendarVersion++;
+        return {
+          etag: '"calendar-' + calendarVersion + '"',
+          labelProperties: { eventLabels: structuredClone(labels) },
+        };
+      }
+      if (request.method === 'GET')
+        return request.eventId
+          ? records.get(request.eventId)
+          : { accessRole: 'owner', items: [...records.values()] };
+      if (request.method === 'POST') {
+        const id = request.body!.id as string;
+        if (records.has(id)) throw { response: { status: 409 } };
+        const record = {
+          ...request.body!,
+          etag: '"event-' + eventVersion++ + '"',
+          organizer: { self: true },
+        };
+        records.set(id, record);
+        if (failPost) {
+          failPost = false;
+          throw new Error('Lost provider response');
+        }
+        return record;
+      }
+      assert.equal(request.method, 'PATCH');
+      const original = records.get(request.eventId!)!;
+      assert.equal(request.headers?.['If-Match'], original.etag);
+      const record: Record<string, unknown> = {
+        ...original,
+        ...request.body!,
+        etag: '"event-' + eventVersion++ + '"',
+      };
+      if (record.eventLabelId === '') {
+        delete record.eventLabelId;
+        delete record.colorId;
+      }
+      records.set(request.eventId!, record);
+      return record;
+    },
+  });
+  return {
+    ...f,
+    labels,
+    records,
+    labelRequests: requests,
+    conflict: (count: number, concurrent = false) => {
+      conflicts = count;
+      addConcurrent = concurrent;
+    },
+    lostResponse: () => {
+      failPost = true;
+    },
+  };
+}
 
 test('missing OAuth config remains unconfigured and does not call Google', async () => {
   const f = fixture({}, {});
@@ -793,7 +900,19 @@ test('colors are read from list metadata, written to Google and preserved or res
 test('unknown color IDs and event identity mismatches are rejected before writing', async () => {
   for (const colorId of CALENDAR_COLOR_IDS)
     assert.equal(googleEventInputSchema.safeParse({ ...eventInput, colorId }).success, true);
-  for (const colorId of ['0', '12', '01', '', 'violet', '#ff0000', ' 1', 1])
+  for (const colorId of [
+    '0',
+    '12',
+    '01',
+    '',
+    'violet',
+    '#fff',
+    '#ff0000;',
+    '#gg0000',
+    ' #ff0000',
+    ' 1',
+    1,
+  ])
     assert.equal(googleEventInputSchema.safeParse({ ...eventInput, colorId }).success, false);
   assert.equal(googleEventInputSchema.safeParse({ ...eventInput, colorId: null }).success, true);
   assert.equal(googleEventInputSchema.safeParse(eventInput).success, true);
@@ -1036,6 +1155,308 @@ test('Google deletion preserves series, ownership, locks and stale-version barri
     f.service.deleteEvent('event12345', '"v1"'),
     rejectsCode('GOOGLE_INVALID_EVENT'),
   );
+});
+
+test('extended color consent is opt-in and incomplete or denied consent keeps the existing grant', async () => {
+  let scope = GOOGLE_CALENDAR_SCOPE;
+  const f = fixture({ exchangeCode: async () => fullCredentials(scope) });
+  await f.connect();
+  const original = f.secrets.values.get('google.tokens');
+  assert.equal((await f.service.status()).extendedColors, false);
+  const extended = await f.start({ extendedColors: true });
+  assert.equal(
+    new URL(extended.authorizationUrl).searchParams.get('scope'),
+    GOOGLE_CALENDAR_SCOPE + ' ' + GOOGLE_CALENDAR_LABELS_SCOPE,
+  );
+  assert.equal(f.secrets.values.get('google.tokens'), original);
+  await assert.rejects(
+    f.service.callback({
+      state: extended.state,
+      code: 'test-code',
+      correlationCookie: extended.correlationCookie,
+    }),
+    rejectsCode('GOOGLE_LABEL_SCOPE_REQUIRED'),
+  );
+  assert.equal(f.secrets.values.get('google.tokens'), original);
+  const denied = await f.start({ extendedColors: true });
+  await assert.rejects(
+    f.service.callback({
+      state: denied.state,
+      error: 'access_denied',
+      correlationCookie: denied.correlationCookie,
+    }),
+    rejectsCode('GOOGLE_CONSENT_DENIED'),
+  );
+  assert.equal(f.secrets.values.get('google.tokens'), original);
+  scope += ' ' + GOOGLE_CALENDAR_LABELS_SCOPE;
+  await f.connect({ extendedColors: true });
+  assert.equal((await f.service.status()).extendedColors, true);
+  const reconnect = await f.connect();
+  assert.equal(new URL(reconnect.authorizationUrl).searchParams.get('scope'), scope);
+  assert.equal((await f.service.status()).extendedColors, true);
+});
+
+test('the full 24-color palette is written natively and create retries never duplicate labels or events', async () => {
+  const f = labelFixture();
+  await f.connect({ extendedColors: true });
+  for (const color of CALENDAR_PALETTE) {
+    const id = randomUUID(),
+      input = { ...eventInput, colorId: color.id };
+    const event = await f.service.createEvent(input, id);
+    const post = f.labelRequests
+      .filter((request) => !request.resource && request.method === 'POST')
+      .at(-1)!;
+    assert.equal(post.query?.eventLabelVersion, 1);
+    assert.equal(Object.hasOwn(post.body!, 'colorId'), false);
+    const label = f.labels.find((label) => label.id === post.body!.eventLabelId)!;
+    assert.equal(label.backgroundColor, color.hex);
+    assert.equal(event.colorId, color.id);
+    assert.equal((await f.service.createEvent(input, id)).id, event.id);
+  }
+  assert.equal(f.labels.length, 24);
+  assert.equal(f.records.size, 24);
+  assert.equal(
+    f.labelRequests.filter(
+      (request) => request.resource === 'calendar' && request.method === 'PATCH',
+    ).length,
+    24,
+  );
+  const custom = await f.service.createEvent({ ...eventInput, colorId: '#12Ab34' }, randomUUID());
+  assert.equal(custom.colorId, '#12ab34');
+  assert.equal(
+    googleEventInputSchema.parse({ ...eventInput, colorId: '#12Ab34' }).colorId,
+    '#12ab34',
+  );
+});
+
+test('legacy grant still supports legacy colors and cannot write a custom color without consent', async () => {
+  const calls: GoogleRequest[] = [];
+  const f = fixture({
+    request: async (_config, _token, request) => {
+      calls.push(request);
+      return { ...request.body!, etag: '"v1"', organizer: { self: true } };
+    },
+  });
+  await f.connect();
+  await assert.rejects(
+    f.service.createEvent({ ...eventInput, colorId: '#b71c50' }, randomUUID()),
+    rejectsCode('GOOGLE_EXTENDED_COLORS_REQUIRED'),
+  );
+  assert.equal(calls.length, 0);
+  const created = await f.service.createEvent({ ...eventInput, colorId: '10' }, randomUUID());
+  assert.equal(created.colorId, '10');
+  assert.equal(calls[0].body!.colorId, '10');
+  assert.equal(calls[0].query?.eventLabelVersion, undefined);
+  assert.equal(calls[0].resource, undefined);
+});
+
+test('list reads labels once, gives exact native colors priority, and retains ordinary legacy colors', async () => {
+  let calendarReads = 0,
+    eventReads = 0;
+  const customId = randomUUID(),
+    knownId = randomUUID();
+  const f = fixture({
+    exchangeCode: async () => fullCredentials(),
+    request: async (_config, _token, request) => {
+      assert.equal(request.method, 'GET');
+      assert.equal(request.query?.eventLabelVersion, undefined);
+      if (request.resource === 'calendar') {
+        calendarReads++;
+        return {
+          etag: '"cal"',
+          labelProperties: {
+            eventLabels: [
+              { id: customId, backgroundColor: '#12AB34', name: 'Внешний цвет' },
+              { id: knownId, backgroundColor: '#0B8043' },
+            ],
+          },
+        };
+      }
+      eventReads++;
+      assert.ok(String(request.query?.fields).includes('eventLabelId'));
+      if (!request.query?.pageToken)
+        return {
+          accessRole: 'owner',
+          items: [rawEvent({ id: 'custom123', eventLabelId: customId, colorId: '4' })],
+          nextPageToken: 'next',
+        };
+      return {
+        accessRole: 'owner',
+        items: [
+          rawEvent({ id: 'known123', eventLabelId: knownId }),
+          rawEvent({ id: 'legacy123', colorId: '9' }),
+        ],
+      };
+    },
+  });
+  await f.connect({ extendedColors: true });
+  const listed = await f.service.listEvents({
+    from: '2026-10-13',
+    to: '2026-10-14',
+    timeZone: 'Asia/Qyzylorda',
+  });
+  assert.deepEqual(
+    listed.events.map((event) => [event.id, event.colorId]),
+    [
+      ['custom123', '#12ab34'],
+      ['known123', '10'],
+      ['legacy123', '9'],
+    ],
+  );
+  assert.equal(calendarReads, 1);
+  assert.equal(eventReads, 2);
+  assert.equal(listed.partial, false);
+});
+
+test('native update preserves omitted colors and unrelated fields and resets explicitly with empty eventLabelId', async () => {
+  const f = labelFixture();
+  await f.connect({ extendedColors: true });
+  const created = await f.service.createEvent({ ...eventInput, colorId: '#b71c50' }, randomUUID());
+  const original = f.records.get(created.id)!;
+  const metadata = {
+    location: 'Спортзал',
+    reminders: { useDefault: true },
+    conferenceData: { conferenceId: 'external' },
+    visibility: 'private',
+  };
+  Object.assign(original, metadata);
+  const preserved = await f.service.updateEvent(
+    created.id,
+    { ...eventInput, title: 'Новое название' },
+    created.etag,
+  );
+  const noColor = f.labelRequests
+    .filter((request) => !request.resource && request.method === 'PATCH')
+    .at(-1)!;
+  assert.equal(Object.hasOwn(noColor.body!, 'colorId'), false);
+  assert.equal(Object.hasOwn(noColor.body!, 'eventLabelId'), false);
+  assert.equal(preserved.colorId, '#b71c50');
+  for (const [key, value] of Object.entries(metadata))
+    assert.deepEqual(f.records.get(created.id)![key], value);
+  const legacy = await f.service.updateEvent(
+    created.id,
+    { ...eventInput, colorId: '9' },
+    preserved.etag,
+  );
+  assert.equal(legacy.colorId, '9');
+  const changed = f.labelRequests
+    .filter((request) => !request.resource && request.method === 'PATCH')
+    .at(-1)!;
+  assert.equal(changed.query?.eventLabelVersion, 1);
+  assert.equal(Object.hasOwn(changed.body!, 'colorId'), false);
+  const cleared = await f.service.updateEvent(
+    created.id,
+    { ...eventInput, colorId: null },
+    legacy.etag,
+  );
+  const reset = f.labelRequests
+    .filter((request) => !request.resource && request.method === 'PATCH')
+    .at(-1)!;
+  assert.equal(reset.body!.eventLabelId, '');
+  assert.equal(reset.query?.eventLabelVersion, 1);
+  assert.equal(cleared.colorId, undefined);
+  const before = f.labelRequests.length;
+  await assert.rejects(
+    f.service.updateEvent(created.id, { ...eventInput, colorId: '#e91e63' }, '"stale"'),
+    rejectsCode('CONFLICT'),
+  );
+  assert.equal(
+    f.labelRequests.length,
+    before + 1,
+    'A stale event cannot mutate the calendar palette.',
+  );
+});
+
+test('If-Match retry merges concurrent foreign labels and stops after a bounded conflict count', async () => {
+  const f = labelFixture();
+  await f.connect({ extendedColors: true });
+  f.labels.push({ id: randomUUID(), backgroundColor: '#112233', name: 'Существующая' });
+  f.conflict(1, true);
+  const event = await f.service.createEvent({ ...eventInput, colorId: '#b71c50' }, randomUUID());
+  assert.equal(event.colorId, '#b71c50');
+  assert.equal(f.labels.length, 3);
+  assert.deepEqual(
+    f.labels.slice(0, 2).map((label) => label.name),
+    ['Существующая', 'Чужая метка'],
+  );
+  assert.equal(
+    f.labelRequests.filter((request) => request.resource && request.method === 'PATCH').length,
+    2,
+  );
+  const posts = f.labelRequests.filter(
+    (request) => !request.resource && request.method === 'POST',
+  ).length;
+  f.conflict(10);
+  await assert.rejects(
+    f.service.createEvent({ ...eventInput, colorId: '#e91e63' }, randomUUID()),
+    rejectsCode('CONFLICT'),
+  );
+  assert.equal(
+    f.labelRequests.filter((request) => request.resource && request.method === 'PATCH').length,
+    5,
+  );
+  assert.equal(
+    f.labelRequests.filter((request) => !request.resource && request.method === 'POST').length,
+    posts,
+  );
+});
+
+test('label cap reuses case-insensitive exact colors and stable UUID collisions never overwrite another label', async () => {
+  const f = labelFixture();
+  await f.connect({ extendedColors: true });
+  for (let index = 0; index < 200; index++)
+    f.labels.push({
+      id: randomUUID(),
+      backgroundColor: index === 100 ? '#B71C50' : '#' + index.toString(16).padStart(6, '0'),
+      name: 'Внешняя ' + index,
+    });
+  const reused = await f.service.createEvent({ ...eventInput, colorId: '#b71c50' }, randomUUID());
+  assert.equal(reused.colorId, '#b71c50');
+  assert.equal(
+    f.labelRequests.filter((request) => request.resource && request.method === 'PATCH').length,
+    0,
+  );
+  await assert.rejects(
+    f.service.createEvent({ ...eventInput, colorId: '#e91e63' }, randomUUID()),
+    rejectsCode('GOOGLE_LABEL_LIMIT'),
+  );
+  f.labels.splice(0);
+  await f.service.createEvent({ ...eventInput, colorId: '#b71c50' }, randomUUID());
+  const id = f.labels[0].id;
+  f.labels[0].backgroundColor = '#112233';
+  const patches = f.labelRequests.filter(
+    (request) => request.resource && request.method === 'PATCH',
+  ).length;
+  await assert.rejects(
+    f.service.createEvent({ ...eventInput, colorId: '#b71c50' }, randomUUID()),
+    rejectsCode('CONFLICT'),
+  );
+  assert.deepEqual(f.labels[0], { id, backgroundColor: '#112233', name: 'Ritm · Малина' });
+  assert.equal(
+    f.labelRequests.filter((request) => request.resource && request.method === 'PATCH').length,
+    patches,
+  );
+});
+
+test('a lost native create response retries with the same event ID, label and logical fingerprint', async () => {
+  const f = labelFixture();
+  await f.connect({ extendedColors: true });
+  const id = randomUUID(),
+    input = { ...eventInput, colorId: '#b71c50' };
+  f.lostResponse();
+  await assert.rejects(f.service.createEvent(input, id), rejectsCode('GOOGLE_UNAVAILABLE'));
+  const event = await f.service.createEvent(input, id);
+  assert.equal(event.colorId, '#b71c50');
+  assert.equal(f.labels.length, 1);
+  assert.equal(f.records.size, 1);
+  const posts = f.labelRequests.filter((request) => !request.resource && request.method === 'POST');
+  assert.equal(posts.length, 2);
+  assert.deepEqual(posts[0].body, posts[1].body);
+  await assert.rejects(
+    f.service.createEvent({ ...input, colorId: '#e91e63' }, id),
+    rejectsCode('CONFLICT'),
+  );
+  assert.equal(f.records.size, 1);
 });
 
 test('read deadline aborts the transport and never returns stale availability', async () => {

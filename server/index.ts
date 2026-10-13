@@ -280,14 +280,15 @@ export function createApp(options: AppOptions = {}) {
     res.json(await google.removeConfiguration());
   });
   app.post('/api/integrations/google/connect', async (req, res) => {
-    z.object({})
+    const input = z
+      .object({ extendedColors: z.boolean().optional() })
       .strict()
       .parse(req.body ?? {});
     await security.limit(req, 'google-connect', 10, 60_000);
     const owner = await security.ownerSession(req);
     if (!owner)
       throw new AppError(401, 'AUTH_REQUIRED', 'Войдите в Ritm перед подключением Google.');
-    const connection = await google.connect(owner);
+    const connection = await google.connect(owner, input);
     res.cookie(GOOGLE_OAUTH_COOKIE, connection.correlationCookie, {
       httpOnly: true,
       sameSite: 'lax',

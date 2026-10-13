@@ -378,6 +378,10 @@ export default function App() {
   const saveTask = async (value: TaskInput, id?: string) => {
     if (value.date && google.status.status !== 'connected')
       throw new Error('Подключи Google Calendar в настройках, чтобы назначить дату записи.');
+    if (value.date && value.colorId?.startsWith('#') && !google.status.extendedColors)
+      throw new Error(
+        'Разреши новые цвета в Настройках → Google Calendar, чтобы сохранить этот оттенок в календаре.',
+      );
     const task = id ? await api.updateTask(id, value) : await api.createTask(value);
     putTask(task);
     notify(
@@ -756,6 +760,8 @@ export default function App() {
       {googleDialog ? (
         <GoogleEventDialog
           {...googleDialog}
+          extendedColorsEnabled={google.status.extendedColors ?? false}
+          onEnableExtendedColors={() => google.connect(true)}
           timeZone={data.settings.timeZone}
           onClose={() => {
             setGoogleDialog(null);

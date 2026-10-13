@@ -89,6 +89,7 @@ export interface GoogleCalendarStatus {
   mode: 'readwrite';
   calendarId: 'primary';
   lastFetchedAt: string | null;
+  extendedColors?: boolean;
 }
 export interface GoogleOAuthSetup {
   configured: boolean;

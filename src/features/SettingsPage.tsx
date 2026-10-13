@@ -31,7 +31,7 @@ interface SettingsPageProps {
   settings: Settings;
   aiStatus: AiStatus;
   googleStatus: GoogleCalendarStatus;
-  onConnectGoogle: () => Promise<void>;
+  onConnectGoogle: (extendedColors?: boolean) => Promise<void>;
   onDisconnectGoogle: () => Promise<void>;
   onGoogleConfigured?: () => Promise<void>;
   onSave: (settings: Settings) => Promise<void>;
@@ -96,7 +96,7 @@ export function SettingsPage({
   const secretInputRef = useRef<HTMLInputElement>(null);
   const titleId = useId();
   const previousSettings = useRef(settings);
-  async function googleAction(disconnect = false) {
+  async function googleAction(disconnect = false, extendedColors?: boolean) {
     setGoogleBusy(true);
     setGoogleError('');
     try {
@@ -105,7 +105,7 @@ export function SettingsPage({
         setGoogleStatusUnknown(false);
         setConfirmGoogleDisconnect(false);
         setConnectionNotice('Google Calendar отключён от Ritm.');
-      } else await onConnectGoogle();
+      } else await onConnectGoogle(extendedColors);
     } catch (error) {
       setGoogleError(errorText(error));
     } finally {
@@ -555,6 +555,13 @@ export function SettingsPage({
                       ? 'Основной календарь · просмотр, создание и редактирование событий'
                       : 'Добавьте Client ID и Client Secret из Google Cloud'}
                   </small>
+                  {googleStatus.status === 'connected' ? (
+                    <small>
+                      {googleStatus.extendedColors
+                        ? 'Полная палитра включена'
+                        : 'Для новых оттенков Google попросит разрешение на управление календарями.'}
+                    </small>
+                  ) : null}
                 </div>
                 <div className="settings-connection-actions">
                   <button
@@ -582,6 +589,18 @@ export function SettingsPage({
                             ['connected', 'reauth_required'].includes(googleStatus.status)
                           ? 'Переподключить'
                           : 'Подключить'}
+                    </button>
+                  ) : null}
+                  {googleConfiguredLocally &&
+                  googleStatus.status === 'connected' &&
+                  !googleStatus.extendedColors ? (
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      disabled={googleBusy}
+                      onClick={() => void googleAction(false, true)}
+                    >
+                      Разрешить новые цвета
                     </button>
                   ) : null}
                   {googleConfiguredLocally &&

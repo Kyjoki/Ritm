@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { performance } from 'node:perf_hooks';
 import { CodeChallengeMethod, OAuth2Client, type Credentials } from 'google-auth-library';
 import { z } from 'zod';
-import { CALENDAR_COLOR_IDS } from '../shared/calendar-colors.ts';
+import { CALENDAR_PALETTE } from '../shared/calendar-colors.ts';
 import type {
   GoogleCalendarEvent,
   GoogleCalendarResult,
@@ -13,11 +13,13 @@ import type {
   Settings,
 } from '../shared/types.ts';
 import { AppError, conflict } from './errors.ts';
-import { dateValue, minutes, timeValue } from './validation.ts';
+import { calendarColorSchema, dateValue, minutes, timeValue } from './validation.ts';
 
 export const GOOGLE_CALLBACK_PATH = '/api/integrations/google/callback';
 export const GOOGLE_OAUTH_COOKIE = 'ritm_google_flow';
 export const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+export const GOOGLE_CALENDAR_LABELS_SCOPE = 'https://www.googleapis.com/auth/calendar.calendars';
+const CALENDAR_URL = 'https://www.googleapis.com/calendar/v3/calendars/primary';
 const EVENTS_URL = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
 const TOKEN_SLOT = 'google.tokens';
 const CONFIGURATION_SLOT = 'google.oauth.configuration';
@@ -48,6 +50,7 @@ export interface GoogleOAuthConfig {
 }
 export interface GoogleRequest {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  resource?: 'calendar';
   eventId?: string;
   query?: Record<string, string | number | boolean>;
   body?: Record<string, unknown>;
@@ -77,6 +80,7 @@ const flowSchema = z
     expiresAt: z.number().int(),
     configFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
     epoch: z.string().uuid(),
+    extendedColors: z.boolean().optional(),
   })
   .strict();
 const tokensSchema = z
@@ -90,6 +94,7 @@ const tokensSchema = z
     connectionId: z.string().uuid(),
     epoch: z.string().uuid().optional(),
     lastFetchedAt: z.string().nullable(),
+    extendedColors: z.boolean().optional(),
   })
   .strict();
 type StoredTokens = z.infer<typeof tokensSchema>;
@@ -127,7 +132,7 @@ export const googleEventInputSchema = z
     time: timeValue.nullable(),
     duration: z.number().int().min(5).max(720),
     allDay: z.boolean(),
-    colorId: z.enum(CALENDAR_COLOR_IDS).nullable().optional(),
+    colorId: calendarColorSchema.nullable().optional(),
     repeat: z.enum(['none', 'daily', 'weekly', 'monthly']).optional(),
   })
   .strict()
@@ -219,12 +224,20 @@ export const defaultGoogleTransport: GoogleTransport = {
     return (await client.refreshAccessToken()).credentials;
   },
   async request(config, accessToken, request) {
+    if (
+      request.resource === 'calendar' &&
+      (request.eventId || !['GET', 'PATCH'].includes(request.method))
+    )
+      throw new Error('Unsupported Google calendar metadata operation');
     const client = oauthClient(config);
     // Refresh is coordinated through the durable lease, never independently by this API client.
     client.setCredentials({ access_token: accessToken });
-    const url = request.eventId
-      ? `${EVENTS_URL}/${encodeURIComponent(request.eventId)}`
-      : EVENTS_URL;
+    const url =
+      request.resource === 'calendar'
+        ? CALENDAR_URL
+        : request.eventId
+          ? `${EVENTS_URL}/${encodeURIComponent(request.eventId)}`
+          : EVENTS_URL;
     const response = await client.request({
       url,
       method: request.method,
@@ -378,7 +391,6 @@ export function googleZonedInstant(date: string, time: string, timeZone: string)
 }
 
 function eventBody(input: GoogleEventInput, timeZone: string) {
-  const color = input.colorId === undefined ? {} : { colorId: input.colorId };
   const frequency = { daily: 'DAILY', weekly: 'WEEKLY', monthly: 'MONTHLY' };
   const recurrence =
     input.repeat && input.repeat !== 'none'
@@ -393,7 +405,6 @@ function eventBody(input: GoogleEventInput, timeZone: string) {
         date: dateShift(input.date, 1),
         ...(input.repeat && input.repeat !== 'none' ? { timeZone } : {}),
       },
-      ...color,
       ...recurrence,
     };
   const start = googleZonedInstant(input.date, input.time!, timeZone),
@@ -413,7 +424,6 @@ function eventBody(input: GoogleEventInput, timeZone: string) {
     description: input.description,
     start: { dateTime: new Date(start).toISOString(), timeZone },
     end: { dateTime: new Date(end).toISOString(), timeZone },
-    ...color,
     ...recurrence,
   };
 }
@@ -424,6 +434,7 @@ const eventSchema = z
     etag: z.string().max(256),
     summary: z.string().optional(),
     colorId: z.string().max(64).optional(),
+    eventLabelId: z.string().max(128).optional(),
     description: z.string().optional(),
     status: z.string().optional(),
     start: z.object({
@@ -444,10 +455,57 @@ const eventSchema = z
   })
   .passthrough();
 
+const labelSchema = z
+  .object({
+    id: z.string().uuid(),
+    backgroundColor: z.string().regex(/^#[0-9a-f]{6}$/i),
+    name: z.string().max(50).optional(),
+  })
+  .passthrough();
+const calendarLabelsSchema = z
+  .object({
+    etag: googleEtagSchema,
+    labelProperties: z
+      .object({ eventLabels: z.array(labelSchema).max(200).optional() })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+type CalendarLabels = z.infer<typeof calendarLabelsSchema>;
+const labelColors = (calendar: CalendarLabels) =>
+  new Map(
+    (calendar.labelProperties?.eventLabels ?? []).map(
+      (label) => [label.id, label.backgroundColor.toLowerCase()] as const,
+    ),
+  );
+function usesExtendedColors(tokens: StoredTokens | null) {
+  return Boolean(
+    tokens?.extendedColors &&
+    tokens.scope
+      .split(/\s+/)
+      .some((scope) =>
+        [GOOGLE_CALENDAR_LABELS_SCOPE, 'https://www.googleapis.com/auth/calendar'].includes(scope),
+      ),
+  );
+}
+const colorValue = (hex: string) =>
+  CALENDAR_PALETTE.find((color) => !color.id.startsWith('#') && color.hex === hex)?.id ?? hex;
+function stableLabelId(hex: string) {
+  const bytes = createHash('sha256')
+    .update('Ritm:calendar-label:' + hex)
+    .digest()
+    .subarray(0, 16);
+  bytes[6] = (bytes[6] & 15) | 80;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const value = bytes.toString('hex');
+  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+}
+
 export function mapGoogleEvent(
   value: unknown,
   timeZone: string,
   accessRole = 'owner',
+  labels: ReadonlyMap<string, string> = new Map(),
 ): GoogleCalendarEvent | null {
   if (value && typeof value === 'object' && (value as { status?: unknown }).status === 'cancelled')
     return null;
@@ -527,6 +585,8 @@ export function mapGoogleEvent(
                 : !googleEtagSchema.safeParse(event.etag).success
                   ? 'Не удалось определить версию события. Обновите календарь перед изменением.'
                   : undefined;
+  const nativeColor = event.eventLabelId ? labels.get(event.eventLabelId) : undefined;
+  const selectedColor = nativeColor ? colorValue(nativeColor) : event.colorId;
   return {
     id: event.id,
     source: 'google',
@@ -541,7 +601,7 @@ export function mapGoogleEvent(
     busy: event.transparency !== 'transparent',
     readOnly: Boolean(readOnlyReason),
     recurring: Boolean(event.recurringEventId || event.recurrence !== undefined),
-    ...(event.colorId ? { colorId: event.colorId } : {}),
+    ...(selectedColor ? { colorId: selectedColor } : {}),
     ...(readOnlyReason ? { readOnlyReason } : {}),
   };
 }
@@ -810,9 +870,15 @@ export class GoogleCalendarService {
       mode: 'readwrite',
       calendarId: 'primary',
       lastFetchedAt: tokens?.lastFetchedAt ?? null,
+      extendedColors:
+        usesExtendedColors(tokens) &&
+        Boolean(config) &&
+        tokens?.configFingerprint === this.fingerprint(config!) &&
+        tokens?.epoch === epoch &&
+        !tokens?.needsReauth,
     };
   }
-  async connect(ownerSessionHash: string) {
+  async connect(ownerSessionHash: string, options: { extendedColors?: boolean } = {}) {
     if (
       !ownerHashPattern.test(ownerSessionHash) ||
       !(await this.options.security.hasOwnerSession(ownerSessionHash))
@@ -820,6 +886,7 @@ export class GoogleCalendarService {
       throw new AppError(401, 'AUTH_REQUIRED', 'Войдите в Ritm перед подключением Google.');
     return this.withLease(async (assertActive) => {
       const config = await this.oauthConfiguration(),
+        extendedColors = options.extendedColors ?? usesExtendedColors(await this.readTokens()),
         client = oauthClient(config),
         verifier = await client.generateCodeVerifierAsync();
       if (!(await this.options.security.hasOwnerSession(ownerSessionHash)))
@@ -850,13 +917,14 @@ export class GoogleCalendarService {
           expiresAt,
           configFingerprint: this.fingerprint(config),
           epoch,
+          extendedColors,
         }),
       );
       assertActive();
       await this.options.secrets.saveSecret(ownerSlot, stateHash);
       await this.assertConfiguration(config, epoch);
       const authorizationUrl = client.generateAuthUrl({
-        scope: [GOOGLE_CALENDAR_SCOPE],
+        scope: [GOOGLE_CALENDAR_SCOPE, ...(extendedColors ? [GOOGLE_CALENDAR_LABELS_SCOPE] : [])],
         state,
         access_type: 'offline',
         prompt: 'consent',
@@ -975,6 +1043,21 @@ export class GoogleCalendarService {
           'GOOGLE_OFFLINE_REQUIRED',
           'Google не предоставил постоянный доступ. Подключите календарь заново с подтверждением разрешения.',
         );
+      if (
+        flow.extendedColors &&
+        !scope
+          .split(/\s+/)
+          .some((scope) =>
+            [GOOGLE_CALENDAR_LABELS_SCOPE, 'https://www.googleapis.com/auth/calendar'].includes(
+              scope,
+            ),
+          )
+      )
+        throw new AppError(
+          403,
+          'GOOGLE_LABEL_SCOPE_REQUIRED',
+          'Для всей палитры разрешите изменение свойств календаря Google. Прежнее подключение сохранено.',
+        );
       const tokens: StoredTokens = {
         accessToken: credentials.access_token,
         refreshToken: credentials.refresh_token,
@@ -985,6 +1068,7 @@ export class GoogleCalendarService {
         connectionId: randomUUID(),
         epoch: flow.epoch,
         lastFetchedAt: null,
+        extendedColors: flow.extendedColors === true,
       };
       if (!(await this.options.security.hasOwnerSession(flow.ownerSessionHash)))
         throw new AppError(
@@ -1093,6 +1177,117 @@ export class GoogleCalendarService {
       }
     });
   }
+  private async calendarLabels(
+    connection: GoogleConnection,
+    signal?: AbortSignal,
+  ): Promise<CalendarLabels> {
+    const data = await this.api(connection, {
+      method: 'GET',
+      resource: 'calendar',
+      signal,
+      query: { fields: 'etag,labelProperties' },
+    });
+    const parsed = calendarLabelsSchema.safeParse(data);
+    if (
+      !parsed.success ||
+      new Set((parsed.data.labelProperties?.eventLabels ?? []).map((label) => label.id)).size !==
+        (parsed.data.labelProperties?.eventLabels?.length ?? 0)
+    )
+      throw new AppError(
+        502,
+        'GOOGLE_INVALID_LABELS',
+        'Google вернул неполную палитру календаря. Обновите календарь позднее.',
+      );
+    return parsed.data;
+  }
+  private async ensureLabel(connection: GoogleConnection, hex: string) {
+    const id = stableLabelId(hex);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const calendar = await this.calendarLabels(connection),
+        labels = calendar.labelProperties?.eventLabels ?? [];
+      const existing = labels.find((label) => label.backgroundColor.toLowerCase() === hex);
+      if (existing) return { id: existing.id, labels: labelColors(calendar) };
+      if (labels.some((label) => label.id === id))
+        throw conflict(
+          'Идентификатор цвета Google уже занят другой меткой. Обновите палитру в Google Calendar.',
+        );
+      if (labels.length >= 200)
+        throw new AppError(
+          400,
+          'GOOGLE_LABEL_LIMIT',
+          'В Google Calendar уже 200 цветовых меток. Удалите ненужную метку в Google, затем повторите.',
+        );
+      const name = CALENDAR_PALETTE.find((color) => color.hex === hex)?.name ?? hex;
+      const next = { id, backgroundColor: hex, name: 'Ritm · ' + name };
+      try {
+        const data = await this.api(connection, {
+          method: 'PATCH',
+          resource: 'calendar',
+          headers: { 'If-Match': calendar.etag },
+          body: {
+            labelProperties: { ...calendar.labelProperties, eventLabels: [...labels, next] },
+          },
+        });
+        const updated = calendarLabelsSchema.safeParse(data);
+        if (
+          !updated.success ||
+          !updated.data.labelProperties?.eventLabels?.some(
+            (label) => label.id === id && label.backgroundColor.toLowerCase() === hex,
+          )
+        )
+          throw new AppError(
+            502,
+            'GOOGLE_INVALID_LABELS',
+            'Не удалось подтвердить цветовую метку Google. Обновите календарь перед повторным сохранением.',
+          );
+        return { id, labels: labelColors(updated.data) };
+      } catch (error) {
+        if (!(error instanceof AppError) || error.code !== 'CONFLICT' || attempt === 2) throw error;
+      }
+    }
+    throw conflict('Палитра Google изменилась. Обновите календарь и повторите.');
+  }
+  private async eventColor(
+    connection: GoogleConnection,
+    value: string | null | undefined,
+  ): Promise<{
+    body: Record<string, unknown>;
+    labels?: ReadonlyMap<string, string>;
+    useLabels: boolean;
+  }> {
+    if (value === undefined) return { body: {}, useLabels: false };
+    if (!usesExtendedColors(connection.tokens)) {
+      if (value?.startsWith('#'))
+        throw new AppError(
+          403,
+          'GOOGLE_EXTENDED_COLORS_REQUIRED',
+          'Разрешите новые цвета в подключении Google Calendar, чтобы этот цвет сохранялся и в Google.',
+        );
+      return { body: { colorId: value }, useLabels: false };
+    }
+    if (value === null) return { body: { eventLabelId: '' }, useLabels: true };
+    const hex = value.startsWith('#')
+      ? value
+      : CALENDAR_PALETTE.find((color) => color.id === value)!.hex;
+    const label = await this.ensureLabel(connection, hex);
+    return { body: { eventLabelId: label.id }, labels: label.labels, useLabels: true };
+  }
+  private async mapReturnedEvent(
+    data: unknown,
+    connection: GoogleConnection,
+    timeZone: string,
+    labels?: ReadonlyMap<string, string>,
+  ) {
+    if (
+      !labels &&
+      usesExtendedColors(connection.tokens) &&
+      data &&
+      typeof data === 'object' &&
+      (data as { eventLabelId?: unknown }).eventLabelId
+    )
+      labels = labelColors(await this.calendarLabels(connection));
+    return mapGoogleEvent(data, timeZone, 'owner', labels);
+  }
   async listEvents(
     input: {
       from: string;
@@ -1123,6 +1318,9 @@ export class GoogleCalendarService {
       events: GoogleCalendarEvent[] = [],
       seen = new Set<string>(),
       pageTokens = new Set<string>();
+    const labels = usesExtendedColors(tokens.tokens)
+      ? labelColors(await this.calendarLabels(tokens, signal))
+      : undefined;
     let pageToken: string | undefined,
       partial = false,
       scanned = 0;
@@ -1139,7 +1337,7 @@ export class GoogleCalendarService {
           timeZone: input.timeZone,
           maxResults: 250,
           fields:
-            'items(id,summary,description,colorId,etag,status,start,end,transparency,locked,eventType,organizer(self),attendees(self),recurrence,recurringEventId),nextPageToken,accessRole',
+            'items(id,summary,description,colorId,eventLabelId,etag,status,start,end,transparency,locked,eventType,organizer(self),attendees(self),recurrence,recurringEventId),nextPageToken,accessRole',
           ...(pageToken ? { pageToken } : {}),
         },
       });
@@ -1160,7 +1358,12 @@ export class GoogleCalendarService {
       for (const item of parsed.data.items ?? []) {
         processed++;
         scanned++;
-        const event = mapGoogleEvent(item, input.timeZone, parsed.data.accessRole ?? 'reader');
+        const event = mapGoogleEvent(
+          item,
+          input.timeZone,
+          parsed.data.accessRole ?? 'reader',
+          labels,
+        );
         if (event && !seen.has(event.id) && inRange(event, from, to, input.timeZone)) {
           events.push(event);
           seen.add(event.id);
@@ -1230,15 +1433,22 @@ export class GoogleCalendarService {
         }),
       ),
       eventId = hash(`Ritm:${request}`);
+    const fields = eventBody(input, timeZone),
+      color = await this.eventColor(tokens, input.colorId);
     const body = {
-      ...eventBody(input, timeZone),
+      ...fields,
+      ...color.body,
       ...(options.transparency === undefined ? {} : { transparency: options.transparency }),
       id: eventId,
       extendedProperties: { private: { ritmRequestHash: fingerprint } },
     };
     let data: unknown;
     try {
-      data = await this.api(tokens, { method: 'POST', body, query: { sendUpdates: 'none' } });
+      data = await this.api(tokens, {
+        method: 'POST',
+        body,
+        query: { sendUpdates: 'none', ...(color.useLabels ? { eventLabelVersion: 1 } : {}) },
+      });
     } catch (error) {
       if (!(error instanceof AppError) || error.status !== 409) throw error;
       data = await this.api(tokens, { method: 'GET', eventId });
@@ -1252,7 +1462,7 @@ export class GoogleCalendarService {
           'Идентификатор сохранения уже использован. Обновите календарь и начните новую запись.',
         );
     }
-    const event = mapGoogleEvent(data, timeZone);
+    const event = await this.mapReturnedEvent(data, tokens, timeZone, color.labels);
     if (!event || event.id !== eventId)
       throw new AppError(
         502,
@@ -1301,14 +1511,16 @@ export class GoogleCalendarService {
       );
     if (original.etag !== version)
       throw conflict('Событие Google изменилось. Обновите календарь перед сохранением.');
+    const fields = eventBody(input, settings.timeZone),
+      color = await this.eventColor(tokens, input.colorId);
     const data = await this.api(tokens, {
       method: 'PATCH',
       eventId,
-      body: eventBody(input, settings.timeZone),
+      body: { ...fields, ...color.body },
       headers: { 'If-Match': version },
-      query: { sendUpdates: 'none' },
+      query: { sendUpdates: 'none', ...(color.useLabels ? { eventLabelVersion: 1 } : {}) },
     });
-    const event = mapGoogleEvent(data, settings.timeZone);
+    const event = await this.mapReturnedEvent(data, tokens, settings.timeZone, color.labels);
     if (!event || event.id !== eventId)
       throw new AppError(
         502,

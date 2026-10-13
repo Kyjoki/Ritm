@@ -28,6 +28,8 @@ const knownNoCreation = new Set([
   'GOOGLE_TIME_GAP',
   'GOOGLE_TIME_AMBIGUOUS',
   'GOOGLE_TIME_RANGE',
+  'GOOGLE_EXTENDED_COLORS_REQUIRED',
+  'GOOGLE_LABEL_LIMIT',
 ]);
 
 /** One-way migration into Google's canonical calendar; no persistent mirror. */
