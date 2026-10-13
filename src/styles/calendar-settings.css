@@ -1498,6 +1498,9 @@
   color: var(--accent);
   margin-top: 2px;
 }
+.cal-sync-footer {
+  margin: 16px 0 0;
+}
 .cal-google-status-copy {
   display: grid;
   gap: 4px;
@@ -1726,13 +1729,13 @@
     font-size: 8px;
   }
   .cal-mobile-week .cal-grid-scroll {
-    height: clamp(288px, calc(100dvh - 325px - env(safe-area-inset-bottom)), 960px);
+    height: clamp(288px, calc(100dvh - 277px - env(safe-area-inset-bottom)), 960px);
     max-height: none;
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
   }
   .cal-mobile-week .cal-calendar-panel:has(.cal-overlap-row) .cal-grid-scroll {
-    height: clamp(288px, calc(100dvh - 357px - env(safe-area-inset-bottom)), 960px);
+    height: clamp(288px, calc(100dvh - 309px - env(safe-area-inset-bottom)), 960px);
   }
   .cal-mobile-week .cal-hour-labels {
     font-size: 9px;

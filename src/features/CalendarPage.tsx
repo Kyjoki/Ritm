@@ -393,75 +393,6 @@ export function CalendarPage({
         </div>
       </div>
 
-      {googleStatus || googleLoading || googleError ? (
-        <div
-          className={`cal-google-status ${googleError || googlePartial || googleStatus?.status === 'reauth_required' ? 'cal-google-status-warning' : ''}`}
-          role={googleError ? 'alert' : initialGoogleLoading ? 'status' : undefined}
-        >
-          {googleLoading ? (
-            <LoaderCircle size={18} className="spinning" aria-hidden="true" />
-          ) : googleError || googlePartial || googleStatus?.status === 'reauth_required' ? (
-            <AlertCircle size={18} aria-hidden="true" />
-          ) : (
-            <CalendarDays size={18} aria-hidden="true" />
-          )}
-          <div className="cal-google-status-copy">
-            <strong>
-              {initialGoogleLoading
-                ? 'Загружаем Google Calendar…'
-                : googleError
-                  ? 'Google Calendar требует внимания'
-                  : googleStatus?.status === 'reauth_required'
-                    ? 'Подключи Google Calendar заново'
-                    : googlePartial
-                      ? 'Загружена часть событий Google'
-                      : googleConnected
-                        ? 'Календарь синхронизирован'
-                        : 'Google Calendar пока не подключён'}
-            </strong>
-            <span>
-              {googleError
-                ? `${googleError} Показанные события могут быть неактуальны.`
-                : googlePartial
-                  ? 'Часть событий не загружена. Свободное время нужно уточнить в Google Calendar.'
-                  : initialGoogleLoading
-                    ? 'Обновляем выбранный период и синхронизируем записи.'
-                    : googleStatus?.status === 'reauth_required'
-                      ? 'Разрешение нужно обновить в настройках.'
-                      : googleConnected
-                        ? 'Изменения сохраняются в Google Calendar. Расписание обновляется автоматически.'
-                        : 'Подключи Google Calendar в настройках, чтобы работать с единым расписанием.'}
-            </span>
-            {fetchedLabel ? (
-              <small className="cal-google-updated">
-                Последнее обновление:{' '}
-                <time dateTime={googleFetchedAt ?? undefined}>{fetchedLabel}</time>
-                {googleLoading ? ' · Обновляем…' : ''}
-              </small>
-            ) : null}
-          </div>
-          <div className="cal-google-status-actions">
-            {onGoogleRefresh && (googleConnected || Boolean(googleError)) ? (
-              <button
-                type="button"
-                className="button button-secondary"
-                disabled={googleLoading}
-                onClick={onGoogleRefresh}
-              >
-                <RefreshCw size={15} aria-hidden="true" />
-                Обновить
-              </button>
-            ) : null}
-            {onOpenSettings && !googleConnected ? (
-              <button type="button" className="cal-google-settings" onClick={onOpenSettings}>
-                Настройки
-                <ChevronRight size={15} aria-hidden="true" />
-              </button>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-
       {view === 'month' ? (
         <section className="panel cal-month-panel" aria-label="Календарь на месяц">
           <div className="cal-month-grid">
@@ -761,6 +692,75 @@ export function CalendarPage({
           </footer>
         </section>
       )}
+
+      {googleStatus || googleLoading || googleError ? (
+        <div
+          className={`cal-google-status cal-sync-footer ${googleError || googlePartial || googleStatus?.status === 'reauth_required' ? 'cal-google-status-warning' : ''}`}
+          role={googleError ? 'alert' : initialGoogleLoading ? 'status' : undefined}
+        >
+          {googleLoading ? (
+            <LoaderCircle size={18} className="spinning" aria-hidden="true" />
+          ) : googleError || googlePartial || googleStatus?.status === 'reauth_required' ? (
+            <AlertCircle size={18} aria-hidden="true" />
+          ) : (
+            <CalendarDays size={18} aria-hidden="true" />
+          )}
+          <div className="cal-google-status-copy">
+            <strong>
+              {initialGoogleLoading
+                ? 'Загружаем Google Calendar…'
+                : googleError
+                  ? 'Google Calendar требует внимания'
+                  : googleStatus?.status === 'reauth_required'
+                    ? 'Подключи Google Calendar заново'
+                    : googlePartial
+                      ? 'Загружена часть событий Google'
+                      : googleConnected
+                        ? 'Календарь синхронизирован'
+                        : 'Google Calendar пока не подключён'}
+            </strong>
+            <span>
+              {googleError
+                ? `${googleError} Показанные события могут быть неактуальны.`
+                : googlePartial
+                  ? 'Часть событий не загружена. Свободное время нужно уточнить в Google Calendar.'
+                  : initialGoogleLoading
+                    ? 'Обновляем выбранный период и синхронизируем записи.'
+                    : googleStatus?.status === 'reauth_required'
+                      ? 'Разрешение нужно обновить в настройках.'
+                      : googleConnected
+                        ? 'Изменения сохраняются в Google Calendar. Расписание обновляется автоматически.'
+                        : 'Подключи Google Calendar в настройках, чтобы работать с единым расписанием.'}
+            </span>
+            {fetchedLabel ? (
+              <small className="cal-google-updated">
+                Последнее обновление:{' '}
+                <time dateTime={googleFetchedAt ?? undefined}>{fetchedLabel}</time>
+                {googleLoading ? ' · Обновляем…' : ''}
+              </small>
+            ) : null}
+          </div>
+          <div className="cal-google-status-actions">
+            {onGoogleRefresh && (googleConnected || Boolean(googleError)) ? (
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={googleLoading}
+                onClick={onGoogleRefresh}
+              >
+                <RefreshCw size={15} aria-hidden="true" />
+                Обновить
+              </button>
+            ) : null}
+            {onOpenSettings && !googleConnected ? (
+              <button type="button" className="cal-google-settings" onClick={onOpenSettings}>
+                Настройки
+                <ChevronRight size={15} aria-hidden="true" />
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       <div className="cal-bottom-grid">
         <section className="panel cal-summary">
