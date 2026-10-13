@@ -9,3 +9,16 @@
 node_modules/
 .sites-runtime/
 
+# Сборка, персональные данные и серверные ключи.
+/build/
+/data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.tsbuildinfo
+/test-results/
+/playwright-report/
+/coverage/
+/.eve/
+/.workflow-data/
+/.vercel/
