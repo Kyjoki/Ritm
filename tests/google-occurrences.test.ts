@@ -71,8 +71,8 @@ test('timed Google events follow the selected time zone across midnight', () => 
   const displayed = googleOccurrences([external], '2026-10-14', 'Asia/Qyzylorda')[0];
   assert.equal(displayed.start, 270);
   assert.equal(displayed.end, 300);
-  assert.equal(displayed.startLabel, '04:30');
-  assert.equal(displayed.endLabel, '05:00');
+  assert.equal(displayed.startLabel, '4:30 AM');
+  assert.equal(displayed.endLabel, '5:00 AM');
   assert.deepEqual(googleEventDraft(external, 'Asia/Qyzylorda'), {
     title: external.title,
     description: '',
@@ -93,9 +93,13 @@ test('overnight events split into day segments and exclude an exact midnight end
   assert.equal(first.start, 1410);
   assert.equal(first.end, 1440);
   assert.equal(first.continues, true);
+  assert.equal(first.startLabel, '11:30 PM');
+  assert.equal(first.endLabel, '12:00 AM');
   assert.equal(second.start, 0);
   assert.equal(second.end, 30);
   assert.equal(second.continued, true);
+  assert.equal(second.startLabel, '12:00 AM');
+  assert.equal(second.endLabel, '12:30 AM');
   assert.equal(second.duration, 60);
   assert.equal(canEditGoogleEvent(external, 'Asia/Qyzylorda'), false);
   const endingAtMidnight = event({
@@ -182,8 +186,11 @@ test('completed, unscheduled and transparent records do not claim busy time', ()
 
 test('day/week/month fetch ranges use exclusive ends and all 42 displayed month cells', () => {
   assert.deepEqual(calendarRange('day', '2026-12-31'), { from: '2026-12-31', to: '2027-01-01' });
-  assert.deepEqual(calendarRange('week', '2026-10-18'), { from: '2026-10-12', to: '2026-10-19' });
-  assert.deepEqual(calendarRange('month', '2026-10-13'), { from: '2026-09-28', to: '2026-11-09' });
+  assert.deepEqual(calendarRange('week', '2026-10-17'), { from: '2026-10-11', to: '2026-10-18' });
+  assert.deepEqual(calendarRange('week', '2026-10-18'), { from: '2026-10-18', to: '2026-10-25' });
+  assert.deepEqual(calendarRange('month', '2026-10-13'), { from: '2026-09-27', to: '2026-11-08' });
+  assert.deepEqual(calendarRange('month', '2026-11-13'), { from: '2026-11-01', to: '2026-12-13' });
+  assert.deepEqual(calendarRange('month', '2027-01-01'), { from: '2026-12-27', to: '2027-02-07' });
   const february = calendarRange('month', '2024-02-29');
   assert.equal((Date.parse(february.to) - Date.parse(february.from)) / 86400000, 42);
 });
@@ -207,8 +214,8 @@ test('DST changes retain actual duration and readonly edits avoid silently movin
   });
   const reversedWall = googleOccurrences([autumn], '2026-10-25', 'Europe/Berlin')[0];
   assert.ok(reversedWall.end! > reversedWall.start!);
-  assert.equal(reversedWall.startLabel, '02:45');
-  assert.equal(reversedWall.endLabel, '02:15');
+  assert.equal(reversedWall.startLabel, '2:45 AM');
+  assert.equal(reversedWall.endLabel, '2:15 AM');
   assert.equal(reversedWall.duration, 30);
   assert.equal(reversedWall.clockChange, true);
   assert.equal(canEditGoogleEvent(autumn, 'Europe/Berlin'), false);

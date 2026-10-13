@@ -137,6 +137,7 @@
   font-size: 10px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .cal-hour-labels span {
   padding-top: 3px;
@@ -499,11 +500,12 @@
   cursor: pointer;
 }
 .cal-agenda-time {
-  width: 43px;
+  width: 70px;
   flex: none;
   color: var(--accent);
-  font-size: 13px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .cal-agenda-copy {
   flex: 1;

@@ -1,5 +1,6 @@
 import type { GoogleCalendarEvent, GoogleEventInput, Task } from '../../shared/types';
 import { addDays, dateKey, getDayOccurrences, parseDate, startOfWeek } from './calendar-utils';
+import { formatTime } from '../lib/date';
 
 interface CalendarOccurrenceBase {
   key: string;
@@ -195,8 +196,8 @@ export function googleOccurrences(
       continued,
       continues: end.date > date && !(end.date === addDays(date, 1) && end.seconds === 0),
       duration,
-      startLabel: continued ? '00:00' : start.time,
-      endLabel: end.date > date ? '00:00' : end.time,
+      startLabel: continued ? formatTime(0) : formatTime(start.time),
+      endLabel: end.date > date ? formatTime(1440) : formatTime(end.time),
       clockChange,
     });
   }

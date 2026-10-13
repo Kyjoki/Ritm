@@ -29,8 +29,20 @@ export function formatDate(
 ): string {
   return new Intl.DateTimeFormat('ru-RU', options).format(localDate(date));
 }
-export function formatTime(minutes: number): string {
-  return `${String(Math.floor(minutes / 60) % 24).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+export function formatTime(value: number | string, options: { compact?: boolean } = {}): string {
+  let minutes: number;
+  if (typeof value === 'string') {
+    const match = /^(\d{2}):(\d{2})$/.exec(value);
+    if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) return '—';
+    minutes = Number(match[1]) * 60 + Number(match[2]);
+  } else minutes = value;
+  if (!Number.isFinite(minutes)) return '—';
+  const normalized = Math.floor(((minutes % 1440) + 1440) % 1440);
+  const hour = Math.floor(normalized / 60);
+  const minute = normalized % 60;
+  const suffix = hour < 12 ? 'AM' : 'PM';
+  const minuteLabel = options.compact && minute === 0 ? '' : `:${String(minute).padStart(2, '0')}`;
+  return `${hour % 12 || 12}${minuteLabel} ${suffix}`;
 }
 export function durationText(minutes: number): string {
   const hours = Math.floor(minutes / 60),

@@ -36,6 +36,7 @@ import {
   layoutCalendarOccurrences,
   type CalendarOccurrence,
 } from './google-occurrences';
+import { formatTime, minutesInZone } from '../lib/date';
 import '../styles/calendar-settings.css';
 
 interface CalendarPageProps {
@@ -59,7 +60,10 @@ interface CalendarPageProps {
 
 type CalendarView = 'day' | 'week' | 'month';
 const VIEW_LABELS: Record<CalendarView, string> = { day: 'День', week: 'Неделя', month: 'Месяц' };
-const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+const WEEKDAYS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
+const GRID_TIME_COLUMN = 62;
+const HOUR_HEIGHT = 62;
 const EMPTY_GOOGLE_EVENTS: GoogleCalendarEvent[] = [];
 
 function freeIntervals(entries: CalendarOccurrence[]): { start: number; end: number }[] {
@@ -82,7 +86,7 @@ function occurrenceLabel(entry: CalendarOccurrence): string {
     ? 'Весь день'
     : entry.start === null
       ? 'Без времени'
-      : `${entry.startLabel ?? minuteTime(entry.start)}–${entry.endLabel ?? (entry.end === 1440 ? '00:00' : minuteTime(entry.end ?? entry.start))}`;
+      : `${entry.startLabel ?? formatTime(entry.start)}–${entry.endLabel ?? formatTime(entry.end ?? entry.start)}`;
   return `${entry.title}, ${time}${entry.source === 'google' ? ', Google Calendar' : ', Ritm'}${entry.completed ? ', выполнено' : ''}${entry.source === 'ritm' && entry.task.repeat !== 'none' ? ', повторяющаяся запись, редактировать серию' : ''}${entry.source === 'google' && entry.event.readOnly ? ', только просмотр' : ''}${entry.clockChange ? ', перевод часов' : ''}`;
 }
 
@@ -104,7 +108,7 @@ function AgendaEntry({
         {entry.start === null ? (
           <Clock3 size={18} aria-hidden="true" />
         ) : (
-          (entry.startLabel ?? minuteTime(entry.start))
+          (entry.startLabel ?? formatTime(entry.start))
         )}
       </span>
       <span className="cal-agenda-copy">
@@ -158,6 +162,8 @@ export function CalendarPage({
   const googleConnected = googleStatus?.status === 'connected';
   const sourceAvailable = googleConnected && Boolean(onGoogleCreate);
   const rangeCallback = useRef(onRangeChange);
+  const gridScrollRef = useRef<HTMLDivElement>(null);
+  const scrolledPeriodRef = useRef<string | null>(null);
   useEffect(() => {
     rangeCallback.current = onRangeChange;
   }, [onRangeChange]);
@@ -216,20 +222,24 @@ export function CalendarPage({
       };
     });
   }, [tasks, googleEvents, selectedDate, timeZone]);
-  const [startHour, endHour] = useMemo(() => {
-    let start = 8;
-    let end = 20;
+  const gridHeight = HOURS.length * HOUR_HEIGHT;
+  useEffect(() => {
+    if (isMobile || view === 'month') {
+      scrolledPeriodRef.current = null;
+      return;
+    }
+    const period = `${view}:${selectedDate}`;
+    if (!gridScrollRef.current || scrolledPeriodRef.current === period) return;
+    let firstStart = Infinity;
     for (const day of occurrencesByDay)
-      for (const entry of day.entries) {
-        if (entry.start !== null && entry.end !== null) {
-          start = Math.min(start, Math.floor(entry.start / 60));
-          end = Math.max(end, Math.ceil(entry.end / 60));
-        }
-      }
-    return [Math.max(0, start), Math.min(24, end)];
-  }, [occurrencesByDay]);
-  const hours = Array.from({ length: endHour - startHour }, (_, index) => startHour + index);
-  const gridHeight = hours.length * 62;
+      for (const entry of day.entries)
+        if (entry.start !== null) firstStart = Math.min(firstStart, entry.start);
+    const firstHour = Number.isFinite(firstStart)
+      ? Math.max(0, Math.floor(firstStart / 60) - 1)
+      : 8;
+    gridScrollRef.current.scrollTop = firstHour * HOUR_HEIGHT;
+    scrolledPeriodRef.current = period;
+  }, [isMobile, view, selectedDate, occurrencesByDay]);
   const visibleCount = occurrencesByDay.reduce((total, day) => total + day.entries.length, 0);
   const noDateTasks = tasks.filter((task) => task.date === null && !task.completed);
   const periodLabel =
@@ -270,9 +280,7 @@ export function CalendarPage({
           timeZone,
           day: 'numeric',
           month: 'short',
-          hour: '2-digit',
-          minute: '2-digit',
-        }).format(fetchedDate)
+        }).format(fetchedDate) + ` · ${formatTime(minutesInZone(timeZone, fetchedDate))}`
       : null;
 
   return (
@@ -473,7 +481,9 @@ export function CalendarPage({
                           onClick={() => editEntry(entry)}
                           aria-label={occurrenceLabel(entry)}
                         >
-                          {entry.start === null ? '' : `${minuteTime(entry.start)} `}
+                          {entry.start === null
+                            ? ''
+                            : `${entry.startLabel ?? formatTime(entry.start)} `}
                           {entry.source === 'google' ? (
                             <span className="cal-google-mark" aria-hidden="true">
                               G
@@ -539,7 +549,7 @@ export function CalendarPage({
                     <Plus size={16} aria-hidden="true" />
                     <span>
                       {googleConnected ? 'Свободно' : 'Свободно в Ritm'}{' '}
-                      {minuteTime(interval.start)}–{minuteTime(interval.end)}
+                      {formatTime(interval.start)}–{formatTime(interval.end)}
                     </span>
                   </button>
                 ))}
@@ -558,7 +568,9 @@ export function CalendarPage({
         >
           <div
             className="cal-grid-header"
-            style={{ gridTemplateColumns: `52px repeat(${periodDays.length}, minmax(0, 1fr))` }}
+            style={{
+              gridTemplateColumns: `${GRID_TIME_COLUMN}px repeat(${periodDays.length}, minmax(0, 1fr))`,
+            }}
           >
             <span className="cal-timezone">
               {new Intl.DateTimeFormat('ru-RU', { timeZone, timeZoneName: 'shortOffset' })
@@ -585,7 +597,9 @@ export function CalendarPage({
           {occurrencesByDay.some((day) => day.entries.some((entry) => entry.start === null)) ? (
             <div
               className="cal-all-day"
-              style={{ gridTemplateColumns: `52px repeat(${periodDays.length}, minmax(0, 1fr))` }}
+              style={{
+                gridTemplateColumns: `${GRID_TIME_COLUMN}px repeat(${periodDays.length}, minmax(0, 1fr))`,
+              }}
             >
               <span>Весь день / без времени</span>
               {occurrencesByDay.map(({ date, entries }) => (
@@ -612,18 +626,18 @@ export function CalendarPage({
               ))}
             </div>
           ) : null}
-          <div className="cal-grid-scroll">
+          <div ref={gridScrollRef} className="cal-grid-scroll">
             <div
               className="cal-grid"
               style={{
-                gridTemplateColumns: `52px repeat(${periodDays.length}, minmax(0, 1fr))`,
+                gridTemplateColumns: `${GRID_TIME_COLUMN}px repeat(${periodDays.length}, minmax(0, 1fr))`,
                 height: gridHeight,
               }}
             >
               <div className="cal-hour-labels">
-                {hours.map((hour) => (
-                  <span key={hour} style={{ height: 62 }}>
-                    {String(hour).padStart(2, '0')}:00
+                {HOURS.map((hour) => (
+                  <span key={hour} style={{ height: HOUR_HEIGHT }}>
+                    {formatTime(hour * 60, { compact: true })}
                   </span>
                 ))}
               </div>
@@ -632,14 +646,17 @@ export function CalendarPage({
                   className={`cal-day-column ${date === today ? 'cal-today-column' : ''}`}
                   key={date}
                 >
-                  {hours.flatMap((hour) =>
+                  {HOURS.flatMap((hour) =>
                     [0, 30].map((minute) => (
                       <button
                         type="button"
                         className="cal-free-slot"
                         key={`${hour}:${minute}`}
-                        style={{ top: (((hour - startHour) * 60 + minute) / 60) * 62, height: 31 }}
-                        aria-label={`Добавить запись: ${formatDate(date, { day: 'numeric', month: 'long' })}, ${minuteTime(hour * 60 + minute)}`}
+                        style={{
+                          top: ((hour * 60 + minute) / 60) * HOUR_HEIGHT,
+                          height: HOUR_HEIGHT / 2,
+                        }}
+                        aria-label={`Добавить запись: ${formatDate(date, { day: 'numeric', month: 'long' })}, ${formatTime(hour * 60 + minute)}`}
                         onClick={() => addEntry(date, minuteTime(hour * 60 + minute))}
                       >
                         <Plus size={15} aria-hidden="true" />
@@ -654,8 +671,8 @@ export function CalendarPage({
                         type="button"
                         className={`cal-grid-event ${entry.source === 'google' || entry.task.kind === 'event' ? 'cal-event-kind' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''} ${entry.completed ? 'cal-completed' : ''} ${duration < 40 ? 'cal-compact-event' : ''}`}
                         style={{
-                          top: (((entry.start ?? 0) - startHour * 60) / 60) * 62 + 2,
-                          height: Math.max(22, (duration / 60) * 62 - 4),
+                          top: ((entry.start ?? 0) / 60) * HOUR_HEIGHT + 2,
+                          height: Math.max(22, (duration / 60) * HOUR_HEIGHT - 4),
                           width: `calc(${100 / entry.lanes}% - 7px)`,
                           left: `calc(${(entry.lane * 100) / entry.lanes}% + 4px)`,
                         }}
@@ -672,9 +689,8 @@ export function CalendarPage({
                           {entry.title}
                         </strong>
                         <span>
-                          {entry.startLabel ?? minuteTime(entry.start ?? 0)}–
-                          {entry.endLabel ??
-                            (entry.end === 1440 ? '00:00' : minuteTime(entry.end ?? 0))}
+                          {entry.startLabel ?? formatTime(entry.start ?? 0)}–
+                          {entry.endLabel ?? formatTime(entry.end ?? 0)}
                           {entry.source === 'ritm' && entry.task.repeat !== 'none' ? ' · ↻' : ''}
                           {entry.clockChange ? ' · Перевод часов' : ''}
                         </span>

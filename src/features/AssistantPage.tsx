@@ -26,6 +26,7 @@ import type {
   ScheduleProposal,
   ScheduleTime,
 } from '../../shared/types';
+import { formatTime } from '../lib/date';
 import '../styles/assistant.css';
 
 export interface AssistantPageProps {
@@ -84,7 +85,7 @@ function formatSchedule(schedule: ScheduleTime) {
         new Date(`${schedule.date}T12:00:00`),
       )
     : 'Без даты';
-  const time = schedule.time ?? 'Время не выбрано';
+  const time = schedule.time ? formatTime(schedule.time) : 'Время не выбрано';
   return { date, time, duration: `${schedule.duration} мин` };
 }
 

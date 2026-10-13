@@ -5,6 +5,7 @@ import { Dialog } from './Dialog';
 import { canEditGoogleEvent, googleEventDraft } from '../features/google-occurrences';
 import { ApiError } from '../lib/api';
 import { addDays, formatDate } from '../features/calendar-utils';
+import { formatTime, minutesInZone } from '../lib/date';
 import '../styles/google.css';
 
 export function GoogleEventDialog({
@@ -46,14 +47,14 @@ export function GoogleEventDialog({
     value.date
       ? formatDate(value.date, { day: 'numeric', month: 'long', year: 'numeric' })
       : value.dateTime
-        ? new Intl.DateTimeFormat('ru-RU', {
+        ? `${new Intl.DateTimeFormat('ru-RU', {
             timeZone,
             day: 'numeric',
             month: 'long',
             year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          }).format(new Date(value.dateTime))
+          }).format(
+            new Date(value.dateTime),
+          )}, ${formatTime(minutesInZone(timeZone, new Date(value.dateTime)))}`
         : 'Не указано';
   const set = <K extends keyof GoogleEventInput>(key: K, next: GoogleEventInput[K]) => {
     setValue((old) => ({ ...old, [key]: next }));

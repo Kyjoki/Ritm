@@ -42,7 +42,7 @@ export function addMonths(date: string, amount: number): string {
 }
 
 export function startOfWeek(date: string): string {
-  return addDays(date, -((parseDate(date).getUTCDay() + 6) % 7));
+  return addDays(date, -parseDate(date).getUTCDay());
 }
 
 export function timeMinutes(time: string): number {

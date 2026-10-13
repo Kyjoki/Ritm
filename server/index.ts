@@ -152,6 +152,25 @@ export function createApp(options: AppOptions = {}) {
     next();
   });
   app.use('/api', apiRequestGuard, security.originGuard);
+  app.use('/api', (req, _res, next) => {
+    // The Vercel /api/:path* -> /api rewrite appends its unused capture
+    // to query parameters. It is transport metadata only when it matches
+    // this exact route. User parameters still pass through strict schemas.
+    const route = req.originalUrl.split('?')[0],
+      query = req.query;
+    if (
+      env.VERCEL === '1' &&
+      route.startsWith('/api/') &&
+      typeof query.path === 'string' &&
+      query.path === route.slice('/api/'.length)
+    ) {
+      const { path: _routingCapture, ...parameters } = query;
+      // Express 5 calculates query through a getter; deleting req.query.path
+      // would be lost on the next read. Override only this request's value.
+      Object.defineProperty(req, 'query', { value: parameters, configurable: true });
+    }
+    next();
+  });
   // Anonymous clients only need these exact routes. Protected requests are
   // authenticated before reading/parsing their body, including unknown routes.
   app.use('/api', (req, res, next) => {
