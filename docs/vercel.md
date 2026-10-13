@@ -12,9 +12,12 @@ production-база и применена миграция `001-postgres.sql`. �
 ## Автопубликация из GitHub
 
 Владелец явно разрешил постоянную связь `Kyjoki/Ritm` → Vercel `ritm`:
-push в `main` должен собираться и публиковаться в production. Подключение Git
-пока не завершено: Vercel требует GitHub Login Connection в настройках
-аккаунта владельца. Действующий CLI-выпуск от этой связи не зависит.
+push в `main` собирается и публикуется в production. Владелец подключил
+GitHub Login Connection и предоставил приложению Vercel доступ к Ritm.
+Git connect выполнен; API проекта подтвердил `Kyjoki/Ritm`,
+`productionBranch=main`, `createDeployments=enabled` и
+`autoAssignCustomDomains=true`. Проверка первого Git-выпуска выполняется
+новым commit документации; код приложения не изменён.
 
 После подключения проверьте репозиторий, production branch `main` и успешный
 deployment конкретного commit. Перед push выполняйте `npm run build`,
@@ -23,6 +26,13 @@ deployment конкретного commit. Перед push выполняйте `
 Vercel не ожидает окончания GitHub Actions. Статус CI и статус deployment
 проверяйте отдельно; не объявляйте автопубликацию работающей только по факту
 подключения репозитория.
+
+Для [приватного репозитория на Hobby](https://vercel.com/docs/deployments/troubleshoot-project-collaboration)
+автор deployment commit должен соответствовать владельцу Vercel. Авторизованный
+GitHub connector создаёт новый commit от Kyjoki по умолчанию; `Co-authored-by: Codex`
+сохраняет происхождение работы ИИ. До обновления main проверяйте автора, родителя
+и список файлов. Используйте `expected_sha` и `force=false`, чтобы не перезаписать
+конкурирующее обновление ветки. История и локальная Git identity сохраняются.
 
 ## Что меняется в хранилище
 
