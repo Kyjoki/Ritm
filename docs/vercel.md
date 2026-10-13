@@ -87,6 +87,11 @@ Express CDN output. [Express на Vercel](https://vercel.com/docs/frameworks/bac
 Секретные значения не помещаются в Git, `VITE_*`, HTML, логи или сообщения
 чата. Production и Preview используют разные базы и серверные секреты.
 
+`.vercelignore` отдельно исключает локальные `data`, SQLite, `.env*`,
+`.vercel` и provider skills из deployment upload. Одного `.gitignore`
+для Vercel CLI недостаточно. Перед первым выпуском `vercel deploy --dry --json`
+подтвердил: 88 файлов, локальных баз/секретов в списке отправки нет.
+
 | Переменная              | Назначение                                                        |
 | ----------------------- | ----------------------------------------------------------------- |
 | `DATABASE_URL`          | Серверное подключение к выбранному PostgreSQL                     |

@@ -1,0 +1,22 @@
+# Upload only application sources; local databases and credentials stay local.
+.git
+.vercel
+.agents
+.env
+.env.*
+!.env.example
+data
+node_modules
+build
+dist
+.openai
+.sites-runtime
+.eve
+.workflow-data
+test-results
+playwright-report
+coverage
+skills-lock.json
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
