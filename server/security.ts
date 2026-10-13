@@ -3,6 +3,7 @@ import {
   createHmac,
   randomBytes,
   randomUUID,
+  scrypt,
   scryptSync,
   timingSafeEqual,
 } from 'node:crypto';
@@ -20,6 +21,7 @@ const loopback = (address: string | undefined) =>
     address && ['127.0.0.1', '::1', '[::1]', '::ffff:127.0.0.1', 'localhost'].includes(address),
   );
 const sessionLifetime = 8 * 60 * 60_000;
+const maxPasswordChecks = 4;
 
 export class Security {
   private passwordHash: Buffer | null;
@@ -30,6 +32,8 @@ export class Security {
   private sessionKey: Buffer;
   private credentialVersion: string;
   private loginName: string;
+  private cookieName: string;
+  private passwordChecks = 0;
   constructor(
     private env: NodeJS.ProcessEnv,
     private state: RuntimeState,
@@ -90,13 +94,35 @@ export class Security {
     } else if (!localHost || env.VERCEL === '1')
       throw new Error('APP_ORIGIN is required for public access.');
     this.secureCookie = this.publicOrigin?.startsWith('https://') ?? false;
+    this.cookieName = this.secureCookie ? '__Host-ritm_session' : 'ritm_session';
   }
   private token(req: Request) {
-    return req.headers.cookie
+    const values = req.headers.cookie
       ?.split(';')
       .map((part) => part.trim())
-      .find((part) => part.startsWith('ritm_session='))
-      ?.slice('ritm_session='.length);
+      .filter((part) => part.startsWith(this.cookieName + '='));
+    // An ambiguous cookie list must never select whichever identity came first.
+    return values?.length === 1 ? values[0].slice(this.cookieName.length + 1) : undefined;
+  }
+  private async checkPassword(password: string) {
+    if (this.passwordChecks >= maxPasswordChecks) {
+      throw new AppError(
+        429,
+        'AUTH_BUSY',
+        'Сейчас обрабатывается несколько входов. Повторите через несколько секунд.',
+      );
+    }
+    this.passwordChecks++;
+    try {
+      return await new Promise<Buffer>((done, reject) => {
+        scrypt(password, this.salt, 32, (error, derivedKey) => {
+          if (error) reject(error);
+          else done(derivedKey);
+        });
+      });
+    } finally {
+      this.passwordChecks--;
+    }
   }
   async ownerSession(req: Request): Promise<string | null> {
     if (!this.passwordHash)
@@ -152,7 +178,12 @@ export class Security {
       const host = req.get('host');
       let hostname: string;
       try {
-        hostname = new URL('http://' + host).hostname;
+        const authority = host?.match(/^(\[[\da-fA-F:.]+\]|[a-zA-Z\d.-]+)(?::\d{1,5})?$/);
+        if (!authority) throw new Error('Invalid authority');
+        const parsed = new URL('http://' + host);
+        if (parsed.hostname.toLowerCase() !== authority[1].toLowerCase())
+          throw new Error('Noncanonical host');
+        hostname = parsed.hostname;
       } catch {
         throw new AppError(403, 'INVALID_HOST', 'Недопустимый адрес приложения.');
       }
@@ -181,7 +212,7 @@ export class Security {
   };
   async limit(req: Request, key: string, maximum: number, windowMs: number) {
     let bucket: string;
-    if (key === 'login') {
+    if (['login', 'public-session', 'oauth-callback'].includes(key)) {
       // Vercel supplies this header; ordinary servers never trust it. Lists,
       // malformed addresses and absent headers fall back to the socket peer.
       // https://vercel.com/docs/headers/request-headers#x-vercel-forwarded-for
@@ -190,7 +221,7 @@ export class Security {
       const address =
         forwarded && isIP(forwarded) ? forwarded : (req.socket.remoteAddress ?? 'unknown');
       bucket = createHmac('sha256', this.sessionKey)
-        .update('ritm:login:client:' + address)
+        .update('ritm:' + key + ':client:' + address)
         .digest('hex');
     } else {
       bucket = digest('ritm:owner:' + key);
@@ -205,8 +236,9 @@ export class Security {
   }
   async login(req: Request, res: Response, login: string, password: string) {
     await this.limit(req, 'login', 10, 15 * 60_000);
-    const inputHash = scryptSync(password, this.salt, 32);
-    const passwordMatches = !this.passwordHash || timingSafeEqual(inputHash, this.passwordHash);
+    const inputHash = this.passwordHash ? await this.checkPassword(password) : null;
+    const passwordMatches =
+      !this.passwordHash || Boolean(inputHash && timingSafeEqual(inputHash, this.passwordHash));
     const loginMatches = timingSafeEqual(
       Buffer.from(digest(login.trim().toLocaleLowerCase('en-US')), 'hex'),
       Buffer.from(digest(this.loginName), 'hex'),
@@ -226,7 +258,7 @@ export class Security {
         .setExpirationTime(Math.floor(expiry / 1000))
         .sign(this.sessionKey);
       await this.state.createSession(this.credentialVersion + ':' + digest(id), expiry);
-      res.cookie('ritm_session', token, {
+      res.cookie(this.cookieName, token, {
         httpOnly: true,
         sameSite: 'strict',
         secure: this.secureCookie,
@@ -239,7 +271,7 @@ export class Security {
   async logout(req: Request, res: Response) {
     const hash = await this.ownerSession(req);
     if (hash && this.passwordHash) await this.state.deleteSession(hash);
-    res.clearCookie('ritm_session', {
+    res.clearCookie(this.cookieName, {
       httpOnly: true,
       sameSite: 'strict',
       secure: this.secureCookie,

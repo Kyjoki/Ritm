@@ -6,6 +6,7 @@ import { DataType, newDb } from 'pg-mem';
 import { PostgresStore } from '../server/postgres-store.ts';
 import { migrate } from '../migrations/migrate.ts';
 import { AppError } from '../server/errors.ts';
+import { MAX_WORKSPACE_BYTES } from '../server/repository.ts';
 import type { ChatMessage, TaskInput } from '../shared/types.ts';
 
 const base: TaskInput = {
@@ -81,6 +82,7 @@ async function fixture(t: TestContext) {
   });
   return {
     store,
+    db,
     raw,
     pool,
     applied,
@@ -108,6 +110,80 @@ test('pg-mem: explicit migrations are repeatable and do not overwrite settings',
       .conversations,
     [],
   );
+});
+
+test('pg-mem: restoring a task cannot bypass the quota and the rejected undo is retryable', async (t) => {
+  const { store, db } = await fixture(t);
+  const deleted = await store.deleteTask((await store.createTask(base)).id);
+  const table = db.public.getTable('ritm_tasks');
+  let one = '';
+  for (let index = 0; index < 2000; index++) {
+    const value = { ...deleted, id: randomUUID() };
+    one = value.id;
+    table.insert({ id: value.id, json: value });
+  }
+  await assert.rejects(
+    store.restoreTask(deleted),
+    (error: unknown) => error instanceof AppError && error.code === 'TASK_LIMIT',
+  );
+  assert.equal((await store.tasks()).length, 2000);
+  await store.deleteTask(one);
+  assert.equal((await store.restoreTask(deleted)).id, deleted.id);
+  assert.equal((await store.tasks()).length, 2000);
+});
+
+test('pg-mem serial rollback fixture: over-budget chat is atomic and its request can be recovered', async (t) => {
+  const { store } = await fixture(t);
+  const request = randomUUID();
+  const claim = await store.startRequest(request, 'fingerprint', null);
+  const oversized = { ...assistant(), text: 'x'.repeat(MAX_WORKSPACE_BYTES) };
+  await assert.rejects(
+    store.finishChat(request, undefined, 'План', oversized, claim.leaseToken),
+    (error: unknown) => error instanceof AppError && error.code === 'STORAGE_LIMIT',
+  );
+  assert.deepEqual(await store.conversations(), []);
+  assert.equal((await store.request(request))?.status, 'running');
+  await store.abandonRequest(request, claim.leaseToken);
+  assert.equal(await store.request(request), undefined);
+  const replacement = await store.startRequest(request, 'fingerprint', null);
+  const completed = await store.finishChat(
+    request,
+    undefined,
+    'План',
+    assistant(),
+    replacement.leaseToken,
+  );
+  assert.equal(completed.messages.length, 2);
+  assert.equal((await store.request(request))?.status, 'complete');
+});
+
+test('pg-mem: legacy over-budget data stays deletable and rejected writes leave no changes', async (t) => {
+  const { store, db, raw } = await fixture(t);
+  const task = await store.createTask(base);
+  const conversation = await store.createConversation();
+  conversation.messages.push({ ...assistant(), text: 'x'.repeat(MAX_WORKSPACE_BYTES) });
+  await raw.query('DELETE FROM ritm_conversations WHERE id=$1', [conversation.id]);
+  db.public.getTable('ritm_conversations').insert({ id: conversation.id, json: conversation });
+  const storageLimit = (error: unknown) =>
+    error instanceof AppError && error.code === 'STORAGE_LIMIT';
+  await assert.rejects(store.updateTask(task.id, { title: 'Изменённый план' }), storageLimit);
+  assert.equal((await store.task(task.id)).title, base.title);
+  await assert.rejects(store.createTask(base), storageLimit);
+  assert.equal((await store.tasks()).length, 1);
+  await assert.rejects(store.createConversation(), storageLimit);
+  assert.equal((await store.conversations()).length, 1);
+  await store.deleteTask(task.id);
+  await store.deleteConversation(conversation.id);
+  assert.equal((await store.createTask(base)).title, base.title);
+});
+
+test('pg-mem: SQL metacharacters in values never become query syntax', async (t) => {
+  const { store } = await fixture(t);
+  const title = "'); DROP TABLE ritm_tasks; --";
+  const task = await store.createTask({ ...base, title, description: '<script>alert(1)</script>' });
+  assert.equal((await store.task(task.id)).title, title);
+  await assert.rejects(store.task("' OR 1=1 --"), /uuid/);
+  assert.equal((await store.tasks()).length, 1);
 });
 
 test('pg-mem: task CRUD, occurrence completion, semantic restore and validation', async (t) => {
@@ -162,7 +238,7 @@ test('pg-mem: durable request claims survive another repository instance and exp
     AppError,
   );
   await assert.rejects(second.deleteConversation(conversation.id), AppError);
-  h.advance(120_001);
+  h.advance(180_001);
   assert.equal(await second.request(id), undefined);
   await assert.rejects(second.startRequest(id, 'changed-fingerprint', conversation.id), AppError);
   const replacement = await second.startRequest(id, 'same-fingerprint', conversation.id);

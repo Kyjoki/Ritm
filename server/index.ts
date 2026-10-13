@@ -21,6 +21,12 @@ import { SqliteRuntimeState, type RuntimeState } from './runtime-state.ts';
 import { SecretStore } from './secrets.ts';
 import { Security } from './security.ts';
 import { AppError, conflict } from './errors.ts';
+import {
+  apiRequestGuard,
+  createSecurityAudit,
+  requestIdentity,
+  type SecurityLogger,
+} from './http-security.ts';
 import { assistantMessage, runAssistant, type AssistantRunner } from './assistant.ts';
 import {
   chatSchema,
@@ -56,6 +62,7 @@ export interface AppOptions {
   runtimeState?: RuntimeState;
   googleTransport?: GoogleTransport;
   googleService?: AppGoogleService;
+  securityLogger?: SecurityLogger;
 }
 
 export function createApp(options: AppOptions = {}) {
@@ -112,29 +119,58 @@ export function createApp(options: AppOptions = {}) {
     });
   const assistant = options.assistant ?? runAssistant;
   const app = express();
+  const audit = createSecurityAudit(
+    options.securityLogger ??
+      (env.NODE_ENV === 'test' ? () => {} : (record) => console.warn(JSON.stringify(record))),
+  );
   app.disable('x-powered-by');
   app.set('trust proxy', false);
+  app.use(requestIdentity);
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
     res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
     if (env.NODE_ENV === 'production' || env.VERCEL === '1')
       res.setHeader(
         'Content-Security-Policy',
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
       );
+    if (env.APP_ORIGIN?.startsWith('https://'))
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000');
     next();
   });
-  app.use('/api', security.originGuard, express.json({ limit: '128kb' }));
   app.use('/api', (_req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     next();
+  });
+  app.use('/api', apiRequestGuard, security.originGuard);
+  // Anonymous clients only need these exact routes. Protected requests are
+  // authenticated before reading/parsing their body, including unknown routes.
+  app.use('/api', (req, res, next) => {
+    const path = req.originalUrl.split('?')[0];
+    const publicRoute =
+      (['GET', 'HEAD'].includes(req.method) && ['/api/health', '/api/session'].includes(path)) ||
+      (req.method === 'POST' && path === '/api/login') ||
+      (req.method === 'GET' && path === GOOGLE_CALLBACK_PATH);
+    if (publicRoute) next();
+    else void security.requireAuth(req, res, next);
+  });
+  const loginJson = express.json({ limit: '4kb', inflate: false });
+  const apiJson = express.json({ limit: '128kb', inflate: false });
+  app.use('/api', (req, res, next) => {
+    const parser =
+      req.method === 'POST' && req.originalUrl.split('?')[0] === '/api/login' ? loginJson : apiJson;
+    parser(req, res, next);
   });
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
   });
   app.get('/api/session', async (req, res) => {
+    await security.limit(req, 'public-session', 120, 60_000);
     res.json(await security.session(req));
   });
   app.post('/api/login', async (req, res) => {
@@ -142,14 +178,19 @@ export function createApp(options: AppOptions = {}) {
       .object({ login: z.string().trim().min(1).max(100), password: z.string().max(512) })
       .strict()
       .parse(req.body);
-    res.json(await security.login(req, res, login, password));
+    const session = await security.login(req, res, login, password);
+    audit(res, 'login_success', 200);
+    res.json(session);
   });
   app.post('/api/logout', async (req, res) => {
-    res.json(await security.logout(req, res));
+    const session = await security.logout(req, res);
+    audit(res, 'logout', 200);
+    res.json(session);
   });
   app.get(GOOGLE_CALLBACK_PATH, async (req, res) => {
     res.setHeader('Referrer-Policy', 'no-referrer');
     try {
+      await security.limit(req, 'oauth-callback', 20, 60_000);
       const input = z
         .object({
           state: z.string().max(128),
@@ -163,6 +204,7 @@ export function createApp(options: AppOptions = {}) {
         .find((part) => part.startsWith(GOOGLE_OAUTH_COOKIE + '='))
         ?.slice(GOOGLE_OAUTH_COOKIE.length + 1);
       await google.callback({ ...input, correlationCookie: cookie });
+      audit(res, 'google_connected', 303);
       res.clearCookie(GOOGLE_OAUTH_COOKIE, {
         path: GOOGLE_CALLBACK_PATH,
         httpOnly: true,
@@ -171,6 +213,7 @@ export function createApp(options: AppOptions = {}) {
       });
       res.redirect(303, '/?section=settings&google=connected');
     } catch (error) {
+      audit(res, 'request_blocked', error instanceof AppError ? error.status : 500);
       res.redirect(
         303,
         '/?section=settings&google=error&code=' +
@@ -178,10 +221,10 @@ export function createApp(options: AppOptions = {}) {
       );
     }
   });
-  app.use('/api', security.requireAuth);
   app.use('/api', async (req, _res, next) => {
     try {
       if (!['GET', 'HEAD'].includes(req.method)) await security.limit(req, 'mutation', 120, 60_000);
+      else await security.limit(req, 'read', 600, 60_000);
       next();
     } catch (error) {
       next(error);
@@ -240,7 +283,9 @@ export function createApp(options: AppOptions = {}) {
   });
   app.delete('/api/integrations/google/connection', async (req, res) => {
     await security.limit(req, 'google-connect', 10, 60_000);
-    res.json(await google.disconnect());
+    const result = await google.disconnect();
+    audit(res, 'google_disconnected', 200);
+    res.json(result);
   });
   app.post('/api/tasks', async (req, res) => {
     res.status(201).json(await store.createTask(taskInputSchema.parse(req.body)));
@@ -262,10 +307,14 @@ export function createApp(options: AppOptions = {}) {
   });
   app.post('/api/settings/openai', async (req, res) => {
     await security.limit(req, 'secret', 10, 60_000);
-    res.json(await secrets.save(secretSchema.parse(req.body)));
+    const status = await secrets.save(secretSchema.parse(req.body));
+    audit(res, 'openai_saved', 200);
+    res.json(status);
   });
   app.delete('/api/settings/openai', async (_req, res) => {
-    res.json(await secrets.remove());
+    const status = await secrets.remove();
+    audit(res, 'openai_removed', 200);
+    res.json(status);
   });
   app.post('/api/conversations', async (req, res) => {
     z.object({}).strict().parse(req.body);
@@ -322,6 +371,7 @@ export function createApp(options: AppOptions = {}) {
       if (!res.writableEnded) controller.abort();
     };
     res.on('close', onDisconnect);
+    let modelSlot: { key: string; token: string } | undefined;
     let leaseToken: string | undefined,
       acquired = false;
     try {
@@ -341,6 +391,18 @@ export function createApp(options: AppOptions = {}) {
           : undefined;
       if (controller.signal.aborted)
         throw new AppError(499, 'REQUEST_CANCELLED', 'Запрос отменён.');
+      // One owner may use multiple conversations and server instances. Bound
+      // paid generations across them, independently of per-minute quotas.
+      for (let slot = 0; slot < 2; slot++) {
+        const key = 'ritm:ai:slot:' + slot;
+        const token = await state.acquireLease(key, 180_000);
+        if (token) {
+          modelSlot = { key, token };
+          break;
+        }
+      }
+      if (!modelSlot)
+        throw new AppError(429, 'AI_BUSY', 'Помощник уже отвечает. Дождитесь завершения ответа.');
       // Reserve the paid model generation after read-only calendar loading, so
       // Google latency does not consume the 120-second database claim lease.
       const claim = await store.startRequest(
@@ -385,6 +447,15 @@ export function createApp(options: AppOptions = {}) {
     } finally {
       busyConversations.delete(busyId);
       res.off('close', onDisconnect);
+      if (modelSlot) {
+        try {
+          await state.releaseLease(modelSlot.key, modelSlot.token);
+        } catch {
+          // A crashed/unavailable database cannot free capacity early; the
+          // durable lease expires automatically, without exposing its token.
+          audit(res, 'server_error', 503);
+        }
+      }
     }
   });
   for (const action of ['apply', 'undo', 'reject'] as const)
@@ -420,6 +491,17 @@ export function createApp(options: AppOptions = {}) {
   }
   const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
     if (res.headersSent) return;
+    if (error instanceof AppError && [401, 403, 405, 413, 414, 415, 429].includes(error.status))
+      audit(res, 'request_blocked', error.status);
+    else if (error?.type === 'entity.too.large') audit(res, 'request_blocked', 413);
+    else if (['encoding.unsupported', 'charset.unsupported'].includes(error?.type))
+      audit(res, 'request_blocked', 415);
+    else if (!(
+      error instanceof AppError ||
+      error instanceof z.ZodError ||
+      error instanceof SyntaxError
+    ))
+      audit(res, 'server_error', 500);
     if (error instanceof AppError) {
       res.status(error.status).json({ error: error.message, code: error.code });
       return;
@@ -445,6 +527,12 @@ export function createApp(options: AppOptions = {}) {
       res
         .status(413)
         .json({ error: 'Запрос слишком большой. Сократите текст.', code: 'REQUEST_TOO_LARGE' });
+      return;
+    }
+    if (['encoding.unsupported', 'charset.unsupported'].includes(error?.type)) {
+      res
+        .status(415)
+        .json({ error: 'Отправьте JSON в UTF-8 без сжатия.', code: 'INVALID_ENCODING' });
       return;
     }
     if (error instanceof SyntaxError && 'body' in error) {
@@ -484,6 +572,10 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
   const server = instance.app.listen(port, process.env.HOST || '127.0.0.1', () => {
     console.log('Ritm server ready on port ' + port + '.');
   });
+  server.headersTimeout = 15_000;
+  server.requestTimeout = 30_000;
+  server.keepAliveTimeout = 5_000;
+  server.maxRequestsPerSocket = 100;
   const shutdown = () => {
     server.close(() => {
       void instance.close().then(() => process.exit(0));

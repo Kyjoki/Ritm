@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GoogleCalendarStatus, GoogleCalendarResult } from '../../shared/types';
 import { api } from './api';
 import { addDays } from '../features/calendar-utils';
+import { googleAuthorizationUrl } from './navigation';
 
 export const unconfiguredGoogle: GoogleCalendarStatus = {
   configured: false,
@@ -109,9 +110,7 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
   }, [refreshStatus]);
   const connect = useCallback(async () => {
     const { authorizationUrl } = await api.connectGoogle();
-    const url = new URL(authorizationUrl);
-    if (url.protocol !== 'https:' || url.hostname !== 'accounts.google.com')
-      throw new Error('Сервер вернул неверный адрес подключения Google.');
+    const url = googleAuthorizationUrl(authorizationUrl);
     window.location.assign(url.href);
   }, []);
   const disconnect = useCallback(async () => {

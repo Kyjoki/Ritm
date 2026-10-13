@@ -172,11 +172,11 @@ test('AI Google context is bounded, coverage labeled and event IDs are not edita
     googleCalendar: snapshot,
   });
   assert.ok(JSON.stringify(input).length <= MAX_ASSISTANT_CONTEXT_CHARS);
-  assert.match(input.instructions, /"calendarIntegration":"connected"/);
-  assert.match(input.instructions, /"partial":true/);
-  assert.match(input.instructions, /"eventsTotal":500/);
-  assert.equal(input.instructions.includes('google-event-'), false);
-  assert.equal(input.instructions.includes('private description'), false);
+  assert.match(input.messages[0].content, /"calendarIntegration":"connected"/);
+  assert.match(input.messages[0].content, /"partial":true/);
+  assert.match(input.messages[0].content, /"eventsTotal":500/);
+  assert.equal(input.messages[0].content.includes('google-event-'), false);
+  assert.equal(input.messages[0].content.includes('private description'), false);
 });
 
 test('escaped Google titles share the complete budget with history, the full latest request and tasks', () => {
@@ -246,7 +246,9 @@ test('escaped Google titles share the complete budget with history, the full lat
     );
     assert.ok(JSON.stringify(input).length <= MAX_ASSISTANT_CONTEXT_CHARS);
     assert.equal(input.messages.at(-1)?.content, message);
-    const data = JSON.parse(input.instructions.slice(input.instructions.lastIndexOf('\n') + 1));
+    const data = JSON.parse(
+      input.messages[0].content.slice(input.messages[0].content.lastIndexOf('\n') + 1),
+    );
     assert.equal(data.googleCalendar.from, snapshot.from);
     assert.equal(data.googleCalendar.to, snapshot.to);
     assert.equal(data.googleCalendar.fetchedAt, stamp);

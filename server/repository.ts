@@ -7,6 +7,18 @@ import type {
   Task,
   TaskInput,
 } from '../shared/types.ts';
+import { AppError } from './errors.ts';
+
+/** UTF-8 bytes of the active task/history JSON sent to the client. */
+export const MAX_WORKSPACE_BYTES = 8 * 1024 * 1024;
+export function assertWorkspaceStorage(tasks: Task[], conversations: Conversation[]) {
+  if (Buffer.byteLength(JSON.stringify({ tasks, conversations }), 'utf8') > MAX_WORKSPACE_BYTES)
+    throw new AppError(
+      400,
+      'STORAGE_LIMIT',
+      'Хранилище Ritm заполнено. Удалите старые задачи или диалоги и повторите действие.',
+    );
+}
 
 /** SQLite may resolve synchronously; callers always await this contract. */
 export type Awaitable<T> = T | Promise<T>;

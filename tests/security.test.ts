@@ -109,7 +109,9 @@ test('complete AI input stays within its budget even with escaped text and large
   assert.ok(JSON.stringify(input).length <= MAX_ASSISTANT_CONTEXT_CHARS);
   assert.equal(input.messages.at(-1)?.content, currentMessage);
   assert.equal(JSON.stringify(input).includes(fakeKey), false);
-  const context = JSON.parse(input.instructions.slice(input.instructions.lastIndexOf('\n') + 1));
+  const context = JSON.parse(
+    input.messages[0].content.slice(input.messages[0].content.lastIndexOf('\n') + 1),
+  );
   assert.equal(context.totalTasks, tasks.length);
   assert.equal(context.includedTasks, context.tasks.length);
   assert.equal(context.tasks[0].id, fixed.id);
@@ -152,7 +154,7 @@ test('short prior step lists remain available for follow-up questions', () => {
     },
     new Date(stamp),
   );
-  assert.match(input.messages[0].content, /2\. Подготовить слайды/);
+  assert.match(input.messages[1].content, /2\. Подготовить слайды/);
 });
 
 test('duplicate or unexpected model actions fail validation and never become executable tools', () => {

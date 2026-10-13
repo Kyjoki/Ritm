@@ -18,6 +18,7 @@ import type {
   RuntimeStateRepository,
   WorkspaceRepository,
 } from './repository.ts';
+import { assertWorkspaceStorage } from './repository.ts';
 
 const { Pool } = pg;
 type Connection = Pick<PgPool | PoolClient, 'query'>;
@@ -91,11 +92,14 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
             max: 3,
             idleTimeoutMillis: 10_000,
             connectionTimeoutMillis: 10_000,
+            statement_timeout: 15_000,
+            lock_timeout: 5_000,
+            query_timeout: 16_000,
           })
         : connection;
     this.ownsPool = options.ownsPool ?? typeof connection === 'string';
     this.clock = options.now ?? Date.now;
-    this.requestLeaseMs = options.requestLeaseMs ?? 120_000;
+    this.requestLeaseMs = options.requestLeaseMs ?? 180_000;
     if (this.requestLeaseMs < 100_000)
       throw new Error('The chat request lease must exceed the provider timeout.');
   }
@@ -140,6 +144,22 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
     return result.rows[0] ? decoded<T>(result.rows[0].json) : undefined;
   }
   private async write<T extends { id: string }>(client: Connection, table: EntityTable, value: T) {
+    // Every active write is prospective and inside the shared workspace lock.
+    // Deleting records remains available even when legacy data exceeds the cap.
+    if (table === 'ritm_tasks')
+      assertWorkspaceStorage(
+        (await this.listTasks(client))
+          .filter((task) => task.id !== value.id)
+          .concat(value as unknown as Task),
+        await this.listConversations(client),
+      );
+    else if (table === 'ritm_conversations')
+      assertWorkspaceStorage(
+        await this.listTasks(client),
+        (await this.listConversations(client))
+          .filter((conversation) => conversation.id !== value.id)
+          .concat(value as unknown as Conversation),
+      );
     await client.query(
       `INSERT INTO ${table} (id, json) VALUES ($1, $2::jsonb) ON CONFLICT (id) DO UPDATE SET json = EXCLUDED.json`,
       [value.id, JSON.stringify(value)],
@@ -340,6 +360,13 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
       const deleted = await this.read<Task>(client, 'ritm_deleted_tasks', snapshot.id, true);
       if (!deleted || canonical(deleted) !== canonical(snapshot))
         throw conflict('Эту запись уже нельзя восстановить. Создайте новое задание.');
+      const count = await client.query('SELECT count(*) AS count FROM ritm_tasks');
+      if (Number(count.rows[0].count) >= 2000)
+        throw new AppError(
+          400,
+          'TASK_LIMIT',
+          'Достигнут лимит 2000 задач. Удалите ненужные записи.',
+        );
       const task = { ...deleted, updatedAt: this.stamp(deleted.updatedAt) };
       await this.write(client, 'ritm_tasks', task);
       await client.query('DELETE FROM ritm_deleted_tasks WHERE id = $1', [task.id]);

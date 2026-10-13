@@ -74,7 +74,7 @@ npm test
 npm run format:check
 ```
 
-Проверяются SQLite/API, постоянные сессии, шифрование, повторная отправка чата, подтверждение и отмена предложений, повторы, Google OAuth и события с заменой провайдера, часовые пояса и PostgreSQL-контракты через pg-mem. Реальные Google и PostgreSQL проверяются после настройки credentials. Отчёты: [проверки](docs/verification.md), [безопасность](docs/security-review.md), [обзор команды](docs/implementation-review.md).
+90 тестов проверяют SQLite/API, постоянные сессии, шифрование, повторную отправку чата, подтверждение и отмену предложений, повторы, Google OAuth и события с заменой провайдера, часовые пояса и PostgreSQL-контракты через pg-mem. Дополнительные проверки безопасности покрывают Host/CSRF/cookie, квоты, ограничение HTTP, журнал, параллельность ИИ, размер данных, allowlist исходящих запросов и строгий AES-GCM. Реальные Google и PostgreSQL проверяются после настройки credentials. Отчёты: [проверки](docs/verification.md), [безопасность](docs/security-review.md), [обзор команды](docs/implementation-review.md).
 
 ## Дизайн и ветки
 

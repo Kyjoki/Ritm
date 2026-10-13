@@ -4,6 +4,26 @@ import { join } from 'node:path';
 import type { AiStatus } from '../shared/types.ts';
 import { AppError } from './errors.ts';
 import type { RuntimeState } from './runtime-state.ts';
+import { secretSchema } from './validation.ts';
+import { z } from 'zod';
+
+const MAX_SECRET_BYTES = 64 * 1024;
+const base64Value = z
+  .string()
+  .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/);
+const envelopeSchema = z
+  .object({
+    version: z.union([z.literal(1), z.literal(2)]),
+    iv: base64Value.max(16),
+    tag: base64Value.max(24),
+    ciphertext: base64Value.max(4 * Math.ceil(MAX_SECRET_BYTES / 3)),
+  })
+  .strict();
+function decodeBase64(value: string) {
+  const buffer = Buffer.from(value, 'base64');
+  if (buffer.toString('base64') !== value) throw new Error('Invalid encoding');
+  return buffer;
+}
 
 export const defaultModel = 'gpt-6-luna';
 interface SavedSecret {
@@ -34,7 +54,11 @@ export class SecretStore {
       const text = this.env.SECRET_ENCRYPTION_KEY;
       const value = /^[a-fA-F0-9]{64}$/.test(text)
         ? Buffer.from(text, 'hex')
-        : Buffer.from(text, 'base64');
+        : /^[A-Za-z0-9+/]{43}=?$/.test(text) &&
+            Buffer.from(text, 'base64').toString('base64').replace(/=$/, '') ===
+              text.replace(/=$/, '')
+          ? Buffer.from(text, 'base64')
+          : Buffer.alloc(0);
       if (value.length !== 32)
         throw new AppError(
           503,
@@ -57,8 +81,14 @@ export class SecretStore {
     return value;
   }
   private encrypt(name: string, text: string): string {
+    if (Buffer.byteLength(text, 'utf8') > MAX_SECRET_BYTES)
+      throw new AppError(
+        400,
+        'SECRET_TOO_LARGE',
+        'Сохранённый секрет превышает допустимый размер.',
+      );
     const iv = randomBytes(12),
-      cipher = createCipheriv('aes-256-gcm', this.key(), iv);
+      cipher = createCipheriv('aes-256-gcm', this.key(), iv, { authTagLength: 16 });
     cipher.setAAD(Buffer.from(name));
     const ciphertext = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
     const envelope: Envelope = {
@@ -71,20 +101,19 @@ export class SecretStore {
   }
   private decrypt(name: string, blob: string): string {
     try {
-      const envelope = JSON.parse(blob) as Envelope;
+      if (blob.length > 90_000) throw new Error('Oversized envelope');
+      const envelope = envelopeSchema.parse(JSON.parse(blob));
       if (envelope.version !== 2 && !(envelope.version === 1 && name === 'openai'))
         throw new Error('Invalid envelope');
-      const decipher = createDecipheriv(
-        'aes-256-gcm',
-        this.key(),
-        Buffer.from(envelope.iv, 'base64'),
-      );
+      const iv = decodeBase64(envelope.iv),
+        tag = decodeBase64(envelope.tag),
+        ciphertext = decodeBase64(envelope.ciphertext);
+      if (iv.length !== 12 || tag.length !== 16 || ciphertext.length > MAX_SECRET_BYTES)
+        throw new Error('Invalid envelope parameters');
+      const decipher = createDecipheriv('aes-256-gcm', this.key(), iv, { authTagLength: 16 });
       if (envelope.version === 2) decipher.setAAD(Buffer.from(name));
-      decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'));
-      return Buffer.concat([
-        decipher.update(Buffer.from(envelope.ciphertext, 'base64')),
-        decipher.final(),
-      ]).toString('utf8');
+      decipher.setAuthTag(tag);
+      return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
     } catch (error) {
       if (error instanceof AppError) throw error;
       throw new AppError(
@@ -156,10 +185,11 @@ export class SecretStore {
       return { apiKey: environment, model: this.env.OPENAI_MODEL?.trim() || defaultModel };
     const blob = await this.getSecret('openai');
     if (!blob) return null;
-    const value = JSON.parse(blob) as SavedSecret;
-    if (typeof value.apiKey !== 'string' || typeof value.model !== 'string')
+    try {
+      return secretSchema.parse(JSON.parse(blob));
+    } catch {
       throw new AppError(500, 'SECRET_STORE_ERROR', 'Не удалось прочитать ключ ИИ.');
-    return value;
+    }
   }
   async status(): Promise<AiStatus> {
     const credential = await this.credentials();
@@ -176,7 +206,10 @@ export class SecretStore {
         'ENVIRONMENT_KEY',
         'Ключ задан на сервере через OPENAI_API_KEY. Измените серверную переменную и перезапустите приложение.',
       );
-    await this.saveSecret('openai', JSON.stringify(value));
+    const parsed = secretSchema.safeParse(value);
+    if (!parsed.success)
+      throw new AppError(400, 'SECRET_INVALID', 'Проверьте формат ключа OpenAI и название модели.');
+    await this.saveSecret('openai', JSON.stringify(parsed.data));
     return this.status();
   }
   async remove(): Promise<AiStatus> {

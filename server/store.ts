@@ -14,6 +14,7 @@ import type {
 } from '../shared/types.ts';
 import { AppError, conflict, missing } from './errors.ts';
 import { minutes, scheduleInPast, taskInputSchema, validSchedule } from './validation.ts';
+import { assertWorkspaceStorage } from './repository.ts';
 
 export const defaultSettings: Settings = {
   displayName: 'Максим',
@@ -95,7 +96,11 @@ export class Store {
         for (const row of this.db.prepare(`SELECT json FROM ${table}`).all()) {
           const task = JSON.parse(String(row.json)) as Task;
           if (!Array.isArray(task.completedDates))
-            this.write(table, { ...task, completedDates: [] });
+            // Schema normalization must not prevent opening a legacy workspace
+            // above the new byte budget: deletion remains available to recover.
+            this.db
+              .prepare(`UPDATE ${table} SET json=? WHERE id=?`)
+              .run(JSON.stringify({ ...task, completedDates: [] }), task.id);
         }
       }
       this.writeConfig('schemaVersion', 2);
@@ -131,6 +136,22 @@ export class Store {
     table: 'tasks' | 'conversations' | 'deleted_tasks',
     value: T,
   ) {
+    // Synchronous prospective check: rejection occurs before any row changes.
+    // Multi-row operations already run inside the existing SQLite transaction.
+    if (table === 'tasks')
+      assertWorkspaceStorage(
+        this.tasks()
+          .filter((task) => task.id !== value.id)
+          .concat(value as unknown as Task),
+        this.conversations(),
+      );
+    else if (table === 'conversations')
+      assertWorkspaceStorage(
+        this.tasks(),
+        this.conversations()
+          .filter((conversation) => conversation.id !== value.id)
+          .concat(value as unknown as Conversation),
+      );
     this.db
       .prepare(
         `INSERT INTO ${table}(id,json) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET json=excluded.json`,
@@ -262,6 +283,12 @@ export class Store {
       if (!deleted || JSON.stringify(deleted) !== JSON.stringify(snapshot)) {
         throw conflict('Эту запись уже нельзя восстановить. Создайте новое задание.');
       }
+      if (this.tasks().length >= 2000)
+        throw new AppError(
+          400,
+          'TASK_LIMIT',
+          'Достигнут лимит 2000 задач. Удалите ненужные записи.',
+        );
       const task = { ...deleted, updatedAt: this.stamp(deleted.updatedAt) };
       this.write('tasks', task);
       this.db.prepare('DELETE FROM deleted_tasks WHERE id=?').run(task.id);
