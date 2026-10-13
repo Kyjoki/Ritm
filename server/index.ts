@@ -29,6 +29,7 @@ import {
   type SecurityLogger,
 } from './http-security.ts';
 import { assistantMessage, runAssistant, type AssistantRunner } from './assistant.ts';
+import { ideaReviewMessage, runIdeaReview, type IdeaReviewRunner } from './idea-review.ts';
 import { createTaskGoogleTransfer } from './task-google-transfer.ts';
 import {
   chatSchema,
@@ -69,6 +70,7 @@ export interface AppOptions {
   env?: NodeJS.ProcessEnv;
   seed?: boolean;
   assistant?: AssistantRunner;
+  ideaReviewer?: IdeaReviewRunner;
   repository?: WorkspaceRepository;
   runtimeState?: RuntimeState;
   googleTransport?: GoogleTransport;
@@ -401,9 +403,14 @@ export function createApp(options: AppOptions = {}) {
   });
   app.post('/api/chat', async (req, res) => {
     const input = chatSchema.parse(req.body);
+    const reviewingIdea = input.mode === 'idea_review';
     const fingerprint = createHash('sha256')
       .update(
-        JSON.stringify({ conversationId: input.conversationId ?? null, message: input.message }),
+        JSON.stringify({
+          conversationId: input.conversationId ?? null,
+          message: input.message,
+          ...(reviewingIdea ? { mode: 'idea_review' } : {}),
+        }),
       )
       .digest('hex');
     const existing = await store.request(input.requestId);
@@ -424,6 +431,7 @@ export function createApp(options: AppOptions = {}) {
         'Подключите OpenAI в настройках, чтобы начать разговор.',
       );
     await security.limit(req, 'chat', 10, 60_000);
+    if (reviewingIdea) await security.limit(req, 'idea-review', 2, 60_000);
     const conversation = input.conversationId
       ? await store.conversation(input.conversationId)
       : undefined;
@@ -442,18 +450,18 @@ export function createApp(options: AppOptions = {}) {
       if (!res.writableEnded) controller.abort();
     };
     res.on('close', onDisconnect);
-    let modelSlot: { key: string; token: string } | undefined;
+    const modelSlots: { key: string; token: string }[] = [];
     let leaseToken: string | undefined,
       acquired = false;
     try {
       const snapshot = await store.tasks(),
         settings = await store.settings();
-      const googleStatus = await google.status();
+      const googleStatus = reviewingIdea ? undefined : await google.status();
       const today = localDate(new Date(), settings.timeZone),
         until = new Date(today + 'T12:00:00Z');
       until.setUTCDate(until.getUTCDate() + 14);
       const googleCalendar =
-        googleStatus.status === 'connected'
+        googleStatus?.status === 'connected'
           ? await google.listEvents({
               from: today,
               to: until.toISOString().slice(0, 10),
@@ -468,14 +476,14 @@ export function createApp(options: AppOptions = {}) {
         const key = 'ritm:ai:slot:' + slot;
         const token = await state.acquireLease(key, 180_000);
         if (token) {
-          modelSlot = { key, token };
-          break;
+          modelSlots.push({ key, token });
+          if (!reviewingIdea) break;
         }
       }
-      if (!modelSlot)
+      if (modelSlots.length < (reviewingIdea ? 2 : 1))
         throw new AppError(429, 'AI_BUSY', 'Помощник уже отвечает. Дождитесь завершения ответа.');
       // Reserve the paid model generation after read-only calendar loading, so
-      // Google latency does not consume the 120-second database claim lease.
+      // Google latency does not consume the database claim lease.
       const claim = await store.startRequest(
         input.requestId,
         fingerprint,
@@ -490,19 +498,30 @@ export function createApp(options: AppOptions = {}) {
       const freshConversation = input.conversationId
         ? await store.conversation(input.conversationId)
         : undefined;
-      const reply = await assistant({
-        ...credential,
-        settings,
-        tasks: snapshot,
-        conversation: freshConversation,
-        message: input.message,
-        signal: controller.signal,
-        googleCalendar,
-        googleCalendarStatus: googleStatus.status,
-      });
+      const message = reviewingIdea
+        ? ideaReviewMessage(
+            await (options.ideaReviewer ?? runIdeaReview)({
+              ...credential,
+              message: input.message,
+              signal: controller.signal,
+            }),
+          )
+        : assistantMessage(
+            await assistant({
+              ...credential,
+              settings,
+              tasks: snapshot,
+              conversation: freshConversation,
+              message: input.message,
+              signal: controller.signal,
+              googleCalendar,
+              googleCalendarStatus: googleStatus!.status,
+            }),
+            snapshot,
+            settings.timeZone,
+          );
       if (controller.signal.aborted)
         throw new AppError(499, 'REQUEST_CANCELLED', 'Запрос отменён.');
-      const message = assistantMessage(reply, snapshot, settings.timeZone);
       res.json(
         await store.finishChat(
           input.requestId,
@@ -518,7 +537,7 @@ export function createApp(options: AppOptions = {}) {
     } finally {
       busyConversations.delete(busyId);
       res.off('close', onDisconnect);
-      if (modelSlot) {
+      for (const modelSlot of modelSlots) {
         try {
           await state.releaseLease(modelSlot.key, modelSlot.token);
         } catch {

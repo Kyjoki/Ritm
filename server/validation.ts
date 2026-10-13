@@ -143,6 +143,7 @@ export const chatSchema = z
     conversationId: idSchema.optional(),
     message: z.string().trim().min(1).max(6000),
     requestId: idSchema,
+    mode: z.enum(['assistant', 'idea_review']).optional(),
   })
   .strict();
 export const proposalActionSchema = z

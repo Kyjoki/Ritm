@@ -23,11 +23,13 @@ import {
 import type {
   AiStatus,
   ChatMessage,
+  ChatMode,
   Conversation,
   ScheduleProposal,
   ScheduleTime,
 } from '../../shared/types';
 import { formatTime } from '../lib/date';
+import { IdeaReviewPanel, ideaExpertRoles, ideaReviewCopyText } from './IdeaReviewPanel';
 import '../styles/assistant.css';
 
 export interface AssistantPageProps {
@@ -39,6 +41,7 @@ export interface AssistantPageProps {
     conversationId: string | undefined,
     message: string,
     requestId: string,
+    mode?: ChatMode,
   ) => Promise<Conversation>;
   onApply: (conversationId: string, messageId: string, proposalIds: string[]) => Promise<void>;
   onReject: (conversationId: string, messageId: string, proposalIds: string[]) => Promise<void>;
@@ -52,6 +55,7 @@ interface SendRequest {
   conversationId: string | undefined;
   message: string;
   requestId: string;
+  mode: ChatMode;
   status: 'sending' | 'failed';
   error?: string;
 }
@@ -140,7 +144,9 @@ function MessageCopyButton({ message }: { message: ChatMessage }) {
       : '';
     try {
       await navigator.clipboard.writeText(
-        [message.text, steps, proposals].filter(Boolean).join('\n\n'),
+        message.ideaReview
+          ? ideaReviewCopyText(message.ideaReview)
+          : [message.text, steps, proposals].filter(Boolean).join('\n\n'),
       );
       if (copyAttempt.current !== attempt) return;
       setStatus('copied');
@@ -435,6 +441,7 @@ export function AssistantPage({
 }: AssistantPageProps) {
   const [selectedId, setSelectedId] = useState<string | undefined>(() => conversations[0]?.id);
   const [draft, setDraft] = useState('');
+  const [mode, setMode] = useState<ChatMode>('assistant');
   const [request, setRequest] = useState<SendRequest | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -548,6 +555,7 @@ export function AssistantPage({
     }
     if (initialPrompt === consumedPrompt.current) return;
     consumedPrompt.current = initialPrompt;
+    setMode('assistant');
     setDraft(initialPrompt);
     inputRef.current?.focus();
     onPromptConsumed?.();
@@ -636,6 +644,7 @@ export function AssistantPage({
           conversationId: selectedId,
           message: text,
           requestId: crypto.randomUUID(),
+          mode,
           status: 'sending',
         };
     composerFocusRequest.current =
@@ -653,7 +662,7 @@ export function AssistantPage({
     setPageError('');
     nearBottom.current = true;
     try {
-      const result = await onSend(next.conversationId, next.message, next.requestId);
+      const result = await onSend(next.conversationId, next.message, next.requestId, next.mode);
       if (composerFocusRequest.current?.requestId === next.requestId)
         composerFocusRequest.current.conversationId = result.id;
       setSelectedId(result.id);
@@ -825,7 +834,7 @@ export function AssistantPage({
           <header className="assistant-chat-header">
             <span className="assistant-orb" aria-hidden="true" />
             <div>
-              <h2>Помощник Ritm</h2>
+              <h2>{mode === 'idea_review' ? 'Разбор идей' : 'Помощник Ritm'}</h2>
               <p>
                 {aiStatus.configured
                   ? 'Готов к вашему запросу'
@@ -838,6 +847,24 @@ export function AssistantPage({
               <i aria-hidden="true" />
               {aiStatus.configured ? 'Ключ настроен' : 'Не настроен'}
             </span>
+            <div className="assistant-mode-switch" role="group" aria-label="Режим ИИ">
+              <button
+                type="button"
+                aria-pressed={mode === 'assistant'}
+                disabled={sending || creating || deleting || request?.status === 'failed'}
+                onClick={() => setMode('assistant')}
+              >
+                Помощник
+              </button>
+              <button
+                type="button"
+                aria-pressed={mode === 'idea_review'}
+                disabled={sending || creating || deleting || request?.status === 'failed'}
+                onClick={() => setMode('idea_review')}
+              >
+                Разбор идей
+              </button>
+            </div>
           </header>
           <div
             className="assistant-chat-scroll"
@@ -853,22 +880,39 @@ export function AssistantPage({
                 <div className="assistant-welcome-spark" aria-hidden="true">
                   <Sparkles size={25} />
                 </div>
-                <h3>С чего начнём?</h3>
-                <p>Помогу распределить дела, найти свободное время и сделать первый шаг.</p>
-                <div className="assistant-welcome-prompts">
-                  {prompts.map(({ title, subtitle, icon: Icon }) => (
-                    <button type="button" key={title} onClick={() => choosePrompt(title)}>
-                      <span>
-                        <Icon size={19} aria-hidden="true" />
-                      </span>
-                      <div>
-                        <strong>{title}</strong>
-                        <small>{subtitle}</small>
+                <h3>
+                  {mode === 'idea_review' ? 'Посмотрим на идею с четырёх сторон' : 'С чего начнём?'}
+                </h3>
+                <p>
+                  {mode === 'idea_review'
+                    ? 'Опишите идею, для кого она и чего вы хотите добиться. Получите отдельные оценки экспертов и общий вывод, включая разногласия.'
+                    : 'Помогу распределить дела, найти свободное время и сделать первый шаг.'}
+                </p>
+                {mode === 'idea_review' ? (
+                  <div className="assistant-idea-roles">
+                    {Object.entries(ideaExpertRoles).map(([id, role]) => (
+                      <div className="assistant-idea-role" key={id}>
+                        <strong>{role.title}</strong>
+                        <p>{role.description}</p>
                       </div>
-                      <ArrowRight size={16} aria-hidden="true" />
-                    </button>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="assistant-welcome-prompts">
+                    {prompts.map(({ title, subtitle, icon: Icon }) => (
+                      <button type="button" key={title} onClick={() => choosePrompt(title)}>
+                        <span>
+                          <Icon size={19} aria-hidden="true" />
+                        </span>
+                        <div>
+                          <strong>{title}</strong>
+                          <small>{subtitle}</small>
+                        </div>
+                        <ArrowRight size={16} aria-hidden="true" />
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {!aiStatus.configured ? (
                   <div className="assistant-setup">
                     <Settings2 size={18} aria-hidden="true" />
@@ -905,7 +949,11 @@ export function AssistantPage({
                   <span className="assistant-message-author">
                     {message.role === 'user' ? 'Вы' : 'Ritm'}
                   </span>
-                  <div className="assistant-message-text">{message.text}</div>
+                  {message.ideaReview ? (
+                    <IdeaReviewPanel report={message.ideaReview} />
+                  ) : (
+                    <div className="assistant-message-text">{message.text}</div>
+                  )}
                   {message.steps.length ? (
                     <div className="assistant-steps">
                       <h3>Понятные шаги</h3>
@@ -916,7 +964,7 @@ export function AssistantPage({
                       </ol>
                     </div>
                   ) : null}
-                  {message.proposals.length && conversation ? (
+                  {!message.ideaReview && message.proposals.length && conversation ? (
                     <ProposalCard
                       conversationId={conversation.id}
                       message={message}
@@ -943,7 +991,9 @@ export function AssistantPage({
                     <div className="assistant-waiting" role="status">
                       <span className="assistant-orb assistant-orb--small" aria-hidden="true" />
                       <span>
-                        Ritm изучает ваши планы
+                        {visibleRequest.mode === 'idea_review'
+                          ? 'Эксперты оценивают идею…'
+                          : 'Ritm изучает ваши планы'}
                         <span className="assistant-thinking-dots" aria-hidden="true">
                           <i />
                           <i />
@@ -970,6 +1020,7 @@ export function AssistantPage({
                           className="button button-secondary"
                           onClick={() => {
                             setDraft(visibleRequest.message);
+                            setMode(visibleRequest.mode);
                             setRequest(null);
                             inputRef.current?.focus();
                           }}
@@ -993,7 +1044,7 @@ export function AssistantPage({
             </div>
           </div>
           <div className="assistant-composer-area">
-            {messages.length ? (
+            {messages.length && mode === 'assistant' ? (
               <div className="assistant-prompt-chips" aria-label="Быстрые запросы">
                 {prompts.map(({ title }) => (
                   <button
@@ -1015,9 +1066,15 @@ export function AssistantPage({
                 </button>
               </div>
             ) : null}
+            {mode === 'idea_review' ? (
+              <p className="assistant-idea-hint" id="assistant-idea-hint">
+                Четыре отдельные оценки и общий вывод. Одна модель, пять запросов OpenAI; без
+                проверки фактов в интернете.
+              </p>
+            ) : null}
             <form className="assistant-composer" onSubmit={submit}>
               <label htmlFor="assistant-message-input" className="assistant-sr-only">
-                Сообщение ИИ-помощнику
+                {mode === 'idea_review' ? 'Идея для разбора экспертами' : 'Сообщение ИИ-помощнику'}
               </label>
               <textarea
                 id="assistant-message-input"
@@ -1026,11 +1083,17 @@ export function AssistantPage({
                 value={draft}
                 rows={2}
                 maxLength={6000}
-                placeholder="Спросите о своих планах…"
+                placeholder={
+                  mode === 'idea_review' ? 'Опишите вашу идею…' : 'Спросите о своих планах…'
+                }
                 disabled={sending}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={handleComposerKey}
-                aria-describedby="assistant-composer-hint"
+                aria-describedby={
+                  mode === 'idea_review'
+                    ? 'assistant-idea-hint assistant-composer-hint'
+                    : 'assistant-composer-hint'
+                }
               />
               <button
                 className="button button-primary assistant-send"
@@ -1057,7 +1120,11 @@ export function AssistantPage({
             </form>
             <p id="assistant-composer-hint" className="assistant-composer-hint">
               <ShieldCheck size={13} aria-hidden="true" />
-              <span>Изменения только после вашего подтверждения</span>
+              <span>
+                {mode === 'idea_review'
+                  ? 'Разбор идеи не меняет ваше расписание'
+                  : 'Изменения только после вашего подтверждения'}
+              </span>
               <span className="assistant-key-hint">
                 Enter — отправить · Shift + Enter — новая строка
               </span>

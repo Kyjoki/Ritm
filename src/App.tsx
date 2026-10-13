@@ -747,8 +747,8 @@ export default function App() {
                     : old,
                 );
               }}
-              onSend={async (id, message, requestId) => {
-                const c = await api.chat(id, message, requestId);
+              onSend={async (id, message, requestId, mode) => {
+                const c = await api.chat(id, message, requestId, mode);
                 putConversation(c);
                 return c;
               }}

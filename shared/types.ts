@@ -56,6 +56,35 @@ export interface ChatMessage {
   createdAt: string;
   proposals: ScheduleProposal[];
   steps: string[];
+  ideaReview?: IdeaReviewReport;
+}
+export type ChatMode = 'assistant' | 'idea_review';
+export type IdeaExpertId = 'value' | 'feasibility' | 'resources' | 'risks';
+export type IdeaVerdict = 'promising' | 'needs_testing' | 'weak';
+export interface IdeaExpertOpinion {
+  verdict: IdeaVerdict;
+  summary: string;
+  strengths: string[];
+  concerns: string[];
+  assumptions: string[];
+  firstTest: string;
+}
+export interface IdeaExpertReview extends IdeaExpertOpinion {
+  id: IdeaExpertId;
+}
+export interface IdeaReviewSynthesis {
+  verdict: IdeaVerdict;
+  summary: string;
+  agreements: string[];
+  disagreements: string[];
+  questions: string[];
+  nextSteps: string[];
+}
+export interface IdeaReviewReport {
+  version: 1;
+  model: string;
+  experts: IdeaExpertReview[];
+  synthesis: IdeaReviewSynthesis;
 }
 export interface Conversation {
   id: string;

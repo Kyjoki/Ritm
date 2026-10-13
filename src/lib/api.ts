@@ -1,5 +1,6 @@
 import type {
   AiStatus,
+  ChatMode,
   Bootstrap,
   Conversation,
   GoogleCalendarStatus,
@@ -129,8 +130,8 @@ export const api = {
     }),
   createConversation: () => request<Conversation>('/conversations', 'POST', {}),
   deleteConversation: (id: string) => request(`/conversations/${encodeURIComponent(id)}`, 'DELETE'),
-  chat: (conversationId: string | undefined, message: string, requestId: string) =>
-    request<Conversation>('/chat', 'POST', { conversationId, message, requestId }),
+  chat: (conversationId: string | undefined, message: string, requestId: string, mode?: ChatMode) =>
+    request<Conversation>('/chat', 'POST', { conversationId, message, requestId, mode }),
   proposals: (
     action: 'apply' | 'undo',
     conversationId: string,
