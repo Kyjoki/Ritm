@@ -66,7 +66,7 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
       <header className="signin-topbar">
         <span className="brand">
           <span className="brand-mark" aria-hidden="true">
-            ✦
+            <img src="/ritm-mark.svg" width="36" height="36" alt="" />
           </span>
           Ritm
         </span>

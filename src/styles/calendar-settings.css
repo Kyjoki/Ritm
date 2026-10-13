@@ -150,6 +150,25 @@
 .cal-today-column {
   background: color-mix(in srgb, var(--soft) 34%, transparent);
 }
+.cal-now-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 4;
+}
+.cal-now-line::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
 .cal-free-slot {
   position: absolute;
   left: 0;
@@ -1587,5 +1606,166 @@
   .cal-google-status-actions .button,
   .cal-google-settings {
     min-height: 44px;
+  }
+}
+
+/* Seven days stay in one viewport; only the hours scroll inside the timetable. */
+@media (max-width: 760px) {
+  .cal-mobile-week {
+    animation: none;
+  }
+  .cal-mobile-week .page-heading {
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .cal-mobile-week .page-eyebrow,
+  .cal-mobile-week .page-description {
+    display: none;
+  }
+  .cal-mobile-week .page-heading h1 {
+    font-size: 23px;
+  }
+  .cal-mobile-week .page-heading > .button {
+    position: fixed;
+    bottom: calc(88px + env(safe-area-inset-bottom));
+    right: 18px;
+    z-index: 15;
+    width: 54px;
+    height: 54px;
+    margin: 0;
+    border-radius: 18px;
+    box-shadow: 0 7px 24px rgb(44 22 72 / 0.25);
+  }
+  .cal-mobile-week .page-heading > .button svg {
+    width: 25px;
+    height: 25px;
+  }
+  .cal-mobile-week .cal-toolbar {
+    gap: 8px;
+    margin: 0 0 10px;
+  }
+  .cal-mobile-week .cal-period {
+    gap: 3px;
+  }
+  .cal-mobile-week .cal-period h2 {
+    font-size: 11px;
+    line-height: 1.4;
+  }
+  .cal-mobile-week .cal-today {
+    font-size: 11px;
+    padding: 8px;
+    margin-left: 0;
+  }
+  .cal-mobile-week .cal-now {
+    width: 44px;
+    min-height: 44px;
+    padding: 0;
+    font-size: 0;
+    gap: 0;
+  }
+  .cal-mobile-week .cal-now svg {
+    width: 17px;
+    height: 17px;
+  }
+  .cal-mobile-week .cal-google-status:not(.cal-google-status-warning) {
+    flex-wrap: nowrap;
+    align-items: center;
+    padding: 3px 0;
+    margin-bottom: 8px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    gap: 6px;
+  }
+  .cal-mobile-week .cal-google-status:not(.cal-google-status-warning) .cal-google-status-copy {
+    flex-basis: auto;
+    min-width: 0;
+  }
+  .cal-mobile-week
+    .cal-google-status:not(.cal-google-status-warning)
+    .cal-google-status-copy
+    > span,
+  .cal-mobile-week .cal-google-status:not(.cal-google-status-warning) .cal-google-updated {
+    display: none;
+  }
+  .cal-mobile-week .cal-google-status-copy strong {
+    font-size: 10px;
+  }
+  .cal-mobile-week .cal-google-status:not(.cal-google-status-warning) .cal-google-status-actions {
+    margin: 0;
+  }
+  .cal-mobile-week .cal-google-status-actions .button {
+    font-size: 10px;
+    padding: 5px 7px;
+    min-height: 44px;
+  }
+  .cal-mobile-week .cal-calendar-panel {
+    margin-inline: -12px;
+    padding: 9px 3px 0;
+    border-radius: 16px;
+  }
+  .cal-mobile-week .cal-grid-header {
+    padding-bottom: 7px;
+  }
+  .cal-mobile-week .cal-day-heading {
+    min-height: 54px;
+    gap: 4px;
+  }
+  .cal-mobile-week .cal-day-heading span {
+    font-size: 10px;
+  }
+  .cal-mobile-week .cal-day-heading strong {
+    font-size: 18px;
+  }
+  .cal-mobile-week .cal-day-heading.cal-date-today strong {
+    width: 28px;
+    height: 28px;
+  }
+  .cal-mobile-week .cal-timezone {
+    font-size: 8px;
+  }
+  .cal-mobile-week .cal-grid-scroll {
+    height: clamp(288px, calc(100dvh - 325px - env(safe-area-inset-bottom)), 960px);
+    max-height: none;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+  .cal-mobile-week .cal-hour-labels {
+    font-size: 9px;
+  }
+  .cal-mobile-week .cal-grid-event {
+    padding: 4px 2px;
+    border-left-width: 2px;
+    border-radius: 4px;
+  }
+  .cal-mobile-week .cal-grid-event strong {
+    font-size: 9px;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+    -webkit-line-clamp: 5;
+  }
+  .cal-mobile-week .cal-grid-event.cal-compact-event strong {
+    -webkit-line-clamp: 3;
+  }
+  .cal-mobile-week .cal-event-time {
+    display: none;
+  }
+  .cal-mobile-week .cal-all-day {
+    max-height: 96px;
+    overflow-y: auto;
+  }
+  .cal-mobile-week .cal-all-day-event {
+    font-size: 9px;
+    padding: 3px;
+    overflow-wrap: anywhere;
+  }
+  .cal-mobile-week .cal-all-day > span {
+    font-size: 8px;
+  }
+  .cal-mobile-week .cal-calendar-foot {
+    display: none;
+  }
+  .cal-mobile-week .cal-summary {
+    display: none;
   }
 }

@@ -176,11 +176,14 @@ export function CalendarPage({
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches,
   );
-  const [view, setView] = useState<CalendarView>(() =>
-    typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches
-      ? 'day'
-      : 'week',
-  );
+  const [view, setView] = useState<CalendarView>('week');
+  const [nowMinutes, setNowMinutes] = useState(() => minutesInZone(timeZone, new Date()));
+  useEffect(() => {
+    const update = () => setNowMinutes(minutesInZone(timeZone, new Date()));
+    update();
+    const timer = window.setInterval(update, 60_000);
+    return () => window.clearInterval(timer);
+  }, [timeZone]);
   useEffect(() => {
     const media = window.matchMedia('(max-width: 760px)');
     const listener = () => setIsMobile(media.matches);
@@ -229,7 +232,7 @@ export function CalendarPage({
   }, [tasks, googleEvents, selectedDate, timeZone]);
   const gridHeight = HOURS.length * HOUR_HEIGHT;
   useEffect(() => {
-    if (isMobile || view === 'month') {
+    if ((isMobile && view === 'day') || view === 'month') {
       scrolledPeriodRef.current = null;
       return;
     }
@@ -299,7 +302,7 @@ export function CalendarPage({
       : null;
 
   return (
-    <div className="cal-page">
+    <div className={`cal-page ${isMobile && view === 'week' ? 'cal-mobile-week' : ''}`}>
       <header className="page-heading">
         <div>
           <p className="page-eyebrow">Пространство для твоих планов</p>
@@ -309,6 +312,7 @@ export function CalendarPage({
         <button
           type="button"
           className="button button-primary"
+          aria-label="Добавить запись"
           onClick={() => addEntry(selectedDate)}
         >
           <Plus size={17} aria-hidden="true" />
@@ -341,9 +345,9 @@ export function CalendarPage({
           >
             Сегодня
           </button>
-          {!isMobile && view !== 'month' ? (
+          {view !== 'month' && (!isMobile || view === 'week') ? (
             <button
-              className="button button-secondary"
+              className="button button-secondary cal-now"
               type="button"
               onClick={showNow}
               aria-label="Показать текущее время"
@@ -507,7 +511,7 @@ export function CalendarPage({
             ))}
           </div>
         </section>
-      ) : isMobile ? (
+      ) : isMobile && view === 'day' ? (
         <section className="panel cal-mobile-agenda">
           {occurrencesByDay.map(({ date, entries }) => (
             <div className="cal-agenda-day" key={date}>
@@ -567,7 +571,7 @@ export function CalendarPage({
           <div
             className="cal-grid-header"
             style={{
-              gridTemplateColumns: `${GRID_TIME_COLUMN}px repeat(${periodDays.length}, minmax(0, 1fr))`,
+              gridTemplateColumns: `${isMobile ? 40 : GRID_TIME_COLUMN}px repeat(${periodDays.length}, minmax(0, 1fr))`,
             }}
           >
             <span className="cal-timezone">
@@ -596,7 +600,7 @@ export function CalendarPage({
             <div
               className="cal-all-day"
               style={{
-                gridTemplateColumns: `${GRID_TIME_COLUMN}px repeat(${periodDays.length}, minmax(0, 1fr))`,
+                gridTemplateColumns: `${isMobile ? 40 : GRID_TIME_COLUMN}px repeat(${periodDays.length}, minmax(0, 1fr))`,
               }}
             >
               <span>Весь день / без времени</span>
@@ -624,7 +628,7 @@ export function CalendarPage({
             <div
               className="cal-grid"
               style={{
-                gridTemplateColumns: `${GRID_TIME_COLUMN}px repeat(${periodDays.length}, minmax(0, 1fr))`,
+                gridTemplateColumns: `${isMobile ? 40 : GRID_TIME_COLUMN}px repeat(${periodDays.length}, minmax(0, 1fr))`,
                 height: gridHeight,
               }}
             >
@@ -668,15 +672,15 @@ export function CalendarPage({
                           ...calendarEntryStyle(entry),
                           top: ((entry.start ?? 0) / 60) * HOUR_HEIGHT + 2,
                           height: Math.max(22, (duration / 60) * HOUR_HEIGHT - 4),
-                          width: `calc(${100 / entry.lanes}% - 7px)`,
-                          left: `calc(${(entry.lane * 100) / entry.lanes}% + 4px)`,
+                          width: `calc(${100 / entry.lanes}% - ${isMobile ? 2 : 7}px)`,
+                          left: `calc(${(entry.lane * 100) / entry.lanes}% + ${isMobile ? 1 : 4}px)`,
                         }}
                         onClick={() => editEntry(entry)}
                         title={occurrenceLabel(entry)}
                         aria-label={occurrenceLabel(entry)}
                       >
                         <strong>{entry.title}</strong>
-                        <span>
+                        <span className="cal-event-time">
                           {entryTime(entry, 'start')}–{entryTime(entry, 'end')}
                           {entry.source === 'ritm' && entry.task.repeat !== 'none' ? ' · ↻' : ''}
                           {entry.clockChange ? ' · Перевод часов' : ''}
@@ -684,6 +688,13 @@ export function CalendarPage({
                       </button>
                     );
                   })}
+                  {date === today ? (
+                    <div
+                      className="cal-now-line"
+                      style={{ top: (nowMinutes / 60) * HOUR_HEIGHT }}
+                      aria-hidden="true"
+                    />
+                  ) : null}
                 </div>
               ))}
             </div>

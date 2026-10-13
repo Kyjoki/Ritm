@@ -558,6 +558,9 @@ export default function App() {
       </aside>
       <main id="main-content" className="main-content" tabIndex={-1}>
         <div className="workspace-top">
+          <div className="workspace-brand">
+            <Brand />
+          </div>
           <span>ЛИЧНОЕ ПРОСТРАНСТВО</span>
           <button
             className="icon-button theme-switch"
@@ -817,7 +820,10 @@ export default function App() {
 function Brand() {
   return (
     <span className="brand">
-      <span className="brand-mark">✦</span>Ritm
+      <span className="brand-mark" aria-hidden="true">
+        <img src="/ritm-mark.svg" width="36" height="36" alt="" />
+      </span>
+      Ritm
     </span>
   );
 }
