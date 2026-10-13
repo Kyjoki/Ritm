@@ -7,6 +7,8 @@ import type {
   GoogleCalendarEvent,
   GoogleCalendarResult,
   GoogleCalendarStatus,
+  GoogleTaskCompletion,
+  GoogleTasksStatus,
   GoogleEventInput,
   GoogleOAuthSetup,
   GoogleOAuthSetupInput,
@@ -18,9 +20,11 @@ import { calendarColorSchema, dateValue, minutes, timeValue } from './validation
 export const GOOGLE_CALLBACK_PATH = '/api/integrations/google/callback';
 export const GOOGLE_OAUTH_COOKIE = 'ritm_google_flow';
 export const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+export const GOOGLE_TASKS_SCOPE = 'https://www.googleapis.com/auth/tasks';
 export const GOOGLE_CALENDAR_LABELS_SCOPE = 'https://www.googleapis.com/auth/calendar.calendars';
 const CALENDAR_URL = 'https://www.googleapis.com/calendar/v3/calendars/primary';
 const EVENTS_URL = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
+const TASKS_URL = 'https://tasks.googleapis.com/tasks/v1';
 const TOKEN_SLOT = 'google.tokens';
 const CONFIGURATION_SLOT = 'google.oauth.configuration';
 const EPOCH_SLOT = 'google.connection-epoch';
@@ -50,7 +54,9 @@ export interface GoogleOAuthConfig {
 }
 export interface GoogleRequest {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
-  resource?: 'calendar';
+  resource?: 'calendar' | 'tasklists' | 'tasks';
+  taskListId?: string;
+  taskId?: string;
   eventId?: string;
   query?: Record<string, string | number | boolean>;
   body?: Record<string, unknown>;
@@ -81,6 +87,7 @@ const flowSchema = z
     configFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
     epoch: z.string().uuid(),
     extendedColors: z.boolean().optional(),
+    tasks: z.boolean().optional(),
   })
   .strict();
 const tokensSchema = z
@@ -95,6 +102,7 @@ const tokensSchema = z
     epoch: z.string().uuid().optional(),
     lastFetchedAt: z.string().nullable(),
     extendedColors: z.boolean().optional(),
+    tasks: z.boolean().optional(),
   })
   .strict();
 type StoredTokens = z.infer<typeof tokensSchema>;
@@ -229,15 +237,31 @@ export const defaultGoogleTransport: GoogleTransport = {
       (request.eventId || !['GET', 'PATCH'].includes(request.method))
     )
       throw new Error('Unsupported Google calendar metadata operation');
+    if (
+      request.resource === 'tasklists' &&
+      (request.method !== 'GET' || request.taskListId || request.taskId)
+    )
+      throw new Error('Unsupported Google task lists operation');
+    if (
+      request.resource === 'tasks' &&
+      (!request.taskListId ||
+        !['GET', 'PATCH'].includes(request.method) ||
+        (request.method === 'PATCH' && !request.taskId))
+    )
+      throw new Error('Unsupported Google tasks operation');
     const client = oauthClient(config);
     // Refresh is coordinated through the durable lease, never independently by this API client.
     client.setCredentials({ access_token: accessToken });
     const url =
-      request.resource === 'calendar'
-        ? CALENDAR_URL
-        : request.eventId
-          ? `${EVENTS_URL}/${encodeURIComponent(request.eventId)}`
-          : EVENTS_URL;
+      request.resource === 'tasklists'
+        ? `${TASKS_URL}/users/@me/lists`
+        : request.resource === 'tasks'
+          ? `${TASKS_URL}/lists/${encodeURIComponent(request.taskListId!)}/tasks${request.taskId ? '/' + encodeURIComponent(request.taskId) : ''}`
+          : request.resource === 'calendar'
+            ? CALENDAR_URL
+            : request.eventId
+              ? `${EVENTS_URL}/${encodeURIComponent(request.eventId)}`
+              : EVENTS_URL;
     const response = await client.request({
       url,
       method: request.method,
@@ -449,11 +473,28 @@ const eventSchema = z
     locked: z.boolean().optional(),
     eventType: z.string().optional(),
     organizer: z.object({ self: z.boolean().optional() }).optional(),
+    creator: z.object({ self: z.boolean().optional() }).optional(),
     attendees: z.array(z.object({ self: z.boolean().optional() })).optional(),
     recurrence: z.array(z.string()).optional(),
     recurringEventId: z.string().min(1).max(1024).optional(),
   })
   .passthrough();
+
+function isLinkedTaskMirrorCandidate(event: z.infer<typeof eventSchema>) {
+  return (
+    Boolean(event.summary?.trim()) &&
+    event.summary!.trim().length <= 160 &&
+    (event.description?.length ?? 0) <= 4000 &&
+    event.eventType === 'focusTime' &&
+    event.creator?.self === true &&
+    event.organizer?.self === true &&
+    !event.locked &&
+    !event.attendees?.some((attendee) => attendee.self !== true) &&
+    !event.recurringEventId &&
+    event.recurrence === undefined &&
+    Boolean(taskLinkFromDescription(event.description ?? ''))
+  );
+}
 
 const labelSchema = z
   .object({
@@ -478,6 +519,59 @@ const labelColors = (calendar: CalendarLabels) =>
       (label) => [label.id, label.backgroundColor.toLowerCase()] as const,
     ),
   );
+function usesTasks(tokens: StoredTokens | null) {
+  return Boolean(tokens?.tasks && tokens.scope.split(/\s+/).includes(GOOGLE_TASKS_SCOPE));
+}
+const taskIdSchema = z
+  .string()
+  .min(1)
+  .max(1024)
+  .regex(/^[a-zA-Z0-9_-]+$/);
+const nativeTaskSchema = z
+  .object({
+    id: taskIdSchema,
+    etag: googleEtagSchema,
+    title: z.string().max(1024),
+    due: z.iso.datetime({ offset: true }).optional(),
+    webViewLink: z.string().max(2048).optional(),
+    status: z.enum(['needsAction', 'completed']),
+    completed: z.iso.datetime({ offset: true }).optional(),
+    deleted: z.boolean().optional(),
+  })
+  .passthrough();
+export function normalizeGoogleTaskLink(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== 'https:' ||
+      url.hostname !== 'tasks.google.com' ||
+      url.port ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      !/^\/task\/[a-zA-Z0-9_-]+\/?$/.test(url.pathname)
+    )
+      return null;
+    return 'https://tasks.google.com' + url.pathname.replace(/\/$/, '');
+  } catch {
+    return null;
+  }
+}
+function taskLinkFromDescription(description: string): string | null {
+  const links = new Set(
+    (description.match(/https:\/\/[^\s<>"']+/g) ?? [])
+      .map((value) => normalizeGoogleTaskLink(value.replace(/[.,;:!?)]*$/, '')))
+      .filter((value): value is string => Boolean(value)),
+  );
+  return links.size === 1 ? [...links][0] : null;
+}
+function taskMatchesMirror(task: z.infer<typeof nativeTaskSchema>, event: GoogleCalendarEvent) {
+  const date = event.allDay
+    ? event.start.date
+    : localParts(Date.parse(event.start.dateTime!), event.timeZone).date;
+  return task.title.trim() === event.title && Boolean(task.due) && task.due!.slice(0, 10) === date;
+}
 function usesExtendedColors(tokens: StoredTokens | null) {
   return Boolean(
     tokens?.extendedColors &&
@@ -603,6 +697,7 @@ export function mapGoogleEvent(
     recurring: Boolean(event.recurringEventId || event.recurrence !== undefined),
     ...(selectedColor ? { colorId: selectedColor } : {}),
     ...(readOnlyReason ? { readOnlyReason } : {}),
+    ...(isLinkedTaskMirrorCandidate(event) ? { taskLink: true } : {}),
   };
 }
 
@@ -870,6 +965,12 @@ export class GoogleCalendarService {
       mode: 'readwrite',
       calendarId: 'primary',
       lastFetchedAt: tokens?.lastFetchedAt ?? null,
+      tasksEnabled:
+        usesTasks(tokens) &&
+        Boolean(config) &&
+        tokens?.configFingerprint === this.fingerprint(config!) &&
+        tokens?.epoch === epoch &&
+        !tokens?.needsReauth,
       extendedColors:
         usesExtendedColors(tokens) &&
         Boolean(config) &&
@@ -878,7 +979,10 @@ export class GoogleCalendarService {
         !tokens?.needsReauth,
     };
   }
-  async connect(ownerSessionHash: string, options: { extendedColors?: boolean } = {}) {
+  async connect(
+    ownerSessionHash: string,
+    options: { extendedColors?: boolean; tasks?: boolean } = {},
+  ) {
     if (
       !ownerHashPattern.test(ownerSessionHash) ||
       !(await this.options.security.hasOwnerSession(ownerSessionHash))
@@ -886,7 +990,9 @@ export class GoogleCalendarService {
       throw new AppError(401, 'AUTH_REQUIRED', 'Войдите в Ritm перед подключением Google.');
     return this.withLease(async (assertActive) => {
       const config = await this.oauthConfiguration(),
-        extendedColors = options.extendedColors ?? usesExtendedColors(await this.readTokens()),
+        previousTokens = await this.readTokens(),
+        extendedColors = options.extendedColors === true || usesExtendedColors(previousTokens),
+        tasks = options.tasks === true || usesTasks(previousTokens),
         client = oauthClient(config),
         verifier = await client.generateCodeVerifierAsync();
       if (!(await this.options.security.hasOwnerSession(ownerSessionHash)))
@@ -918,13 +1024,18 @@ export class GoogleCalendarService {
           configFingerprint: this.fingerprint(config),
           epoch,
           extendedColors,
+          tasks,
         }),
       );
       assertActive();
       await this.options.secrets.saveSecret(ownerSlot, stateHash);
       await this.assertConfiguration(config, epoch);
       const authorizationUrl = client.generateAuthUrl({
-        scope: [GOOGLE_CALENDAR_SCOPE, ...(extendedColors ? [GOOGLE_CALENDAR_LABELS_SCOPE] : [])],
+        scope: [
+          GOOGLE_CALENDAR_SCOPE,
+          ...(extendedColors ? [GOOGLE_CALENDAR_LABELS_SCOPE] : []),
+          ...(tasks ? [GOOGLE_TASKS_SCOPE] : []),
+        ],
         state,
         access_type: 'offline',
         prompt: 'consent',
@@ -1058,6 +1169,12 @@ export class GoogleCalendarService {
           'GOOGLE_LABEL_SCOPE_REQUIRED',
           'Для всей палитры разрешите изменение свойств календаря Google. Прежнее подключение сохранено.',
         );
+      if (flow.tasks && !scope.split(/\s+/).includes(GOOGLE_TASKS_SCOPE))
+        throw new AppError(
+          403,
+          'GOOGLE_TASKS_SCOPE_REQUIRED',
+          'Разрешите доступ к Google Tasks. Прежнее подключение календаря сохранено.',
+        );
       const tokens: StoredTokens = {
         accessToken: credentials.access_token,
         refreshToken: credentials.refresh_token,
@@ -1069,6 +1186,7 @@ export class GoogleCalendarService {
         epoch: flow.epoch,
         lastFetchedAt: null,
         extendedColors: flow.extendedColors === true,
+        tasks: flow.tasks === true,
       };
       if (!(await this.options.security.hasOwnerSession(flow.ownerSessionHash)))
         throw new AppError(
@@ -1173,9 +1291,387 @@ export class GoogleCalendarService {
             JSON.stringify({ ...latest, needsReauth: true, accessToken: '' }),
           );
         }
+        if (
+          providerStatus(error) === 403 &&
+          ['tasks', 'tasklists'].includes(request.resource ?? '')
+        )
+          throw new AppError(
+            403,
+            'GOOGLE_TASKS_FORBIDDEN',
+            'Google не разрешил доступ к задачам. Включите Google Tasks API в проекте Google Cloud и проверьте разрешение Google Tasks.',
+          );
         throw error instanceof AppError ? error : safeProviderError(error);
       }
     });
+  }
+  private async taskCatalog(connection: GoogleConnection, signal: AbortSignal) {
+    const lists: string[] = [],
+      entries = new Map<string, Array<{ list: string; task: z.infer<typeof nativeTaskSchema> }>>();
+    let requests = 0,
+      records = 0;
+    const pages = async (request: GoogleRequest, item: z.ZodType) => {
+      const result: unknown[] = [],
+        seenTokens = new Set<string>();
+      let pageToken: string | undefined;
+      do {
+        signal.throwIfAborted();
+        if (++requests > 30)
+          throw new AppError(
+            502,
+            'GOOGLE_TASKS_PARTIAL',
+            'Слишком много списков Google Tasks. Не все статусы удалось проверить.',
+          );
+        const data = await this.api(connection, {
+          ...request,
+          signal,
+          query: { ...request.query, ...(pageToken ? { pageToken } : {}) },
+        });
+        const parsed = z
+          .object({
+            items: z.array(item).max(1000).optional(),
+            nextPageToken: z.string().min(1).max(4096).optional(),
+          })
+          .safeParse(data);
+        if (!parsed.success)
+          throw new AppError(
+            502,
+            'GOOGLE_TASKS_INVALID_RESPONSE',
+            'Google Tasks вернул неполные данные. Повторите обновление.',
+          );
+        result.push(...(parsed.data.items ?? []));
+        records += parsed.data.items?.length ?? 0;
+        if (records > 2100)
+          throw new AppError(
+            502,
+            'GOOGLE_TASKS_PARTIAL',
+            'Слишком много задач Google. Не все статусы удалось проверить.',
+          );
+        pageToken = parsed.data.nextPageToken;
+        if (pageToken && seenTokens.has(pageToken))
+          throw new AppError(
+            502,
+            'GOOGLE_TASKS_PARTIAL',
+            'Google Tasks не завершил загрузку. Повторите обновление.',
+          );
+        if (pageToken) seenTokens.add(pageToken);
+      } while (pageToken);
+      return result;
+    };
+    const listData = await pages(
+      {
+        resource: 'tasklists',
+        method: 'GET',
+        query: { maxResults: 100, fields: 'items(id),nextPageToken' },
+      },
+      z.object({ id: taskIdSchema }),
+    );
+    for (const value of listData) {
+      const id = (value as { id: string }).id;
+      if (!lists.includes(id)) lists.push(id);
+      if (lists.length > 100)
+        throw new AppError(
+          502,
+          'GOOGLE_TASKS_PARTIAL',
+          'Слишком много списков Google Tasks. Не все статусы удалось проверить.',
+        );
+    }
+    const seenTasks = new Set<string>();
+    for (const list of lists) {
+      const items = await pages(
+        {
+          resource: 'tasks',
+          taskListId: list,
+          method: 'GET',
+          query: {
+            maxResults: 100,
+            showCompleted: true,
+            showHidden: true,
+            showDeleted: false,
+            showAssigned: true,
+            fields: 'items(id,etag,title,due,webViewLink,status,completed,deleted),nextPageToken',
+          },
+        },
+        nativeTaskSchema,
+      );
+      for (const item of items) {
+        const task = item as z.infer<typeof nativeTaskSchema>,
+          key = list + '\0' + task.id;
+        if (task.deleted || seenTasks.has(key)) continue;
+        seenTasks.add(key);
+        const link = task.webViewLink && normalizeGoogleTaskLink(task.webViewLink);
+        if (link) entries.set(link, [...(entries.get(link) ?? []), { list, task }]);
+      }
+    }
+    return entries;
+  }
+  private taskInfo(
+    connection: GoogleConnection,
+    list: string,
+    task: z.infer<typeof nativeTaskSchema>,
+  ): GoogleTaskCompletion {
+    return {
+      taskListId: list,
+      id: task.id,
+      etag: task.etag,
+      status: task.status,
+      ...(task.completed ? { completed: task.completed } : {}),
+      connectionId: this.identity(connection),
+    };
+  }
+  private async enrichTasks(
+    events: GoogleCalendarEvent[],
+    connection: GoogleConnection,
+    signal: AbortSignal,
+  ): Promise<GoogleTasksStatus> {
+    const candidates = events.filter((event) => event.taskLink);
+    if (!usesTasks(connection.tokens)) {
+      for (const event of candidates)
+        event.taskUnavailableReason =
+          'Разрешите Google Tasks в настройках, чтобы отмечать выполнение здесь.';
+      return { status: 'permission_required' };
+    }
+    if (!candidates.length) return { status: 'enabled' };
+    try {
+      const catalog = await this.taskCatalog(
+        connection,
+        AbortSignal.any([signal, AbortSignal.timeout(12_000)]),
+      );
+      const mirrorCounts = new Map<string, number>();
+      for (const event of candidates) {
+        const link = taskLinkFromDescription(event.description);
+        if (link) mirrorCounts.set(link, (mirrorCounts.get(link) ?? 0) + 1);
+      }
+      for (const event of candidates) {
+        const link = taskLinkFromDescription(event.description),
+          matches = link && mirrorCounts.get(link) === 1 ? catalog.get(link) : undefined;
+        if (matches?.length === 1 && taskMatchesMirror(matches[0].task, event))
+          event.googleTask = this.taskInfo(connection, matches[0].list, matches[0].task);
+        else
+          event.taskUnavailableReason = matches?.length
+            ? 'Не удалось однозначно определить задачу Google. Откройте её в Google Tasks.'
+            : 'Задача не найдена в Google Tasks. Обновите календарь или откройте её в Google.';
+      }
+      return { status: 'enabled' };
+    } catch (error) {
+      if (error instanceof AppError && ['CONFLICT', 'GOOGLE_REAUTH_REQUIRED'].includes(error.code))
+        throw error;
+      const message =
+        error instanceof AppError &&
+        ['GOOGLE_FORBIDDEN', 'GOOGLE_TASKS_FORBIDDEN'].includes(error.code)
+          ? 'Включите Google Tasks API в проекте Google Cloud и проверьте разрешение Google Tasks.'
+          : 'Не удалось загрузить статусы Google Tasks. Календарь доступен; повторите обновление.';
+      for (const event of candidates) event.taskUnavailableReason = message;
+      return {
+        status:
+          error instanceof AppError && error.code === 'GOOGLE_TASKS_PARTIAL'
+            ? 'partial'
+            : 'unavailable',
+        message,
+      };
+    }
+  }
+  private async assertSingleTaskMirror(
+    connection: GoogleConnection,
+    eventId: string,
+    link: string,
+    signal: AbortSignal,
+  ) {
+    const ids = new Set<string>(),
+      seenTokens = new Set<string>();
+    let pageToken: string | undefined;
+    for (let page = 0; page < 5; page++) {
+      const data = await this.api(connection, {
+        method: 'GET',
+        signal,
+        query: {
+          singleEvents: false,
+          showDeleted: false,
+          eventTypes: 'focusTime',
+          maxResults: 250,
+          fields: 'items(id,description,eventType,recurrence,recurringEventId),nextPageToken',
+          ...(pageToken ? { pageToken } : {}),
+        },
+      });
+      const parsed = z
+        .object({
+          items: z
+            .array(
+              z.object({
+                id: googleEventIdSchema,
+                description: z.string().optional(),
+                eventType: z.string().optional(),
+                recurrence: z.array(z.string()).optional(),
+                recurringEventId: z.string().optional(),
+              }),
+            )
+            .max(250)
+            .optional(),
+          nextPageToken: z.string().min(1).max(4096).optional(),
+        })
+        .safeParse(data);
+      if (!parsed.success)
+        throw new AppError(
+          502,
+          'GOOGLE_TASKS_INVALID_RESPONSE',
+          'Не удалось проверить связь задачи с календарём Google.',
+        );
+      for (const event of parsed.data.items ?? []) {
+        if (
+          event.eventType !== 'focusTime' ||
+          taskLinkFromDescription(event.description ?? '') !== link
+        )
+          continue;
+        if (event.recurrence !== undefined || event.recurringEventId)
+          throw new AppError(
+            409,
+            'GOOGLE_TASK_NOT_LINKED',
+            'Повторяющаяся задача изменяется в Google Tasks.',
+          );
+        ids.add(event.id);
+        if (ids.size > 1)
+          throw new AppError(
+            409,
+            'GOOGLE_TASK_NOT_LINKED',
+            'У задачи несколько записей в календаре. Измените выполнение в Google Tasks.',
+          );
+      }
+      pageToken = parsed.data.nextPageToken;
+      if (!pageToken) {
+        if (ids.size !== 1 || !ids.has(eventId))
+          throw new AppError(
+            409,
+            'GOOGLE_TASK_NOT_LINKED',
+            'Не удалось однозначно проверить запись задачи Google. Обновите календарь.',
+          );
+        return;
+      }
+      if (seenTokens.has(pageToken)) break;
+      seenTokens.add(pageToken);
+    }
+    throw new AppError(
+      409,
+      'GOOGLE_TASK_NOT_LINKED',
+      'Связь задачи Google не удалось проверить полностью. Откройте её в Google Tasks.',
+    );
+  }
+  async completeTask(
+    id: string,
+    input: { etag: string; taskEtag: string; completed: boolean; connectionId: string },
+  ): Promise<{ event: GoogleCalendarEvent }> {
+    const eventId = googleEventIdSchema.parse(id),
+      version = googleEtagSchema.parse(input.etag),
+      taskVersion = googleEtagSchema.parse(input.taskEtag),
+      connection = await this.token();
+    if (this.identity(connection) !== input.connectionId)
+      throw conflict(
+        'Подключение Google изменилось. Обновите календарь перед отметкой выполнения.',
+      );
+    if (!usesTasks(connection.tokens))
+      throw new AppError(
+        403,
+        'GOOGLE_TASKS_SCOPE_REQUIRED',
+        'Разрешите Google Tasks в настройках перед отметкой выполнения.',
+      );
+    const settings = await this.options.settings(),
+      signal = AbortSignal.timeout(20_000);
+    const readEvent = async () => {
+      const data = await this.api(connection, { method: 'GET', eventId, signal });
+      const raw = eventSchema.safeParse(data);
+      if (!raw.success || !isLinkedTaskMirrorCandidate(raw.data))
+        throw new AppError(
+          403,
+          'GOOGLE_TASK_NOT_LINKED',
+          'Эта запись не является поддерживаемой личной задачей Google. Откройте её в Google.',
+        );
+      const event = await this.mapReturnedEvent(data, connection, settings.timeZone);
+      if (!event || event.id !== eventId)
+        throw new AppError(
+          404,
+          'GOOGLE_EVENT_NOT_FOUND',
+          'Запись Google больше недоступна. Обновите календарь.',
+        );
+      if (event.etag !== version)
+        throw conflict('Запись Google изменилась. Обновите календарь перед отметкой выполнения.');
+      return event;
+    };
+    const original = await readEvent(),
+      link = taskLinkFromDescription(original.description);
+    if (!link)
+      throw new AppError(
+        403,
+        'GOOGLE_TASK_NOT_LINKED',
+        'Для этой записи не найдено однозначной ссылки Google Tasks.',
+      );
+    await this.assertSingleTaskMirror(connection, eventId, link, signal);
+    const catalog = await this.taskCatalog(connection, signal),
+      matches = catalog.get(link);
+    if (matches?.length !== 1)
+      throw new AppError(
+        409,
+        'GOOGLE_TASK_NOT_LINKED',
+        'Не удалось однозначно определить задачу Google. Обновите календарь.',
+      );
+    const { list, task: match } = matches[0];
+    const data = await this.api(connection, {
+      resource: 'tasks',
+      taskListId: list,
+      taskId: match.id,
+      method: 'GET',
+      signal,
+    });
+    const parsed = nativeTaskSchema.safeParse(data);
+    if (
+      !parsed.success ||
+      parsed.data.id !== match.id ||
+      parsed.data.deleted ||
+      normalizeGoogleTaskLink(parsed.data.webViewLink ?? '') !== link
+    )
+      throw new AppError(
+        409,
+        'GOOGLE_TASK_NOT_LINKED',
+        'Задача Google изменилась или недоступна. Обновите календарь.',
+      );
+    const task = parsed.data;
+    if (!taskMatchesMirror(task, original))
+      throw new AppError(
+        409,
+        'GOOGLE_TASK_NOT_LINKED',
+        'Название или день задачи Google не совпадают с записью календаря. Обновите календарь или откройте Google Tasks.',
+      );
+    if (task.etag !== taskVersion)
+      throw conflict(
+        'Статус задачи Google изменился. Обновите календарь перед повторной отметкой.',
+      );
+    const fresh = await readEvent();
+    if (taskLinkFromDescription(fresh.description) !== link || !taskMatchesMirror(task, fresh))
+      throw conflict('Связь задачи Google изменилась. Обновите календарь.');
+    const desired = input.completed ? 'completed' : 'needsAction';
+    if (task.status === desired)
+      return { event: { ...fresh, googleTask: this.taskInfo(connection, list, task) } };
+    if (signal.aborted) throw safeProviderError(signal.reason);
+    const updated = await this.api(connection, {
+      resource: 'tasks',
+      taskListId: list,
+      taskId: task.id,
+      method: 'PATCH',
+      headers: { 'If-Match': taskVersion },
+      body: input.completed ? { status: desired } : { status: desired, completed: null },
+    });
+    const confirmed = nativeTaskSchema.safeParse(updated);
+    if (
+      !confirmed.success ||
+      confirmed.data.deleted ||
+      confirmed.data.id !== task.id ||
+      confirmed.data.status !== desired ||
+      !taskMatchesMirror(confirmed.data, fresh) ||
+      normalizeGoogleTaskLink(confirmed.data.webViewLink ?? '') !== link
+    )
+      throw new AppError(
+        502,
+        'GOOGLE_TASKS_UNCONFIRMED',
+        'Не удалось подтвердить выполнение в Google. Обновите календарь перед повторной отметкой.',
+      );
+    return { event: { ...fresh, googleTask: this.taskInfo(connection, list, confirmed.data) } };
   }
   private async calendarLabels(
     connection: GoogleConnection,
@@ -1337,7 +1833,7 @@ export class GoogleCalendarService {
           timeZone: input.timeZone,
           maxResults: 250,
           fields:
-            'items(id,summary,description,colorId,eventLabelId,etag,status,start,end,transparency,locked,eventType,organizer(self),attendees(self),recurrence,recurringEventId),nextPageToken,accessRole',
+            'items(id,summary,description,colorId,eventLabelId,etag,status,start,end,transparency,locked,eventType,creator(self),organizer(self),attendees(self),recurrence,recurringEventId),nextPageToken,accessRole',
           ...(pageToken ? { pageToken } : {}),
         },
       });
@@ -1386,6 +1882,7 @@ export class GoogleCalendarService {
       pageTokens.add(pageToken);
       if (page === 9) partial = true;
     }
+    const tasks = await this.enrichTasks(events, tokens, signal);
     const fetchedAt = new Date(this.now()).toISOString();
     await this.withLease(async (assertActive) => {
       if (signal.aborted) throw safeProviderError(signal.reason);
@@ -1396,7 +1893,7 @@ export class GoogleCalendarService {
         JSON.stringify({ ...latest, lastFetchedAt: fetchedAt }),
       );
     });
-    return { events, from, to, timeZone: input.timeZone, fetchedAt, partial };
+    return { events, from, to, timeZone: input.timeZone, fetchedAt, partial, tasks };
   }
   async createEvent(
     value: GoogleEventInput,

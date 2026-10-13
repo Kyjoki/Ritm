@@ -61,7 +61,8 @@ type AppGoogleService = Pick<
   | 'configuration'
   | 'saveConfiguration'
   | 'removeConfiguration'
->;
+> &
+  Partial<Pick<GoogleCalendarService, 'completeTask'>>;
 export interface AppOptions {
   dataDir?: string;
   clientDir?: string;
@@ -281,7 +282,7 @@ export function createApp(options: AppOptions = {}) {
   });
   app.post('/api/integrations/google/connect', async (req, res) => {
     const input = z
-      .object({ extendedColors: z.boolean().optional() })
+      .object({ extendedColors: z.boolean().optional(), tasks: z.boolean().optional() })
       .strict()
       .parse(req.body ?? {});
     await security.limit(req, 'google-connect', 10, 60_000);
@@ -324,6 +325,21 @@ export function createApp(options: AppOptions = {}) {
       .parse(req.body);
     await security.limit(req, 'google-write', 20, 60_000);
     res.json(await google.updateEvent(googleEventIdSchema.parse(req.params.id), event, etag));
+  });
+  app.patch('/api/integrations/google/events/:id/task', async (req, res) => {
+    const input = z
+      .object({
+        etag: googleEtagSchema,
+        taskEtag: googleEtagSchema,
+        completed: z.boolean(),
+        connectionId: z.string().regex(/^[a-f0-9]{64}$/),
+      })
+      .strict()
+      .parse(req.body);
+    await security.limit(req, 'google-write', 20, 60_000);
+    if (!google.completeTask)
+      throw new AppError(503, 'GOOGLE_TASKS_UNAVAILABLE', 'Google Tasks пока недоступен.');
+    res.json(await google.completeTask(googleEventIdSchema.parse(req.params.id), input));
   });
   app.delete('/api/integrations/google/connection', async (req, res) => {
     await security.limit(req, 'google-connect', 10, 60_000);

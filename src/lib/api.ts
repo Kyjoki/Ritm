@@ -89,12 +89,11 @@ export const api = {
   removeGoogleConfiguration: () =>
     request<GoogleOAuthSetup>('/integrations/google/configuration', 'DELETE'),
   googleStatus: () => request<GoogleCalendarStatus>('/integrations/google/status'),
-  connectGoogle: (extendedColors?: boolean) =>
-    request<{ authorizationUrl: string }>(
-      '/integrations/google/connect',
-      'POST',
-      extendedColors === undefined ? {} : { extendedColors },
-    ),
+  connectGoogle: (extendedColors?: boolean, tasks?: boolean) =>
+    request<{ authorizationUrl: string }>('/integrations/google/connect', 'POST', {
+      ...(extendedColors === undefined ? {} : { extendedColors }),
+      ...(tasks === undefined ? {} : { tasks }),
+    }),
   disconnectGoogle: () =>
     request<GoogleCalendarStatus>('/integrations/google/connection', 'DELETE'),
   googleEvents: (from: string, to: string, timeZone: string, signal?: AbortSignal) =>
@@ -106,6 +105,19 @@ export const api = {
     ),
   createGoogleEvent: (event: GoogleEventInput, requestId: string) =>
     request<GoogleCalendarEvent>('/integrations/google/events', 'POST', { event, requestId }),
+  completeGoogleTask: (event: GoogleCalendarEvent, completed: boolean) => {
+    if (!event.googleTask) throw new Error('Подключи Google Tasks, чтобы отмечать выполнение.');
+    return request<{ event: GoogleCalendarEvent }>(
+      `/integrations/google/events/${encodeURIComponent(event.id)}/task`,
+      'PATCH',
+      {
+        etag: event.etag,
+        taskEtag: event.googleTask.etag,
+        completed,
+        connectionId: event.googleTask.connectionId,
+      },
+    );
+  },
   updateGoogleEvent: (id: string, event: GoogleEventInput, etag: string) =>
     request<GoogleCalendarEvent>(`/integrations/google/events/${encodeURIComponent(id)}`, 'PATCH', {
       event,

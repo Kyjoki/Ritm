@@ -32,6 +32,8 @@ interface SettingsPageProps {
   aiStatus: AiStatus;
   googleStatus: GoogleCalendarStatus;
   onConnectGoogle: (extendedColors?: boolean) => Promise<void>;
+  onConnectGoogleTasks?: () => Promise<void>;
+  googleTasksMessage?: string;
   onDisconnectGoogle: () => Promise<void>;
   onGoogleConfigured?: () => Promise<void>;
   onSave: (settings: Settings) => Promise<void>;
@@ -65,6 +67,8 @@ export function SettingsPage({
   aiStatus,
   googleStatus,
   onConnectGoogle,
+  onConnectGoogleTasks,
+  googleTasksMessage,
   onDisconnectGoogle,
   onGoogleConfigured,
   onSave,
@@ -562,6 +566,9 @@ export function SettingsPage({
                         : 'Для новых оттенков Google попросит разрешение на управление календарями.'}
                     </small>
                   ) : null}
+                  {googleStatus.tasksEnabled ? (
+                    <small>Google Tasks: отметки выполнения подключены</small>
+                  ) : null}
                 </div>
                 <div className="settings-connection-actions">
                   <button
@@ -589,6 +596,28 @@ export function SettingsPage({
                             ['connected', 'reauth_required'].includes(googleStatus.status)
                           ? 'Переподключить'
                           : 'Подключить'}
+                    </button>
+                  ) : null}
+                  {googleTasksMessage ? (
+                    <p className="settings-connection-detail">{googleTasksMessage}</p>
+                  ) : null}
+                  {googleConfiguredLocally &&
+                  googleStatus.status === 'connected' &&
+                  !googleStatus.tasksEnabled &&
+                  onConnectGoogleTasks ? (
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      disabled={googleBusy}
+                      onClick={() => {
+                        setGoogleBusy(true);
+                        setGoogleError('');
+                        void onConnectGoogleTasks()
+                          .catch((error) => setGoogleError(errorText(error)))
+                          .finally(() => setGoogleBusy(false));
+                      }}
+                    >
+                      Подключить Google Tasks
                     </button>
                   ) : null}
                   {googleConfiguredLocally &&

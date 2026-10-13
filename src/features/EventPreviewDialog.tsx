@@ -1,4 +1,14 @@
-import { CalendarDays, Clock3, LockKeyhole, Pencil, Repeat2 } from 'lucide-react';
+import {
+  CalendarDays,
+  Clock3,
+  LockKeyhole,
+  Pencil,
+  Repeat2,
+  Check,
+  LoaderCircle,
+} from 'lucide-react';
+import { useState } from 'react';
+import type { GoogleCalendarEvent } from '../../shared/types';
 import { Dialog } from '../components/Dialog';
 import { calendarEntryStyle } from '../lib/calendar-colors';
 import { formatTime } from '../lib/date';
@@ -55,13 +65,33 @@ export function EventPreviewDialog({
   timeZone,
   onClose,
   onEdit,
+  onGoogleTaskToggle,
+  taskBusy = false,
+  onEnableGoogleTasks,
 }: {
   entry: CalendarOccurrence | null;
   date: string;
   timeZone: string;
   onClose: () => void;
   onEdit: (entry: CalendarOccurrence) => void;
+  onGoogleTaskToggle?: (event: GoogleCalendarEvent) => Promise<void>;
+  taskBusy?: boolean;
+  onEnableGoogleTasks?: () => Promise<void>;
 }) {
+  const [actionError, setActionError] = useState('');
+  const [connecting, setConnecting] = useState(false);
+  const googleTaskEvent = entry?.source === 'google' && entry.event.taskLink ? entry.event : null;
+  async function toggleTask() {
+    if (!googleTaskEvent?.googleTask || !onGoogleTaskToggle || taskBusy) return;
+    setActionError('');
+    try {
+      await onGoogleTaskToggle(googleTaskEvent);
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : 'Не удалось сохранить выполнение в Google.',
+      );
+    }
+  }
   const editable = Boolean(
     entry && (entry.source === 'ritm' || canEditGoogleEvent(entry.event, timeZone)),
   );
@@ -69,17 +99,29 @@ export function EventPreviewDialog({
     entry?.source === 'google' ? entry.event.description : entry?.task.description;
   const recurring =
     entry?.source === 'google' ? entry.event.recurring : entry?.task.repeat !== 'none';
-  const readOnlyReason =
-    entry?.source === 'google' && !editable
+  const readOnlyReason = googleTaskEvent
+    ? googleTaskEvent.googleTask
+      ? 'Статус выполнения синхронизируется с Google Tasks. Дату и время можно изменить в Google Calendar.'
+      : (googleTaskEvent.taskUnavailableReason ??
+        'Подключи Google Tasks, чтобы отмечать выполнение.')
+    : entry?.source === 'google' && !editable
       ? (entry.event.readOnlyReason ??
         'Эта запись доступна только для просмотра. Измени её в Google Calendar.')
       : null;
 
   return (
-    <Dialog title="Просмотр события" onClose={onClose} className="event-preview-dialog">
+    <Dialog
+      title={googleTaskEvent?.googleTask ? 'Задача Google Tasks' : 'Просмотр события'}
+      onClose={onClose}
+      busy={taskBusy || connecting}
+      className="event-preview-dialog"
+    >
       {entry ? (
         <div className="event-preview-content">
-          <div className="event-preview-title" style={calendarEntryStyle(entry)}>
+          <div
+            className={`event-preview-title ${entry.completed ? 'is-complete' : ''}`}
+            style={calendarEntryStyle(entry)}
+          >
             <h3>{entry.title}</h3>
           </div>
           <div className="event-preview-detail">
@@ -116,6 +158,33 @@ export function EventPreviewDialog({
               <p>{readOnlyReason}</p>
             </div>
           ) : null}
+          {actionError ? (
+            <p className="error-text" role="alert">
+              {actionError}
+            </p>
+          ) : null}
+          {googleTaskEvent && !googleTaskEvent.googleTask && onEnableGoogleTasks ? (
+            <button
+              type="button"
+              className="button button-secondary"
+              disabled={connecting}
+              onClick={() => {
+                setConnecting(true);
+                setActionError('');
+                void onEnableGoogleTasks()
+                  .catch((error) =>
+                    setActionError(
+                      error instanceof Error
+                        ? error.message
+                        : 'Не удалось подключить Google Tasks.',
+                    ),
+                  )
+                  .finally(() => setConnecting(false));
+              }}
+            >
+              Подключить Google Tasks
+            </button>
+          ) : null}
         </div>
       ) : (
         <p className="event-preview-unavailable" role="status">
@@ -123,13 +192,35 @@ export function EventPreviewDialog({
         </p>
       )}
       <div className="dialog-actions event-preview-actions">
-        <button type="button" className="button button-secondary" onClick={onClose}>
+        <button
+          type="button"
+          className="button button-secondary"
+          onClick={onClose}
+          disabled={taskBusy || connecting}
+        >
           Закрыть
         </button>
         {entry && editable ? (
           <button type="button" className="button button-primary" onClick={() => onEdit(entry)}>
             <Pencil size={16} aria-hidden="true" />
             Редактировать
+          </button>
+        ) : null}
+        {googleTaskEvent?.googleTask && onGoogleTaskToggle ? (
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={taskBusy}
+            onClick={() => void toggleTask()}
+          >
+            {taskBusy ? (
+              <LoaderCircle size={16} className="spinning" aria-hidden="true" />
+            ) : (
+              <Check size={16} aria-hidden="true" />
+            )}
+            {googleTaskEvent.googleTask.status === 'completed'
+              ? 'Вернуть в задачи'
+              : 'Выполнить задачу'}
           </button>
         ) : null}
       </div>

@@ -35,6 +35,8 @@ import { TaskDialog } from './components/TaskDialog';
 import { LoginPage } from './features/LoginPage';
 import { GoogleEventDialog } from './components/GoogleEventDialog';
 import { useGoogleCalendar } from './lib/google-calendar';
+import { EventPreviewDialog } from './features/EventPreviewDialog';
+import { calendarOccurrences } from './features/google-occurrences';
 
 type Page = 'day' | 'calendar' | 'assistant' | 'settings' | 'login-preview';
 const navigation = [
@@ -63,6 +65,7 @@ export default function App() {
     event?: GoogleCalendarEvent;
     draft?: Partial<GoogleEventInput>;
   } | null>(null);
+  const [googlePreview, setGooglePreview] = useState<{ id: string; date: string } | null>(null);
   const transferRequests = useRef(new Map<string, Promise<GoogleTransferResult>>());
   const failedTransfers = useRef(new Set<string>());
   const migrationRunning = useRef(false);
@@ -72,6 +75,8 @@ export default function App() {
   const [toast, setToast] = useState<Toast | null>(null),
     [undoBusy, setUndoBusy] = useState(false),
     [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+  const [busyGoogleTaskIds, setBusyGoogleTaskIds] = useState<Set<string>>(new Set());
+  const googleTaskRequests = useRef(new Set<string>());
   const [prompt, setPrompt] = useState<string>(),
     [clock, setClock] = useState(() => new Date());
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light');
@@ -124,6 +129,7 @@ export default function App() {
       setLoadError('');
       setTaskDialog(null);
       setGoogleDialog(null);
+      setGooglePreview(null);
       setToast(null);
       failedTransfers.current.clear();
       setMigrationLoading(false);
@@ -184,6 +190,14 @@ export default function App() {
     data?.settings.timeZone ?? 'Asia/Qyzylorda',
     today,
   );
+  const googlePreviewEntry = googlePreview
+    ? (calendarOccurrences(
+        [],
+        google.result?.events ?? [],
+        googlePreview.date,
+        data?.settings.timeZone ?? 'Asia/Qyzylorda',
+      ).find((entry) => entry.source === 'google' && entry.event.id === googlePreview.id) ?? null)
+    : null;
   const synchronizeTask = useCallback(
     (id: string) => {
       const pending = transferRequests.current.get(id);
@@ -217,6 +231,7 @@ export default function App() {
     const records = data.tasks.filter(
       (task) =>
         task.date &&
+        task.calendarEntry !== false &&
         !task.completed &&
         !task.completedDates.length &&
         !failedTransfers.current.has(task.id),
@@ -376,16 +391,21 @@ export default function App() {
         : old,
     );
   const saveTask = async (value: TaskInput, id?: string) => {
-    if (value.date && google.status.status !== 'connected')
+    if (value.calendarEntry !== false && value.date && google.status.status !== 'connected')
       throw new Error('Подключи Google Calendar в настройках, чтобы назначить дату записи.');
-    if (value.date && value.colorId?.startsWith('#') && !google.status.extendedColors)
+    if (
+      value.calendarEntry !== false &&
+      value.date &&
+      value.colorId?.startsWith('#') &&
+      !google.status.extendedColors
+    )
       throw new Error(
         'Разреши новые цвета в Настройках → Google Calendar, чтобы сохранить этот оттенок в календаре.',
       );
     const task = id ? await api.updateTask(id, value) : await api.createTask(value);
     putTask(task);
     notify(
-      value.date
+      value.calendarEntry !== false && value.date
         ? 'Синхронизируем запись с календарём'
         : id
           ? 'Изменения сохранены'
@@ -399,6 +419,49 @@ export default function App() {
       putTask(await api.restoreTask(result.deletedTask));
       notify('Задача восстановлена');
     });
+  };
+  const quickAddTask = async (title: string) => {
+    const generation = loadGeneration.current;
+    const task = await api.createTask({
+      title: title.trim(),
+      description: '',
+      date: today,
+      time: null,
+      duration: 30,
+      priority: 'normal',
+      repeat: 'none',
+      kind: 'task',
+      completed: false,
+      calendarEntry: false,
+    });
+    if (generation === loadGeneration.current) putTask(task);
+  };
+  const toggleGoogleTask = async (event: GoogleCalendarEvent) => {
+    if (!event.googleTask || googleTaskRequests.current.has(event.id)) return;
+    const generation = loadGeneration.current;
+    googleTaskRequests.current.add(event.id);
+    setBusyGoogleTaskIds((old) => new Set(old).add(event.id));
+    try {
+      const { event: saved } = await api.completeGoogleTask(
+        event,
+        event.googleTask.status !== 'completed',
+      );
+      if (generation === loadGeneration.current) {
+        google.upsertEvent(saved);
+        google.refresh();
+      }
+    } catch (error) {
+      if (generation === loadGeneration.current) google.refresh();
+      throw error;
+    } finally {
+      googleTaskRequests.current.delete(event.id);
+      if (generation === loadGeneration.current)
+        setBusyGoogleTaskIds((old) => {
+          const next = new Set(old);
+          next.delete(event.id);
+          return next;
+        });
+    }
   };
   const toggleTask = async (task: Task, occurrenceDate: string, completed: boolean) => {
     if (busyIds.has(task.id)) return;
@@ -445,6 +508,7 @@ export default function App() {
     setToast(null);
     setTaskDialog(null);
     setGoogleDialog(null);
+    setGooglePreview(null);
     failedTransfers.current.clear();
     setMigrationLoading(false);
     setMigrationError('');
@@ -592,7 +656,12 @@ export default function App() {
                 migrationLoading ||
                 (google.status.status === 'connected' && !google.result && !google.error)
               }
-              onGoogleEdit={(event) => setGoogleDialog({ event })}
+              onGoogleEdit={(event) => setGooglePreview({ id: event.id, date: today })}
+              onGoogleTaskToggle={toggleGoogleTask}
+              busyGoogleTaskIds={busyGoogleTaskIds}
+              tasksPermissionMessage={google.result?.tasks?.message}
+              onEnableGoogleTasks={google.status.tasksEnabled ? undefined : google.connectTasks}
+              onQuickAdd={quickAddTask}
               settings={data.settings}
               today={today}
               now={now}
@@ -600,6 +669,7 @@ export default function App() {
               onEdit={(task) => {
                 if (
                   task.date &&
+                  task.calendarEntry !== false &&
                   !task.completed &&
                   !task.completedDates.length &&
                   google.status.status === 'connected'
@@ -646,6 +716,9 @@ export default function App() {
               googlePartial={google.result?.partial ?? false}
               googleFetchedAt={google.result?.fetchedAt ?? null}
               onGoogleEdit={(event) => setGoogleDialog({ event })}
+              onGoogleTaskToggle={toggleGoogleTask}
+              busyGoogleTaskIds={busyGoogleTaskIds}
+              onEnableGoogleTasks={google.status.tasksEnabled ? undefined : google.connectTasks}
               onGoogleCreate={(draft) => setGoogleDialog({ draft })}
               onRangeChange={google.setRange}
               onGoogleRefresh={() => {
@@ -723,6 +796,8 @@ export default function App() {
               aiStatus={data.aiStatus}
               googleStatus={google.status}
               onConnectGoogle={google.connect}
+              onConnectGoogleTasks={google.connectTasks}
+              googleTasksMessage={google.result?.tasks?.message}
               onDisconnectGoogle={google.disconnect}
               onGoogleConfigured={async () => {
                 await google.refreshStatus();
@@ -764,6 +839,21 @@ export default function App() {
           onClose={() => setTaskDialog(null)}
           onSave={saveTask}
           onDelete={deleteTask}
+        />
+      ) : null}
+      {googlePreview ? (
+        <EventPreviewDialog
+          entry={googlePreviewEntry}
+          date={googlePreview.date}
+          timeZone={data.settings.timeZone}
+          onClose={() => setGooglePreview(null)}
+          onEdit={(entry) => {
+            setGooglePreview(null);
+            if (entry.source === 'google') setGoogleDialog({ event: entry.event });
+          }}
+          onGoogleTaskToggle={toggleGoogleTask}
+          taskBusy={busyGoogleTaskIds.has(googlePreview.id)}
+          onEnableGoogleTasks={google.status.tasksEnabled ? undefined : google.connectTasks}
         />
       ) : null}
       {googleDialog ? (

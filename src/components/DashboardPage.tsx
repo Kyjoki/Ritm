@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react';
+import { useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import {
   ArrowUpRight,
   CalendarDays,
@@ -12,11 +12,13 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type { GoogleCalendarEvent, Settings, Task, TaskInput } from '../../shared/types';
-import { getDayOccurrences, recordWord } from '../features/calendar-utils';
+import { getDayOccurrences } from '../features/calendar-utils';
 import { calendarOccurrences, type CalendarOccurrence } from '../features/google-occurrences';
 import { durationText, formatDate, formatTime, greeting } from '../lib/date';
 import { calendarEntryStyle } from '../lib/calendar-colors';
 import { Orb } from './Orb';
+
+const taskPlural = new Intl.PluralRules('ru-RU');
 
 interface Props {
   tasks: Task[];
@@ -24,6 +26,11 @@ interface Props {
   googleUncertain: boolean;
   googlePending: boolean;
   onGoogleEdit: (event: GoogleCalendarEvent) => void;
+  onGoogleTaskToggle: (event: GoogleCalendarEvent) => Promise<void>;
+  busyGoogleTaskIds?: ReadonlySet<string>;
+  tasksPermissionMessage?: string;
+  onEnableGoogleTasks?: () => Promise<void>;
+  onQuickAdd: (title: string) => Promise<void>;
   settings: Settings;
   today: string;
   now: number;
@@ -40,6 +47,11 @@ export function DashboardPage({
   googleUncertain,
   googlePending,
   onGoogleEdit,
+  onGoogleTaskToggle,
+  busyGoogleTaskIds,
+  tasksPermissionMessage,
+  onEnableGoogleTasks,
+  onQuickAdd,
   settings,
   today,
   now,
@@ -50,12 +62,39 @@ export function DashboardPage({
   onAI,
   onCalendar,
 }: Props) {
-  const occurrences = getDayOccurrences(tasks, today);
+  const [quickTitle, setQuickTitle] = useState('');
+  const [quickBusy, setQuickBusy] = useState(false);
+  const [quickError, setQuickError] = useState('');
+  const [googleTaskError, setGoogleTaskError] = useState('');
+  const [permissionBusy, setPermissionBusy] = useState(false);
+  const quickInFlight = useRef(false);
+  const occurrences = getDayOccurrences(
+    tasks.filter((task) => task.kind === 'task'),
+    today,
+  );
   const todayEntries = occurrences.sort(
     (a, b) => Number(a.completed) - Number(b.completed) || (a.start ?? 1441) - (b.start ?? 1441),
   );
-  const completed = todayEntries.filter((t) => t.completed).length;
-  const combined = calendarOccurrences(tasks, googleEvents, today, settings.timeZone);
+  const combined = calendarOccurrences(tasks, googleEvents, today, settings.timeZone).filter(
+    (entry) => entry.source === 'google' || entry.task.calendarEntry !== false,
+  );
+  const googleTodos = combined
+    .filter(
+      (entry) => entry.source === 'google' && (entry.event.taskLink || entry.event.googleTask),
+    )
+    .sort(
+      (a, b) => Number(a.completed) - Number(b.completed) || (a.start ?? 1441) - (b.start ?? 1441),
+    );
+  const completed =
+    todayEntries.filter((entry) => entry.completed).length +
+    googleTodos.filter(
+      (entry) => entry.source === 'google' && entry.event.googleTask?.status === 'completed',
+    ).length;
+  const todoCount = todayEntries.length + googleTodos.length;
+  const unknownGoogleCount = googleTodos.filter(
+    (entry) => entry.source === 'google' && !entry.event.googleTask,
+  ).length;
+  const taskCountLabel = `${todoCount} ${taskPlural.select(todoCount) === 'one' ? 'задача' : taskPlural.select(todoCount) === 'few' ? 'задачи' : 'задач'}`;
   const waitingForPlan = googlePending && !combined.length;
   const timed = combined.filter(
     (o): o is CalendarOccurrence & { start: number; end: number } =>
@@ -88,6 +127,47 @@ export function DashboardPage({
   }
   const free = Math.max(0, workEnd - Math.max(workStart, now) - occupied);
   const greetingName = settings.displayName.split(' ')[0];
+  const quickAdd = async (event: FormEvent) => {
+    event.preventDefault();
+    const title = quickTitle.trim();
+    if (!title || quickInFlight.current) return;
+    quickInFlight.current = true;
+    setQuickBusy(true);
+    setQuickError('');
+    try {
+      await onQuickAdd(title);
+      setQuickTitle('');
+    } catch (error) {
+      setQuickError(error instanceof Error ? error.message : 'Не удалось добавить задачу.');
+    } finally {
+      quickInFlight.current = false;
+      setQuickBusy(false);
+    }
+  };
+  const toggleGoogleTask = async (event: GoogleCalendarEvent) => {
+    setGoogleTaskError('');
+    try {
+      await onGoogleTaskToggle(event);
+    } catch (error) {
+      setGoogleTaskError(
+        error instanceof Error ? error.message : 'Не удалось изменить статус задачи Google.',
+      );
+    }
+  };
+  const enableGoogleTasks = async () => {
+    if (!onEnableGoogleTasks || permissionBusy) return;
+    setPermissionBusy(true);
+    setGoogleTaskError('');
+    try {
+      await onEnableGoogleTasks();
+    } catch (error) {
+      setGoogleTaskError(
+        error instanceof Error ? error.message : 'Не удалось открыть подключение Google Tasks.',
+      );
+    } finally {
+      setPermissionBusy(false);
+    }
+  };
   return (
     <section className="page dashboard-page" aria-labelledby="dashboard-title">
       <header className="page-heading">
@@ -106,15 +186,13 @@ export function DashboardPage({
       </header>
       <div className="overview-grid">
         <div className="panel progress-card">
-          <span className="card-eyebrow">
-            {googleEvents.length ? 'Твой день' : 'Твой прогресс'}
-          </span>
+          <span className="card-eyebrow">Твой прогресс</span>
           <div className="progress-body">
             <div
               className="progress-ring"
               style={
                 {
-                  '--progress': `${todayEntries.length ? (completed / todayEntries.length) * 360 : 0}deg`,
+                  '--progress': `${todoCount && !unknownGoogleCount ? (completed / todoCount) * 360 : 0}deg`,
                 } as CSSProperties
               }
             >
@@ -122,25 +200,25 @@ export function DashboardPage({
             </div>
             <div>
               <strong>
-                {waitingForPlan
-                  ? '…'
-                  : googleEvents.length
-                    ? combined.length
-                    : todayEntries.length
-                      ? `${completed} из ${todayEntries.length}`
+                {unknownGoogleCount
+                  ? '—'
+                  : googlePending && !todoCount
+                    ? '…'
+                    : todoCount
+                      ? `${completed} из ${todoCount}`
                       : googleUncertain
                         ? '—'
-                        : 'Нет записей'}
+                        : 'Нет задач'}
               </strong>
               <span>
-                {waitingForPlan
-                  ? 'Уточняем план'
-                  : googleEvents.length
-                    ? `${recordWord(combined.length)} в календаре`
-                    : todayEntries.length
+                {unknownGoogleCount
+                  ? 'Статус Google Tasks не проверен'
+                  : googlePending && !todoCount
+                    ? 'Загружаем задачи'
+                    : todoCount
                       ? 'задач выполнено'
                       : googleUncertain
-                        ? 'Расписание не проверено'
+                        ? 'Данные Google не проверены'
                         : 'на сегодня'}
               </span>
             </div>
@@ -207,33 +285,57 @@ export function DashboardPage({
       <div className="day-work-grid">
         <div className="panel tasks-panel">
           <div className="section-heading">
-            <h2>План на сегодня</h2>
+            <h2>Задачи на сегодня</h2>
             <span>
-              {waitingForPlan
-                ? 'Загружаем…'
-                : googleUncertain && !combined.length
-                  ? 'Не проверено'
-                  : `${combined.length} ${recordWord(combined.length)} в плане`}
+              {unknownGoogleCount
+                ? taskCountLabel
+                : googlePending && !todoCount
+                  ? 'Загружаем…'
+                  : googleUncertain && !todoCount
+                    ? 'Не проверено'
+                    : `${completed} из ${todoCount}`}
             </span>
           </div>
-          {combined.length ? (
+          {todoCount ? (
             <div className="today-list">
-              {combined
-                .filter((entry) => entry.source === 'google')
-                .map((entry) => (
-                  <div className="task-row" key={entry.key}>
+              {googleTodos.map((entry) => {
+                if (entry.source !== 'google') return null;
+                const event = entry.event;
+                const isComplete = event.googleTask?.status === 'completed';
+                const busy = busyGoogleTaskIds?.has(event.id) ?? false;
+                return (
+                  <div className={`task-row${isComplete ? ' is-complete' : ''}`} key={entry.key}>
                     <button
                       className="check-target"
-                      onClick={() => openEntry(entry)}
-                      aria-label={`Открыть запись: ${entry.title}`}
+                      onClick={() =>
+                        event.googleTask ? void toggleGoogleTask(event) : openEntry(entry)
+                      }
+                      disabled={busy}
+                      aria-label={
+                        event.googleTask
+                          ? `${isComplete ? 'Вернуть в задачи' : 'Выполнить'}: ${entry.title}`
+                          : `Открыть задачу: ${entry.title}`
+                      }
+                      aria-pressed={event.googleTask ? isComplete : undefined}
                     >
-                      <CalendarDays size={18} />
+                      {busy ? (
+                        <LoaderCircle size={18} className="spinning" />
+                      ) : event.googleTask ? (
+                        <span className="task-checkbox">
+                          {isComplete ? <Check size={14} strokeWidth={3} /> : null}
+                        </span>
+                      ) : (
+                        <ListTodo size={18} className="task-pending-icon" />
+                      )}
                     </button>
                     <button className="task-copy" onClick={() => openEntry(entry)}>
                       <span className="task-title">{entry.title}</span>
                       <span className="task-meta">
-                        {entry.allDay ? 'Весь день' : durationText(entry.duration)}
-                        {entry.source === 'google' && entry.event.recurring ? ' · Повторяется' : ''}
+                        Google Tasks
+                        {isComplete ? ' · Выполнено' : ''}
+                        {!event.googleTask
+                          ? ` · ${event.taskUnavailableReason ?? 'Статус пока недоступен'}`
+                          : ''}
                       </span>
                     </button>
                     <time>
@@ -242,7 +344,8 @@ export function DashboardPage({
                         : formatTime(entry.start, { compact: true })}
                     </time>
                   </div>
-                ))}
+                );
+              })}
               {todayEntries.map((o) => {
                 const task = o.task;
                 return (
@@ -254,42 +357,46 @@ export function DashboardPage({
                       aria-label={`${o.completed ? 'Вернуть в план' : 'Выполнить'}: ${task.title}`}
                       aria-pressed={o.completed}
                     >
-                      <span className="task-checkbox">
-                        {o.completed ? <Check size={14} strokeWidth={3} /> : null}
-                      </span>
+                      {busyIds.has(task.id) ? (
+                        <LoaderCircle size={18} className="spinning" />
+                      ) : (
+                        <span className="task-checkbox">
+                          {o.completed ? <Check size={14} strokeWidth={3} /> : null}
+                        </span>
+                      )}
                     </button>
                     <button className="task-copy" onClick={() => onEdit(task)}>
                       <span className="task-title">{task.title}</span>
                       <span className="task-meta">
-                        {task.kind === 'event' ? 'Событие' : 'Задача'}
+                        {task.calendarEntry === false ? 'Личная задача' : 'Задача'}
                         {task.priority === 'high'
                           ? ' · Высокий приоритет'
                           : task.priority === 'low'
                             ? ' · Низкий приоритет'
                             : ' · Обычный приоритет'}
-                        {` · ${durationText(task.duration)}`}
+                        {task.time ? ` · ${durationText(task.duration)}` : ''}
                         {task.repeat !== 'none' ? ' · Повторяется' : ''}
                       </span>
                     </button>
-                    <time>{o.start === null ? 'Без времени' : formatTime(o.start)}</time>
+                    {o.start !== null ? <time>{formatTime(o.start)}</time> : null}
                   </div>
                 );
               })}
             </div>
           ) : googleUncertain ? (
-            <div className="empty-inline" role={waitingForPlan ? 'status' : undefined}>
-              {waitingForPlan ? (
+            <div className="empty-inline" role={googlePending ? 'status' : undefined}>
+              {googlePending ? (
                 <LoaderCircle size={28} className="spinning" aria-hidden="true" />
               ) : (
                 <CircleAlert size={28} aria-hidden="true" />
               )}
-              <h3>{waitingForPlan ? 'Загружаем расписание' : 'Расписание пока недоступно'}</h3>
+              <h3>{googlePending ? 'Загружаем задачи' : 'Задачи Google пока недоступны'}</h3>
               <p>
-                {waitingForPlan
-                  ? 'Проверяем записи Google Calendar.'
-                  : 'Открой календарь, чтобы проверить подключение и обновить записи.'}
+                {googlePending
+                  ? 'Проверяем задачи на сегодня.'
+                  : 'Личные задачи можно добавить ниже. Подключение Google проверь в календаре.'}
               </p>
-              {!waitingForPlan ? (
+              {!googlePending ? (
                 <button className="text-button" onClick={onCalendar}>
                   Открыть календарь
                 </button>
@@ -298,16 +405,73 @@ export function DashboardPage({
           ) : (
             <div className="empty-inline">
               <CheckCheck size={32} />
-              <h3>Сегодня — чистый лист</h3>
-              <p>Добавьте первое дело и задайте ритм дню.</p>
-              <button className="button button-secondary" onClick={() => onCreate({ date: today })}>
-                Добавить запись
-              </button>
+              <h3>Пока нет задач на сегодня</h3>
+              <p>Добавьте первое дело ниже. Встречи и занятия — в расписании справа.</p>
             </div>
           )}
-          <button className="text-button list-footer" onClick={() => onCreate({ date: today })}>
-            <CirclePlus size={16} /> Добавить запись
-          </button>
+          {tasksPermissionMessage ? (
+            <div className="dashboard-task-permission">
+              <p className="field-hint">{tasksPermissionMessage}</p>
+              {onEnableGoogleTasks ? (
+                <button
+                  className="text-button"
+                  onClick={() => void enableGoogleTasks()}
+                  disabled={permissionBusy}
+                >
+                  {permissionBusy ? (
+                    <LoaderCircle size={15} className="spinning" />
+                  ) : (
+                    <CheckCheck size={15} />
+                  )}
+                  Подключить Google Tasks
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {googleTaskError ? (
+            <p className="error-note" role="alert">
+              {googleTaskError}
+            </p>
+          ) : null}
+          <form
+            className="dashboard-quick-add"
+            onSubmit={quickAdd}
+            aria-label="Быстрое добавление задачи"
+          >
+            <label className="visually-hidden" htmlFor="dashboard-quick-title">
+              Новая задача на сегодня
+            </label>
+            <input
+              id="dashboard-quick-title"
+              value={quickTitle}
+              onChange={(event) => setQuickTitle(event.target.value)}
+              placeholder="Что нужно сделать сегодня?"
+              maxLength={160}
+              autoComplete="off"
+              disabled={quickBusy}
+            />
+            <button
+              className="button button-secondary"
+              type="submit"
+              disabled={quickBusy || !quickTitle.trim()}
+              aria-label="Добавить задачу на сегодня"
+            >
+              {quickBusy ? (
+                <LoaderCircle size={18} className="spinning" />
+              ) : (
+                <CirclePlus size={18} />
+              )}
+              <span>Добавить</span>
+            </button>
+          </form>
+          <p className="field-hint dashboard-quick-hint">
+            Только в списке задач — без записи в календаре.
+          </p>
+          {quickError ? (
+            <p className="error-note" role="alert">
+              {quickError}
+            </p>
+          ) : null}
         </div>
         <div className="panel schedule-panel">
           <div className="section-heading">
@@ -375,7 +539,7 @@ export function DashboardPage({
       <div className="dashboard-bottom">
         <span>
           <ListTodo size={14} />{' '}
-          {completed === todayEntries.length && todayEntries.length
+          {completed === todoCount && todoCount
             ? 'Все дела завершены. Можно выдохнуть.'
             : 'Следуйте своему темпу — всё важное перед вами.'}
         </span>

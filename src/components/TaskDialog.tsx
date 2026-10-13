@@ -25,6 +25,7 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
       kind: source?.kind ?? 'task',
       completed: source?.completed ?? false,
       colorId: source?.colorId ?? null,
+      ...(source?.calendarEntry === false ? { calendarEntry: false } : {}),
     };
   });
   const [busy, setBusy] = useState(false),
@@ -128,45 +129,49 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
                 }}
               />
             </label>
-            <label className="field">
-              Время
-              <input
-                type="time"
-                value={value.time ?? ''}
-                disabled={!value.date}
-                onChange={(e) => set('time', e.target.value || null)}
-              />
-            </label>
+            {value.calendarEntry !== false ? (
+              <label className="field">
+                Время
+                <input
+                  type="time"
+                  value={value.time ?? ''}
+                  disabled={!value.date}
+                  onChange={(e) => set('time', e.target.value || null)}
+                />
+              </label>
+            ) : null}
           </div>
           <div className="form-grid">
-            <label className="field">
-              Длительность
-              <select
-                value={value.duration}
-                onChange={(e) => set('duration', Number(e.target.value))}
-              >
-                {[
-                  15,
-                  30,
-                  45,
-                  60,
-                  90,
-                  120,
-                  180,
-                  240,
-                  480,
-                  ...(![15, 30, 45, 60, 90, 120, 180, 240, 480].includes(value.duration)
-                    ? [value.duration]
-                    : []),
-                ]
-                  .sort((a, b) => a - b)
-                  .map((n) => (
-                    <option key={n} value={n}>
-                      {n < 60 ? `${n} минут` : `${n / 60} ч`}
-                    </option>
-                  ))}
-              </select>
-            </label>
+            {value.calendarEntry !== false ? (
+              <label className="field">
+                Длительность
+                <select
+                  value={value.duration}
+                  onChange={(e) => set('duration', Number(e.target.value))}
+                >
+                  {[
+                    15,
+                    30,
+                    45,
+                    60,
+                    90,
+                    120,
+                    180,
+                    240,
+                    480,
+                    ...(![15, 30, 45, 60, 90, 120, 180, 240, 480].includes(value.duration)
+                      ? [value.duration]
+                      : []),
+                  ]
+                    .sort((a, b) => a - b)
+                    .map((n) => (
+                      <option key={n} value={n}>
+                        {n < 60 ? `${n} минут` : `${n / 60} ч`}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            ) : null}
             <label className="field">
               Приоритет
               <select
@@ -214,20 +219,26 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
                     <option value="monthly">Каждый месяц</option>
                   </select>
                 </label>
-                <label className="field">
-                  Тип
-                  <select
-                    value={value.kind}
-                    onChange={(e) => set('kind', e.target.value as TaskInput['kind'])}
-                  >
-                    <option value="task">Задача</option>
-                    <option value="event">Событие</option>
-                  </select>
-                </label>
+                {value.calendarEntry !== false ? (
+                  <label className="field">
+                    Тип
+                    <select
+                      value={value.kind}
+                      onChange={(e) => set('kind', e.target.value as TaskInput['kind'])}
+                    >
+                      <option value="task">Задача</option>
+                      <option value="event">Событие</option>
+                    </select>
+                  </label>
+                ) : null}
               </div>
             </div>
           ) : null}
-          {!value.date ? (
+          {value.calendarEntry === false ? (
+            <p className="field-hint">
+              Личная задача остаётся в списке дел и не занимает время в календаре.
+            </p>
+          ) : !value.date ? (
             <p className="field-hint">
               Без даты — задача останется в списке, пока вы не запланируете её.
             </p>

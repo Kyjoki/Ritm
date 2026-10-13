@@ -13,6 +13,7 @@ export interface TaskInput {
   repeat: Repeat;
   kind: TaskKind;
   completed: boolean;
+  calendarEntry?: boolean;
   colorId?: string | null;
 }
 export interface Task extends TaskInput {
@@ -90,6 +91,7 @@ export interface GoogleCalendarStatus {
   calendarId: 'primary';
   lastFetchedAt: string | null;
   extendedColors?: boolean;
+  tasksEnabled?: boolean;
 }
 export interface GoogleOAuthSetup {
   configured: boolean;
@@ -118,6 +120,21 @@ export interface GoogleCalendarEvent {
   colorId?: string;
   recurring?: boolean;
   readOnlyReason?: string;
+  taskLink?: boolean;
+  taskUnavailableReason?: string;
+  googleTask?: GoogleTaskCompletion;
+}
+export interface GoogleTaskCompletion {
+  taskListId: string;
+  id: string;
+  etag: string;
+  status: 'needsAction' | 'completed';
+  completed?: string;
+  connectionId: string;
+}
+export interface GoogleTasksStatus {
+  status: 'enabled' | 'permission_required' | 'unavailable' | 'partial';
+  message?: string;
 }
 export interface GoogleCalendarResult {
   events: GoogleCalendarEvent[];
@@ -126,6 +143,7 @@ export interface GoogleCalendarResult {
   timeZone: string;
   fetchedAt: string;
   partial: boolean;
+  tasks?: GoogleTasksStatus;
 }
 export interface GoogleEventInput {
   title: string;

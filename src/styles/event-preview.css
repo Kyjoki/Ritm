@@ -16,6 +16,9 @@
   letter-spacing: -0.025em;
   overflow-wrap: anywhere;
 }
+.event-preview-title.is-complete h3 {
+  text-decoration: line-through;
+}
 .event-preview-detail {
   display: flex;
   align-items: flex-start;

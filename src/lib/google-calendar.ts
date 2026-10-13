@@ -161,7 +161,7 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
     (event: GoogleCalendarEvent) => {
       invalidateRead();
       setResult((old) =>
-        old && !(event.recurring && event.readOnly)
+        old && (!(event.recurring && event.readOnly) || Boolean(event.googleTask))
           ? { ...old, events: [...old.events.filter((item) => item.id !== event.id), event] }
           : old,
       );
@@ -187,6 +187,10 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
     setResult(null);
     setError('');
   }, []);
+  const connectTasks = useCallback(async () => {
+    const { authorizationUrl } = await api.connectGoogle(undefined, true);
+    window.location.assign(googleAuthorizationUrl(authorizationUrl).href);
+  }, []);
   return {
     status,
     result,
@@ -196,6 +200,7 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
     setRange,
     refresh,
     connect,
+    connectTasks,
     disconnect,
     refreshStatus,
     upsertEvent,

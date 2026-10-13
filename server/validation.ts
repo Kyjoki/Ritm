@@ -33,6 +33,7 @@ const taskFields = z
     kind: z.enum(['task', 'event']),
     completed: z.boolean(),
     colorId: calendarColorSchema.nullable().optional(),
+    calendarEntry: z.boolean().optional(),
   })
   .strict();
 

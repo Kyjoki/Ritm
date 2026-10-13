@@ -52,6 +52,12 @@ export type GoogleTransferReceipt = {
 );
 export const googleTransferKey = (id: string) => 'google-transfer:' + id;
 export function assertTransferTask(task: Task) {
+  if (task.calendarEntry === false)
+    throw new AppError(
+      400,
+      'GOOGLE_TRANSFER_NOT_SCHEDULED',
+      'Эта задача сохранена только в списке дел и не переносится в календарь.',
+    );
   if (task.completed || !task.date || task.completedDates.length > 0)
     throw new AppError(
       400,

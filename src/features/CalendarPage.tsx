@@ -59,6 +59,9 @@ interface CalendarPageProps {
   googlePartial?: boolean;
   googleFetchedAt?: string | null;
   onGoogleEdit?: (event: GoogleCalendarEvent) => void;
+  onGoogleTaskToggle?: (event: GoogleCalendarEvent) => Promise<void>;
+  busyGoogleTaskIds?: ReadonlySet<string>;
+  onEnableGoogleTasks?: () => Promise<void>;
   onGoogleCreate?: (draft: Partial<GoogleEventInput>) => void;
   onRangeChange?: (from: string, to: string) => void;
   onGoogleRefresh?: () => void;
@@ -124,7 +127,14 @@ function AgendaEntry({
         {entry.start === null ? <Clock3 size={18} aria-hidden="true" /> : entryTime(entry, 'start')}
       </span>
       <span className="cal-agenda-copy">
-        <strong>{entry.title}</strong>
+        <strong>
+          {entry.source === 'google' && entry.event.googleTask
+            ? entry.completed
+              ? '✓ '
+              : '○ '
+            : ''}
+          {entry.title}
+        </strong>
         <span>
           {entry.source === 'google'
             ? 'Google Calendar'
@@ -164,6 +174,9 @@ export function CalendarPage({
   googlePartial = false,
   googleFetchedAt = null,
   onGoogleEdit,
+  onGoogleTaskToggle,
+  busyGoogleTaskIds,
+  onEnableGoogleTasks,
   onGoogleCreate,
   onRangeChange,
   onGoogleRefresh,
@@ -504,6 +517,11 @@ export function CalendarPage({
                           title={occurrenceLabel(entry)}
                           style={calendarEntryStyle(entry)}
                         >
+                          {entry.source === 'google' && entry.event.googleTask
+                            ? entry.completed
+                              ? '✓ '
+                              : '○ '
+                            : ''}
                           {entry.start === null ? '' : `${entryTime(entry, 'start')} `}
                           {entry.title}
                         </button>
@@ -744,7 +762,14 @@ export function CalendarPage({
                         title={occurrenceLabel(entry)}
                         aria-label={occurrenceLabel(entry)}
                       >
-                        <strong>{entry.title}</strong>
+                        <strong>
+                          {entry.source === 'google' && entry.event.googleTask
+                            ? entry.completed
+                              ? '✓ '
+                              : '○ '
+                            : ''}
+                          {entry.title}
+                        </strong>
                         <span className="cal-event-time">
                           {entryTime(entry, 'start')}–{entryTime(entry, 'end')}
                           {entry.source === 'ritm' && entry.task.repeat !== 'none' ? ' · ↻' : ''}
@@ -953,6 +978,11 @@ export function CalendarPage({
           timeZone={timeZone}
           onClose={() => setPreview(null)}
           onEdit={beginEditing}
+          onGoogleTaskToggle={onGoogleTaskToggle}
+          taskBusy={Boolean(
+            previewEntry?.source === 'google' && busyGoogleTaskIds?.has(previewEntry.event.id),
+          )}
+          onEnableGoogleTasks={onEnableGoogleTasks}
         />
       ) : null}
     </div>

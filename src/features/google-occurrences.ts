@@ -156,7 +156,7 @@ export function googleOccurrences(
         title: event.title,
         start: null,
         end: null,
-        completed: false,
+        completed: event.googleTask?.status === 'completed',
         allDay: true,
         busy: event.busy,
         continued: start < date,
@@ -190,7 +190,7 @@ export function googleOccurrences(
       title: event.title,
       start: startMinute,
       end: drawnEnd,
-      completed: false,
+      completed: event.googleTask?.status === 'completed',
       allDay: false,
       busy: event.busy,
       continued,
@@ -210,7 +210,10 @@ export function calendarOccurrences(
   date: string,
   timeZone: string,
 ): CalendarOccurrence[] {
-  const local: CalendarOccurrence[] = getDayOccurrences(tasks, date).map((entry) => ({
+  const local: CalendarOccurrence[] = getDayOccurrences(
+    tasks.filter((task) => task.calendarEntry !== false),
+    date,
+  ).map((entry) => ({
     source: 'ritm',
     task: entry.task,
     date,

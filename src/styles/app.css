@@ -662,6 +662,65 @@ textarea::placeholder {
   margin-top: 13px;
   font-size: 11px;
 }
+.dashboard-page .task-pending-icon {
+  color: var(--muted);
+}
+.dashboard-page .check-target {
+  width: 44px;
+  justify-content: center;
+}
+.dashboard-page .check-target .spinning {
+  color: var(--accent);
+}
+.dashboard-quick-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+.dashboard-quick-add .visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.dashboard-quick-add input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--input-bg, var(--panel));
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.dashboard-quick-add input::placeholder {
+  color: var(--muted);
+}
+.dashboard-quick-add .button {
+  min-height: 44px;
+  flex: none;
+}
+.dashboard-quick-hint {
+  margin-top: 8px;
+}
+.dashboard-task-permission {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+@media (max-width: 600px) {
+  .dashboard-quick-add .button {
+    padding: 11px;
+  }
+  .dashboard-quick-add .button > span {
+    display: none;
+  }
+}
 .schedule-row {
   display: grid;
   grid-template-columns: 38px 1fr;
