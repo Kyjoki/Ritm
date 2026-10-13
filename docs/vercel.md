@@ -75,6 +75,10 @@ favicon, защищённый API и login cookie на одном origin.
 сохраняет исходные пути Express, включая OAuth callback и query parameters.
 Успешный локальный API-тест не заменяет эту проверку платформенной маршрутизации.
 
+`api/tsconfig.json` изолирует транспиляцию Vercel Function от клиентских
+глобальных `vite/client` и dev-only type packages. Полная проверка типов
+всего приложения, включая API, остаётся в корневом `npm run build` и CI.
+
 При выборе native Express preset `express.static()` игнорируется:
 статические файлы публикуются Vercel отдельно. Простая загрузка текущего
 SQLite-сервера с локальной файловой раздачей не создаст работающий облачный
