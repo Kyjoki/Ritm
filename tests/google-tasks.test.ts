@@ -61,7 +61,7 @@ function fixture() {
     task = {
       id: 'task123',
       etag: '"task1"',
-      webViewLink: link,
+      webViewLink: link + '?sa=6',
       title: 'Поговорить с Paul',
       status: 'needsAction' as string,
       notes: 'Do not modify',
@@ -216,11 +216,19 @@ function input(
 }
 test('Tasks URL normalization accepts exact official link only', () => {
   assert.equal(normalizeGoogleTaskLink(link + '/'), link);
+  assert.equal(normalizeGoogleTaskLink(link + '?sa=6'), link);
+  assert.equal(normalizeGoogleTaskLink(link + '/?sa=6'), link);
   for (const url of [
     'http://tasks.google.com/task/x',
     'https://tasks.google.com.evil.test/task/x',
     'https://evil.test/task/x',
     'https://tasks.google.com/task/x?q=1',
+    'https://tasks.google.com/task/x?sa=7',
+    'https://tasks.google.com/task/x?sa=6&sa=6',
+    'https://tasks.google.com/task/x?sa=6&q=1',
+    'https://tasks.google.com/task/x?q=1&sa=6',
+    'https://tasks.google.com/task/x?sa=6&',
+    'https://tasks.google.com/task/x?sa=6#other',
     'https://tasks.google.com/task/x#x',
     'https://user@tasks.google.com/task/x',
     'https://tasks.google.com:444/task/x',
@@ -454,4 +462,23 @@ test('exact Task URL identity also requires native title and scheduled-day integ
       false,
     );
   }
+});
+
+test('actual provider sa=6 links match plain Calendar links across read, completion and refresh', async () => {
+  const f = await enabled();
+  assert.equal(f.task().webViewLink, link + '?sa=6');
+  const original = (await f.read()).events[0];
+  assert.ok(original.description.includes(link + '.'));
+  assert.equal(original.googleTask?.id, 'task123');
+  const result = await f.service.completeTask(original.id, input(original, true));
+  assert.equal(result.event.googleTask?.status, 'completed');
+  assert.equal((await f.read()).events[0].googleTask?.status, 'completed');
+  const write = f.requests.find(
+    (request) => request.resource === 'tasks' && request.method === 'PATCH',
+  );
+  assert.equal(write?.taskId, 'task123');
+  assert.equal(write?.taskListId, 'list1');
+  assert.deepEqual(write?.body, { status: 'completed' });
+  assert.deepEqual(result.event.start, original.start);
+  assert.deepEqual(result.event.end, original.end);
 });

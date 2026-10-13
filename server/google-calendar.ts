@@ -548,7 +548,7 @@ export function normalizeGoogleTaskLink(value: string): string | null {
       url.port ||
       url.username ||
       url.password ||
-      url.search ||
+      (url.search !== '' && url.search !== '?sa=6') ||
       url.hash ||
       !/^\/task\/[a-zA-Z0-9_-]+\/?$/.test(url.pathname)
     )
