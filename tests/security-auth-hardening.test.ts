@@ -34,7 +34,7 @@ function fixture(t: TestContext, publicHttps = false) {
     );
     rmSync(dataDir, { recursive: true, force: true });
   });
-  return { security, state, env, cookies, response };
+  return { security, state, env, cookies, response, dataDir };
 }
 function request(
   headers: Record<string, string> = {},
@@ -271,4 +271,90 @@ test('login, public session and OAuth callback keep separate client quotas', asy
       (error: unknown) => error instanceof AppError && error.code === 'RATE_LIMIT',
     );
   }
+});
+
+test('Vercel permits only its exact deployment host and HTTPS origin alongside APP_ORIGIN', async (t) => {
+  const { env, state, dataDir, response, cookies } = fixture(t, true);
+  const deployment = 'ritm-current-abc-team.vercel.app';
+  const security = new Security({ ...env, VERCEL_URL: deployment }, state, dataDir);
+  for (const host of ['ritm.example', deployment]) {
+    const req = request(
+      { host, origin: 'https://' + host, 'content-type': 'application/json' },
+      '/api/login',
+      'POST',
+    );
+    assert.equal(guard(security, req), undefined);
+  }
+  for (const host of [
+    'ritm-other-deployment.vercel.app',
+    deployment + '.evil.example',
+    deployment + ':8443',
+  ]) {
+    const error = guard(security, request({ host }));
+    assert.ok(error instanceof AppError && error.code === 'INVALID_HOST');
+  }
+  for (const origin of [
+    'https://ritm-other-deployment.vercel.app',
+    'http://' + deployment,
+    'https://' + deployment + '.evil.example',
+  ]) {
+    const error = guard(security, request({ host: deployment, origin }));
+    assert.ok(error instanceof AppError && error.code === 'INVALID_ORIGIN');
+  }
+  await security.login(request({ host: deployment }), response, env.APP_LOGIN, env.APP_PASSWORD);
+  assert.equal(cookies[0].name, '__Host-ritm_session');
+  assert.equal(cookies[0].options.secure, true);
+  assert.equal('domain' in cookies[0].options, false);
+});
+
+test('deployment allowance ignores untrusted headers and VERCEL_URL outside Vercel', (t) => {
+  const { env, state, dataDir } = fixture(t, true);
+  const deployment = 'ritm-current-abc-team.vercel.app';
+  const security = new Security({ ...env, VERCEL: '0', VERCEL_URL: deployment }, state, dataDir);
+  const error = guard(
+    security,
+    request({
+      host: deployment,
+      origin: 'https://' + deployment,
+      'x-forwarded-host': deployment,
+      'x-vercel-url': deployment,
+    }),
+  );
+  assert.ok(error instanceof AppError && error.code === 'INVALID_HOST');
+  assert.equal(
+    guard(security, request({ host: 'ritm.example', origin: 'https://ritm.example' })),
+    undefined,
+  );
+  const trusted = new Security({ ...env, VERCEL_URL: deployment }, state, dataDir);
+  const spoofed = guard(
+    trusted,
+    request({ host: 'ritm-other.vercel.app', 'x-forwarded-host': deployment }),
+  );
+  assert.ok(spoofed instanceof AppError && spoofed.code === 'INVALID_HOST');
+  assert.doesNotThrow(
+    () => new Security({ ...env, VERCEL: '0', VERCEL_URL: 'https://evil.example' }, state, dataDir),
+  );
+});
+
+test('Vercel deployment hostname configuration rejects wildcards, schemes, ports and suffix attacks', (t) => {
+  const { env, state, dataDir } = fixture(t, true);
+  for (const deployment of [
+    '*.vercel.app',
+    'vercel.app',
+    'https://ritm.vercel.app',
+    'ritm.vercel.app:443',
+    'ritm.vercel.app/path',
+    'ritm.vercel.app?query=1',
+    'ritm.vercel.app#fragment',
+    'ritm.vercel.app.evil.example',
+    'nested.ritm.vercel.app',
+    '-ritm.vercel.app',
+    'ritm-.vercel.app',
+    ' ritm.vercel.app',
+    'a'.repeat(64) + '.vercel.app',
+  ])
+    assert.throws(
+      () => new Security({ ...env, VERCEL_URL: deployment }, state, dataDir),
+      /VERCEL_URL must be a deployment hostname/,
+    );
 });

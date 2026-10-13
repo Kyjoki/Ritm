@@ -22,3 +22,7 @@ node_modules/
 /.eve/
 /.workflow-data/
 /.vercel/
+
+# Local provider skills installed by the Vercel integration CLI.
+/.agents/
+/skills-lock.json

@@ -113,6 +113,10 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+      // Neon PgBouncer does not preserve these startup parameters. Apply them
+      // to the transaction before taking any shared workspace locks.
+      await client.query("SET LOCAL statement_timeout = '15s'");
+      await client.query("SET LOCAL lock_timeout = '5s'");
       await client.query('SELECT pg_advisory_xact_lock($1)', [WORKSPACE_LOCK]);
       const workspace = await client.query('SELECT id FROM ritm_workspace WHERE id = 1 FOR UPDATE');
       if (!workspace.rows.length)

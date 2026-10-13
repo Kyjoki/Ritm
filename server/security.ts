@@ -28,6 +28,7 @@ export class Security {
   private salt = randomBytes(32);
   private origins: Set<string>;
   private publicOrigin: string | undefined;
+  private deploymentHost: string | undefined;
   private secureCookie: boolean;
   private sessionKey: Buffer;
   private credentialVersion: string;
@@ -93,6 +94,15 @@ export class Security {
       this.origins.add(url.origin);
     } else if (!localHost || env.VERCEL === '1')
       throw new Error('APP_ORIGIN is required for public access.');
+    if (env.VERCEL === '1' && env.VERCEL_URL) {
+      // Vercel supplies the current deployment hostname without a scheme.
+      // Only this exact host is added, never a wildcard for other deployments.
+      // https://vercel.com/docs/environment-variables/system-environment-variables#vercel_url
+      if (!/^[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?\.vercel\.app$/i.test(env.VERCEL_URL))
+        throw new Error('VERCEL_URL must be a deployment hostname ending in .vercel.app.');
+      this.deploymentHost = env.VERCEL_URL.toLowerCase();
+      this.origins.add('https://' + this.deploymentHost);
+    }
     this.secureCookie = this.publicOrigin?.startsWith('https://') ?? false;
     this.cookieName = this.secureCookie ? '__Host-ritm_session' : 'ritm_session';
   }
@@ -188,7 +198,7 @@ export class Security {
         throw new AppError(403, 'INVALID_HOST', 'Недопустимый адрес приложения.');
       }
       const publicHost = this.publicOrigin ? new URL(this.publicOrigin).host : undefined;
-      if (!loopback(hostname) && host !== publicHost)
+      if (!loopback(hostname) && host !== publicHost && host !== this.deploymentHost)
         throw new AppError(403, 'INVALID_HOST', 'Откройте Ritm по настроенному адресу приложения.');
       if (!this.passwordHash && !loopback(req.socket.remoteAddress))
         throw new AppError(403, 'LOCAL_ONLY', 'Настройте пароль приложения для сетевого доступа.');
