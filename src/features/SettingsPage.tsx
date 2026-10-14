@@ -299,6 +299,67 @@ export function SettingsPage({
           <div className="settings-grid">
             <section className="panel settings-card">
               <div className="settings-card-title">
+                <Globe2 size={19} aria-hidden="true" />
+                <h2>{t('Язык и время')}</h2>
+              </div>
+              <label className="settings-field">
+                {t('Язык интерфейса')}
+                <select
+                  className="field"
+                  value={draft.language}
+                  onChange={(event) =>
+                    update('language', event.target.value as Settings['language'])
+                  }
+                >
+                  <option value="ru">{t('Русский')}</option>
+                  <option value="en">English</option>
+                </select>
+              </label>
+              <label className="settings-field">
+                {t('Часовой пояс')}
+                <select
+                  className="field"
+                  value={draft.timeZone}
+                  onChange={(event) => update('timeZone', event.target.value)}
+                >
+                  {!TIME_ZONES.some(([value]) => value === draft.timeZone) ? (
+                    <option value={draft.timeZone}>{draft.timeZone}</option>
+                  ) : null}
+                  {TIME_ZONES.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {t(label)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="settings-work-hours">
+                <label className="settings-field">
+                  {t('Начало дня')}
+                  <input
+                    className="field"
+                    type="time"
+                    value={draft.workDayStart}
+                    required
+                    onChange={(event) => update('workDayStart', event.target.value)}
+                  />
+                </label>
+                <label className="settings-field">
+                  {t('Конец дня')}
+                  <input
+                    className="field"
+                    type="time"
+                    value={draft.workDayEnd}
+                    required
+                    onChange={(event) => update('workDayEnd', event.target.value)}
+                  />
+                </label>
+              </div>
+              <span className="settings-hint">
+                {t('Помощник учитывает эти часы при планировании.')}
+              </span>
+            </section>
+            <section className="panel settings-card">
+              <div className="settings-card-title">
                 <UserRound size={19} aria-hidden="true" />
                 <h2>{t('Аккаунт')}</h2>
               </div>
@@ -394,68 +455,6 @@ export function SettingsPage({
               </label>
               <span className="settings-hint">
                 {t('Новое оформление появится после сохранения.')}
-              </span>
-            </section>
-
-            <section className="panel settings-card">
-              <div className="settings-card-title">
-                <Globe2 size={19} aria-hidden="true" />
-                <h2>{t('Язык и время')}</h2>
-              </div>
-              <label className="settings-field">
-                {t('Язык интерфейса')}
-                <select
-                  className="field"
-                  value={draft.language}
-                  onChange={(event) =>
-                    update('language', event.target.value as Settings['language'])
-                  }
-                >
-                  <option value="ru">{t('Русский')}</option>
-                  <option value="en">English</option>
-                </select>
-              </label>
-              <label className="settings-field">
-                {t('Часовой пояс')}
-                <select
-                  className="field"
-                  value={draft.timeZone}
-                  onChange={(event) => update('timeZone', event.target.value)}
-                >
-                  {!TIME_ZONES.some(([value]) => value === draft.timeZone) ? (
-                    <option value={draft.timeZone}>{draft.timeZone}</option>
-                  ) : null}
-                  {TIME_ZONES.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {t(label)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="settings-work-hours">
-                <label className="settings-field">
-                  {t('Начало дня')}
-                  <input
-                    className="field"
-                    type="time"
-                    value={draft.workDayStart}
-                    required
-                    onChange={(event) => update('workDayStart', event.target.value)}
-                  />
-                </label>
-                <label className="settings-field">
-                  {t('Конец дня')}
-                  <input
-                    className="field"
-                    type="time"
-                    value={draft.workDayEnd}
-                    required
-                    onChange={(event) => update('workDayEnd', event.target.value)}
-                  />
-                </label>
-              </div>
-              <span className="settings-hint">
-                {t('Помощник учитывает эти часы при планировании.')}
               </span>
             </section>
 
