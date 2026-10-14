@@ -12,6 +12,7 @@ export type { Language } from '../../shared/types';
 import { coreEnglish } from '../locales/core';
 import { settingsAssistantEnglish } from '../locales/settings-assistant';
 import { calendarEnglish } from '../locales/calendar';
+import { financeEnglish } from '../locales/finance';
 
 const LANGUAGE_KEY = 'ritm.language.v1';
 export function normalizeLanguage(value: unknown): Language {
@@ -35,6 +36,7 @@ const english: Record<string, string> = {
   ...coreEnglish,
   ...settingsAssistantEnglish,
   ...calendarEnglish,
+  ...financeEnglish,
 };
 export function translate(
   language: Language,

@@ -20,6 +20,16 @@ export function requestLanguage(header?: string): Language {
 
 // Only server-authored status/error text is translated. Personal text is never passed here.
 const messages: Record<string, string> = {
+  'Проверьте сумму, валюту, дату и описание финансовой записи.':
+    'Check the amount, currency, date and details of the finance entry.',
+  'Финансовая запись не найдена. Обновите страницу.': 'Finance entry not found. Refresh the page.',
+  'Тип финансовой записи нельзя изменить.': 'The finance entry type cannot be changed.',
+  'Финансовая запись изменилась. Обновите данные и повторите действие.':
+    'This finance entry has changed. Refresh your data and try again.',
+  'Достигнут предел финансовых записей. Удалите ненужные записи.':
+    'The finance entry limit has been reached. Delete entries you no longer need.',
+  'Достигнут предел хранения финансовых записей.':
+    'Finance storage is full. Delete entries you no longer need.',
   'Эта оценка больше не является последней в обсуждении. Откройте новую оценку и продолжите от неё.':
     'This review is no longer the latest in the discussion. Open the latest review and continue from it.',
   'Обсуждение достигло предела объёма или числа уточнений. Начните новую идею с кратким описанием текущего варианта.':

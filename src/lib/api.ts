@@ -3,6 +3,8 @@ import type {
   ChatMode,
   Bootstrap,
   Conversation,
+  FinanceEntry,
+  FinanceEntryInput,
   GoogleCalendarStatus,
   GoogleCalendarResult,
   GoogleCalendarEvent,
@@ -88,6 +90,18 @@ export const api = {
   login: (login: string, password: string) => request('/login', 'POST', { login, password }),
   logout: () => request('/logout', 'POST'),
   bootstrap: () => request<Bootstrap>('/bootstrap'),
+  finance: () => request<{ entries: FinanceEntry[] }>('/finance'),
+  createFinanceEntry: (entry: FinanceEntryInput) =>
+    request<{ entry: FinanceEntry }>('/finance', 'POST', entry),
+  updateFinanceEntry: (id: string, entry: FinanceEntryInput, expectedUpdatedAt: string) =>
+    request<{ entry: FinanceEntry }>(`/finance/${encodeURIComponent(id)}`, 'PATCH', {
+      entry,
+      expectedUpdatedAt,
+    }),
+  deleteFinanceEntry: (id: string, expectedUpdatedAt: string) =>
+    request<{ deleted: true }>(`/finance/${encodeURIComponent(id)}`, 'DELETE', {
+      expectedUpdatedAt,
+    }),
   createTask: (task: TaskInput) => request<Task>('/tasks', 'POST', task),
   updateTask: (id: string, task: Partial<TaskInput> & { occurrenceDate?: string }) =>
     request<Task>(`/tasks/${encodeURIComponent(id)}`, 'PATCH', task),

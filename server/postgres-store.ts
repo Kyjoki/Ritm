@@ -11,9 +11,17 @@ import type {
   TaskInput,
   GoogleCalendarEvent,
   GoogleTransferResult,
+  FinanceEntry,
+  FinanceEntryInput,
 } from '../shared/types.ts';
 import { AppError, conflict, missing } from './errors.ts';
-import { minutes, scheduleInPast, taskInputSchema, validSchedule } from './validation.ts';
+import {
+  financeEntryInputSchema,
+  minutes,
+  scheduleInPast,
+  taskInputSchema,
+  validSchedule,
+} from './validation.ts';
 import type {
   RequestClaim,
   RequestRecord,
@@ -22,6 +30,7 @@ import type {
 } from './repository.ts';
 import {
   assertWorkspaceStorage,
+  assertFinanceStorage,
   assertTransferTask,
   assertTransferSnapshot,
   assertTransferConnection,
@@ -31,7 +40,8 @@ import {
 
 const { Pool } = pg;
 type Connection = Pick<PgPool | PoolClient, 'query'>;
-type EntityTable = 'ritm_tasks' | 'ritm_deleted_tasks' | 'ritm_conversations';
+type EntityTable =
+  'ritm_tasks' | 'ritm_deleted_tasks' | 'ritm_conversations' | 'ritm_finance_entries';
 const WORKSPACE_LOCK = 812014;
 const defaultSettings: Settings = {
   displayName: 'Максим',
@@ -188,6 +198,73 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
           (a.time ?? '99').localeCompare(b.time ?? '99') ||
           a.createdAt.localeCompare(b.createdAt),
       );
+  }
+  private async listFinanceEntries(client: Connection): Promise<FinanceEntry[]> {
+    const result = await client.query('SELECT json FROM ritm_finance_entries');
+    return result.rows
+      .map((row) => decoded<FinanceEntry>(row.json))
+      .sort((a, b) => {
+        const aDate = 'date' in a ? a.date : a.asOf;
+        const bDate = 'date' in b ? b.date : b.asOf;
+        return bDate.localeCompare(aDate) || b.createdAt.localeCompare(a.createdAt);
+      });
+  }
+  async financeEntries(): Promise<FinanceEntry[]> {
+    return this.listFinanceEntries(this.pool);
+  }
+  async createFinanceEntry(input: FinanceEntryInput): Promise<FinanceEntry> {
+    const fields = financeEntryInputSchema.parse(input);
+    return this.transaction(async (client) => {
+      const entries = await this.listFinanceEntries(client);
+      if (entries.length >= 2000)
+        throw new AppError(
+          400,
+          'FINANCE_LIMIT',
+          'Достигнут предел финансовых записей. Удалите ненужные записи.',
+        );
+      const now = this.stamp();
+      const entry: FinanceEntry = { ...fields, id: randomUUID(), createdAt: now, updatedAt: now };
+      assertFinanceStorage(entries.concat(entry));
+      await this.write(client, 'ritm_finance_entries', entry);
+      return entry;
+    });
+  }
+  async updateFinanceEntry(
+    id: string,
+    input: FinanceEntryInput,
+    expectedUpdatedAt: string,
+  ): Promise<FinanceEntry> {
+    const fields = financeEntryInputSchema.parse(input);
+    return this.transaction(async (client) => {
+      const current = await this.read<FinanceEntry>(client, 'ritm_finance_entries', id, true);
+      if (!current)
+        throw new AppError(404, 'NOT_FOUND', 'Финансовая запись не найдена. Обновите страницу.');
+      if (current.updatedAt !== expectedUpdatedAt)
+        throw conflict('Финансовая запись изменилась. Обновите данные и повторите действие.');
+      if (current.type !== fields.type)
+        throw new AppError(400, 'FINANCE_TYPE_IMMUTABLE', 'Тип финансовой записи нельзя изменить.');
+      const entry: FinanceEntry = {
+        ...fields,
+        id,
+        createdAt: current.createdAt,
+        updatedAt: this.stamp(current.updatedAt),
+      };
+      assertFinanceStorage(
+        (await this.listFinanceEntries(client)).filter((item) => item.id !== id).concat(entry),
+      );
+      await this.write(client, 'ritm_finance_entries', entry);
+      return entry;
+    });
+  }
+  async deleteFinanceEntry(id: string, expectedUpdatedAt: string): Promise<void> {
+    await this.transaction(async (client) => {
+      const current = await this.read<FinanceEntry>(client, 'ritm_finance_entries', id, true);
+      if (!current)
+        throw new AppError(404, 'NOT_FOUND', 'Финансовая запись не найдена. Обновите страницу.');
+      if (current.updatedAt !== expectedUpdatedAt)
+        throw conflict('Финансовая запись изменилась. Обновите данные и повторите действие.');
+      await client.query('DELETE FROM ritm_finance_entries WHERE id = $1', [id]);
+    });
   }
   private async readTask(client: Connection, id: string, lock = false): Promise<Task> {
     const task = await this.read<Task>(client, 'ritm_tasks', id, lock);

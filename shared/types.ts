@@ -4,6 +4,47 @@ export type Priority = 'low' | 'normal' | 'high';
 export type Repeat = 'none' | 'daily' | 'weekly' | 'monthly';
 export type TaskKind = 'task' | 'event';
 
+/** Finance amounts use integer hundredths for the four supported currencies. */
+export type FinanceCurrency = 'KZT' | 'USD' | 'EUR' | 'RUB';
+export type FinanceEntryInput =
+  | {
+      type: 'income';
+      amountMinor: number;
+      currency: FinanceCurrency;
+      date: string;
+      category: string;
+      note: string;
+    }
+  | {
+      type: 'expense';
+      amountMinor: number;
+      currency: FinanceCurrency;
+      date: string;
+      category: string;
+      note: string;
+    }
+  | {
+      type: 'deposit';
+      name: string;
+      valueMinor: number;
+      currency: FinanceCurrency;
+      asOf: string;
+      note: string;
+    }
+  | {
+      type: 'stock';
+      name: string;
+      valueMinor: number;
+      currency: FinanceCurrency;
+      asOf: string;
+      note: string;
+    };
+export type FinanceEntry = FinanceEntryInput & {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export interface TaskInput {
   title: string;
   description: string;

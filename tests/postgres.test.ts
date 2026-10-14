@@ -112,7 +112,7 @@ async function fixture(t: TestContext) {
 
 test('pg-mem: explicit migrations are repeatable and do not overwrite settings', async (t) => {
   const h = await fixture(t);
-  assert.deepEqual(h.applied, ['001-postgres.sql']);
+  assert.deepEqual(h.applied, ['001-postgres.sql', '002-finance.sql']);
   await h.store.updateSettings({ displayName: 'Владелец', theme: 'light' });
   assert.deepEqual(await migrate(h.raw), []);
   assert.equal((await h.store.settings()).displayName, 'Владелец');
@@ -124,6 +124,85 @@ test('pg-mem: explicit migrations are repeatable and do not overwrite settings',
       .conversations,
     [],
   );
+});
+
+test('pg-mem: finance records persist separately from tasks and reject invalid changes', async (t) => {
+  const { store } = await fixture(t);
+  const income = await store.createFinanceEntry({
+    type: 'income',
+    amountMinor: 125050,
+    currency: 'KZT',
+    date: '2026-10-14',
+    category: 'Salary',
+    note: '',
+  });
+  const deposit = await store.createFinanceEntry({
+    type: 'deposit',
+    name: 'Savings',
+    valueMinor: 700000,
+    currency: 'USD',
+    asOf: '2026-10-14',
+    note: 'Manual valuation',
+  });
+  assert.equal((await store.financeEntries()).length, 2);
+  assert.deepEqual(await store.tasks(), []);
+  await assert.rejects(
+    store.updateFinanceEntry(
+      income.id,
+      {
+        type: 'expense',
+        amountMinor: 1,
+        currency: 'KZT',
+        date: '2026-10-14',
+        category: 'Other',
+        note: '',
+      },
+      income.updatedAt,
+    ),
+    (error: unknown) => error instanceof AppError && error.code === 'FINANCE_TYPE_IMMUTABLE',
+  );
+  assert.equal(
+    (await store.financeEntries()).find((entry) => entry.id === income.id)?.type,
+    'income',
+  );
+  const revised = await store.updateFinanceEntry(
+    deposit.id,
+    {
+      type: 'deposit',
+      name: 'Savings',
+      valueMinor: 750000,
+      currency: 'USD',
+      asOf: '2026-10-14',
+      note: '',
+    },
+    deposit.updatedAt,
+  );
+  assert.equal(revised.type === 'deposit' ? revised.valueMinor : 0, 750000);
+  await assert.rejects(
+    store.updateFinanceEntry(
+      deposit.id,
+      {
+        type: 'deposit',
+        name: 'Stale',
+        valueMinor: 1,
+        currency: 'USD',
+        asOf: '2026-10-14',
+        note: '',
+      },
+      deposit.updatedAt,
+    ),
+    (error: unknown) => error instanceof AppError && error.status === 409,
+  );
+  await assert.rejects(
+    store.deleteFinanceEntry(deposit.id, deposit.updatedAt),
+    (error: unknown) => error instanceof AppError && error.status === 409,
+  );
+  assert.equal(
+    (await store.financeEntries()).find((entry) => entry.id === deposit.id)?.updatedAt,
+    revised.updatedAt,
+  );
+  await store.deleteFinanceEntry(income.id, income.updatedAt);
+  assert.equal((await store.financeEntries()).length, 1);
 });
 
 test('pg-mem: restoring a task cannot bypass the quota and the rejected undo is retryable', async (t) => {

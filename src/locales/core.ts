@@ -2,6 +2,7 @@ export const coreEnglish: Record<string, string> = {
   'Мой день': 'My day',
   Календарь: 'Calendar',
   'ИИ-помощник': 'AI assistant',
+  Финансы: 'Finances',
   Настройки: 'Settings',
   Вход: 'Sign in',
   ' · Выполнено': ' · Completed',

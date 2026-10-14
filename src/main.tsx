@@ -8,6 +8,7 @@ import './styles/tokens.css';
 import './styles/app.css';
 import './styles/calendar-settings.css';
 import './styles/assistant.css';
+import './styles/finance.css';
 import App from './App';
 import { I18nProvider, getLanguage, translate } from './lib/i18n';
 

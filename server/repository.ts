@@ -8,11 +8,22 @@ import type {
   TaskInput,
   GoogleTransferResult,
   GoogleCalendarEvent,
+  FinanceEntry,
+  FinanceEntryInput,
 } from '../shared/types.ts';
 import { AppError } from './errors.ts';
 
 /** UTF-8 bytes of the active task/history JSON sent to the client. */
 export const MAX_WORKSPACE_BYTES = 8 * 1024 * 1024;
+export const MAX_FINANCE_BYTES = 2 * 1024 * 1024;
+export function assertFinanceStorage(entries: FinanceEntry[]) {
+  if (Buffer.byteLength(JSON.stringify(entries), 'utf8') > MAX_FINANCE_BYTES)
+    throw new AppError(
+      400,
+      'FINANCE_STORAGE_LIMIT',
+      'Достигнут предел хранения финансовых записей.',
+    );
+}
 export function assertWorkspaceStorage(tasks: Task[], conversations: Conversation[]) {
   if (Buffer.byteLength(JSON.stringify({ tasks, conversations }), 'utf8') > MAX_WORKSPACE_BYTES)
     throw new AppError(
@@ -109,6 +120,14 @@ export interface RuntimeStateRepository {
 }
 
 export interface WorkspaceRepository {
+  financeEntries(): Awaitable<FinanceEntry[]>;
+  createFinanceEntry(input: FinanceEntryInput): Awaitable<FinanceEntry>;
+  updateFinanceEntry(
+    id: string,
+    input: FinanceEntryInput,
+    expectedUpdatedAt: string,
+  ): Awaitable<FinanceEntry>;
+  deleteFinanceEntry(id: string, expectedUpdatedAt: string): Awaitable<void>;
   tasks(): Awaitable<Task[]>;
   task(id: string): Awaitable<Task>;
   settings(): Awaitable<Settings>;

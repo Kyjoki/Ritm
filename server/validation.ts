@@ -83,6 +83,50 @@ export const taskPatchSchema = taskFields
     'Нет изменений или не указано выполнение.',
   );
 export const idSchema = z.string().uuid();
+const financeCurrencySchema = z.enum(['KZT', 'USD', 'EUR', 'RUB']);
+const financeAmountSchema = z.number().int().safe().min(0).max(1_000_000_000_000);
+export const financeEntryInputSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('income'),
+      amountMinor: financeAmountSchema.positive(),
+      currency: financeCurrencySchema,
+      date: dateValue,
+      category: z.string().trim().min(1).max(80),
+      note: z.string().trim().max(1000),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('expense'),
+      amountMinor: financeAmountSchema.positive(),
+      currency: financeCurrencySchema,
+      date: dateValue,
+      category: z.string().trim().min(1).max(80),
+      note: z.string().trim().max(1000),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('deposit'),
+      name: z.string().trim().min(1).max(120),
+      valueMinor: financeAmountSchema,
+      currency: financeCurrencySchema,
+      asOf: dateValue,
+      note: z.string().trim().max(1000),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('stock'),
+      name: z.string().trim().min(1).max(120),
+      valueMinor: financeAmountSchema,
+      currency: financeCurrencySchema,
+      asOf: dateValue,
+      note: z.string().trim().max(1000),
+    })
+    .strict(),
+]);
 export const taskSchema = taskFields
   .extend({
     id: idSchema,

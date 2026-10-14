@@ -45,6 +45,7 @@ import { createTaskGoogleTransfer } from './task-google-transfer.ts';
 import {
   chatSchema,
   dateValue,
+  financeEntryInputSchema,
   idSchema,
   proposalActionSchema,
   secretSchema,
@@ -389,6 +390,36 @@ export function createApp(options: AppOptions = {}) {
   app.post('/api/tasks', async (req, res) => {
     res.status(201).json(await store.createTask(taskInputSchema.parse(req.body)));
   });
+  app.get('/api/finance', async (_req, res) => {
+    res.json({ entries: await store.financeEntries() });
+  });
+  app.post('/api/finance', async (req, res) => {
+    const input = financeEntryInputSchema.parse(req.body);
+    await security.limit(req, 'finance-write', 60, 60_000);
+    res.status(201).json({ entry: await store.createFinanceEntry(input) });
+  });
+  app.patch('/api/finance/:id', async (req, res) => {
+    const id = idSchema.parse(req.params.id);
+    const { entry, expectedUpdatedAt } = z
+      .object({
+        entry: financeEntryInputSchema,
+        expectedUpdatedAt: z.iso.datetime(),
+      })
+      .strict()
+      .parse(req.body);
+    await security.limit(req, 'finance-write', 60, 60_000);
+    res.json({ entry: await store.updateFinanceEntry(id, entry, expectedUpdatedAt) });
+  });
+  app.delete('/api/finance/:id', async (req, res) => {
+    const id = idSchema.parse(req.params.id);
+    const { expectedUpdatedAt } = z
+      .object({ expectedUpdatedAt: z.iso.datetime() })
+      .strict()
+      .parse(req.body);
+    await security.limit(req, 'finance-write', 60, 60_000);
+    await store.deleteFinanceEntry(id, expectedUpdatedAt);
+    res.json({ deleted: true });
+  });
   app.post('/api/tasks/:id/google', async (req, res) => {
     z.object({}).strict().parse(req.body);
     const id = idSchema.parse(req.params.id);
@@ -685,11 +716,13 @@ export function createApp(options: AppOptions = {}) {
               ? 'Проверьте имя, почту, часовой пояс и время рабочего дня.'
               : path === '/api/login'
                 ? 'Введите логин и пароль приложения.'
-                : path === '/api/chat'
-                  ? 'Введите сообщение длиной до 6000 символов.'
-                  : path.startsWith('/api/proposals/')
-                    ? 'Не удалось выбрать изменения. Обновите диалог и повторите.'
-                    : 'Проверьте заполненные поля: название, дату, время и длительность.';
+                : path.startsWith('/api/finance')
+                  ? 'Проверьте сумму, валюту, дату и описание финансовой записи.'
+                  : path === '/api/chat'
+                    ? 'Введите сообщение длиной до 6000 символов.'
+                    : path.startsWith('/api/proposals/')
+                      ? 'Не удалось выбрать изменения. Обновите диалог и повторите.'
+                      : 'Проверьте заполненные поля: название, дату, время и длительность.';
       res.status(400).json({
         error: localizeError(message, 'VALIDATION_ERROR', language),
         code: 'VALIDATION_ERROR',

@@ -13,11 +13,20 @@ import type {
   TaskInput,
   GoogleCalendarEvent,
   GoogleTransferResult,
+  FinanceEntry,
+  FinanceEntryInput,
 } from '../shared/types.ts';
 import { AppError, conflict, missing } from './errors.ts';
-import { minutes, scheduleInPast, taskInputSchema, validSchedule } from './validation.ts';
+import {
+  financeEntryInputSchema,
+  minutes,
+  scheduleInPast,
+  taskInputSchema,
+  validSchedule,
+} from './validation.ts';
 import {
   assertWorkspaceStorage,
+  assertFinanceStorage,
   assertTransferTask,
   assertTransferSnapshot,
   assertTransferConnection,
@@ -83,6 +92,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, json TEXT NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS deleted_tasks (id TEXT PRIMARY KEY, json TEXT NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, json TEXT NOT NULL) STRICT;
+      CREATE TABLE IF NOT EXISTS finance_entries (id TEXT PRIMARY KEY, json TEXT NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, json TEXT NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS chat_requests (
         id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, conversation_id TEXT,
@@ -173,6 +183,79 @@ export class Store {
         'INSERT INTO config(key,json) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET json=excluded.json',
       )
       .run(key, JSON.stringify(value));
+  }
+  financeEntries(): FinanceEntry[] {
+    return this.db
+      .prepare('SELECT json FROM finance_entries')
+      .all()
+      .map((row) => JSON.parse(String(row.json)) as FinanceEntry)
+      .sort((a, b) => {
+        const aDate = 'date' in a ? a.date : a.asOf;
+        const bDate = 'date' in b ? b.date : b.asOf;
+        return bDate.localeCompare(aDate) || b.createdAt.localeCompare(a.createdAt);
+      });
+  }
+  createFinanceEntry(input: FinanceEntryInput): FinanceEntry {
+    const fields = financeEntryInputSchema.parse(input);
+    return this.transaction(() => {
+      const entries = this.financeEntries();
+      if (entries.length >= 2000)
+        throw new AppError(
+          400,
+          'FINANCE_LIMIT',
+          'Достигнут предел финансовых записей. Удалите ненужные записи.',
+        );
+      const now = this.stamp();
+      const entry: FinanceEntry = { ...fields, id: randomUUID(), createdAt: now, updatedAt: now };
+      assertFinanceStorage(entries.concat(entry));
+      this.db
+        .prepare('INSERT INTO finance_entries (id,json) VALUES (?,?)')
+        .run(entry.id, JSON.stringify(entry));
+      return entry;
+    });
+  }
+  updateFinanceEntry(
+    id: string,
+    input: FinanceEntryInput,
+    expectedUpdatedAt: string,
+  ): FinanceEntry {
+    const fields = financeEntryInputSchema.parse(input);
+    return this.transaction(() => {
+      const row = this.db.prepare('SELECT json FROM finance_entries WHERE id=?').get(id);
+      if (!row)
+        throw new AppError(404, 'NOT_FOUND', 'Финансовая запись не найдена. Обновите страницу.');
+      const current = JSON.parse(String(row.json)) as FinanceEntry;
+      if (current.updatedAt !== expectedUpdatedAt)
+        throw conflict('Финансовая запись изменилась. Обновите данные и повторите действие.');
+      if (current.type !== fields.type)
+        throw new AppError(400, 'FINANCE_TYPE_IMMUTABLE', 'Тип финансовой записи нельзя изменить.');
+      const entry: FinanceEntry = {
+        ...fields,
+        id,
+        createdAt: current.createdAt,
+        updatedAt: this.stamp(current.updatedAt),
+      };
+      assertFinanceStorage(
+        this.financeEntries()
+          .filter((item) => item.id !== id)
+          .concat(entry),
+      );
+      this.db
+        .prepare('UPDATE finance_entries SET json=? WHERE id=?')
+        .run(JSON.stringify(entry), id);
+      return entry;
+    });
+  }
+  deleteFinanceEntry(id: string, expectedUpdatedAt: string): void {
+    return this.transaction(() => {
+      const row = this.db.prepare('SELECT json FROM finance_entries WHERE id=?').get(id);
+      if (!row)
+        throw new AppError(404, 'NOT_FOUND', 'Финансовая запись не найдена. Обновите страницу.');
+      const current = JSON.parse(String(row.json)) as FinanceEntry;
+      if (current.updatedAt !== expectedUpdatedAt)
+        throw conflict('Финансовая запись изменилась. Обновите данные и повторите действие.');
+      this.db.prepare('DELETE FROM finance_entries WHERE id=?').run(id);
+    });
   }
   tasks(): Task[] {
     return this.db
