@@ -20,6 +20,10 @@ export function requestLanguage(header?: string): Language {
 
 // Only server-authored status/error text is translated. Personal text is never passed here.
 const messages: Record<string, string> = {
+  'Эта оценка больше не является последней в обсуждении. Откройте новую оценку и продолжите от неё.':
+    'This review is no longer the latest in the discussion. Open the latest review and continue from it.',
+  'Обсуждение достигло предела объёма или числа уточнений. Начните новую идею с кратким описанием текущего варианта.':
+    'This discussion has reached its length or round limit. Start a new idea with a short description of its current version.',
   'Запрос помощника использует недопустимый адрес или метод.':
     'The assistant request uses an unsupported address or method.',
   'OpenAI вернул перенаправление вместо ответа. Повторите позже.':

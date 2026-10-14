@@ -144,8 +144,12 @@ export const chatSchema = z
     message: z.string().trim().min(1).max(6000),
     requestId: idSchema,
     mode: z.enum(['assistant', 'idea_review']).optional(),
+    reviewMessageId: idSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) => !value.reviewMessageId || (value.mode === 'idea_review' && !!value.conversationId),
+  );
 export const proposalActionSchema = z
   .object({
     conversationId: idSchema,

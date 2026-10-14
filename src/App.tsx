@@ -775,10 +775,24 @@ export default function App() {
                     : old,
                 );
               }}
-              onSend={async (id, message, requestId, mode) => {
-                const c = await api.chat(id, message, requestId, mode);
-                putConversation(c);
-                return c;
+              onSend={async (id, message, requestId, mode, reviewMessageId) => {
+                try {
+                  const c = await api.chat(id, message, requestId, mode, reviewMessageId);
+                  putConversation(c);
+                  return c;
+                } catch (failure) {
+                  if (failure instanceof ApiError && failure.code === 'AI_DISCUSSION_STALE') {
+                    try {
+                      const fresh = await api.bootstrap();
+                      setData((old) =>
+                        old ? { ...old, conversations: fresh.conversations } : old,
+                      );
+                    } catch {
+                      // Preserve the failed reply; the user can reload if history is unavailable.
+                    }
+                  }
+                  throw failure;
+                }
               }}
               onApply={async (conversationId, messageId, proposalIds) => {
                 const result = await api.proposals('apply', conversationId, messageId, proposalIds);

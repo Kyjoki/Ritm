@@ -35,7 +35,12 @@ import {
   type SecurityLogger,
 } from './http-security.ts';
 import { assistantMessage, runAssistant, type AssistantRunner } from './assistant.ts';
-import { ideaReviewMessage, runIdeaReview, type IdeaReviewRunner } from './idea-review.ts';
+import {
+  buildIdeaDiscussion,
+  ideaReviewMessage,
+  runIdeaReview,
+  type IdeaReviewRunner,
+} from './idea-review.ts';
 import { createTaskGoogleTransfer } from './task-google-transfer.ts';
 import {
   chatSchema,
@@ -441,6 +446,7 @@ export function createApp(options: AppOptions = {}) {
           conversationId: input.conversationId ?? null,
           message: input.message,
           ...(reviewingIdea ? { mode: 'idea_review' } : {}),
+          ...(input.reviewMessageId ? { reviewMessageId: input.reviewMessageId } : {}),
         }),
       )
       .digest('hex');
@@ -466,6 +472,8 @@ export function createApp(options: AppOptions = {}) {
     const conversation = input.conversationId
       ? await store.conversation(input.conversationId)
       : undefined;
+    if (input.reviewMessageId)
+      buildIdeaDiscussion(conversation!, input.reviewMessageId, input.message);
     if (conversation && conversation.messages.length >= 200)
       throw new AppError(
         400,
@@ -482,6 +490,7 @@ export function createApp(options: AppOptions = {}) {
     };
     res.on('close', onDisconnect);
     const modelSlots: { key: string; token: string }[] = [];
+    let discussionLease: { key: string; token: string } | undefined;
     let leaseToken: string | undefined,
       acquired = false;
     try {
@@ -513,6 +522,12 @@ export function createApp(options: AppOptions = {}) {
       }
       if (modelSlots.length < (reviewingIdea ? 2 : 1))
         throw new AppError(429, 'AI_BUSY', 'Помощник уже отвечает. Дождитесь завершения ответа.');
+      if (reviewingIdea && input.conversationId) {
+        const key = 'ritm:idea-discussion:' + input.conversationId;
+        const token = await state.acquireLease(key, 180_000);
+        if (!token) throw conflict('В этом диалоге помощник уже отвечает. Дождитесь завершения.');
+        discussionLease = { key, token };
+      }
       // Reserve the paid model generation after read-only calendar loading, so
       // Google latency does not consume the database claim lease.
       const claim = await store.startRequest(
@@ -529,6 +544,9 @@ export function createApp(options: AppOptions = {}) {
       const freshConversation = input.conversationId
         ? await store.conversation(input.conversationId)
         : undefined;
+      const discussion = input.reviewMessageId
+        ? buildIdeaDiscussion(freshConversation!, input.reviewMessageId, input.message)
+        : undefined;
       const message = reviewingIdea
         ? ideaReviewMessage(
             await (options.ideaReviewer ?? runIdeaReview)({
@@ -536,7 +554,9 @@ export function createApp(options: AppOptions = {}) {
               message: input.message,
               language: settings.language,
               signal: controller.signal,
+              ...(discussion ? { discussion } : {}),
             }),
+            discussion,
           )
         : assistantMessage(
             await assistant({
@@ -554,6 +574,12 @@ export function createApp(options: AppOptions = {}) {
           );
       if (controller.signal.aborted)
         throw new AppError(499, 'REQUEST_CANCELLED', 'Запрос отменён.');
+      if (input.reviewMessageId)
+        buildIdeaDiscussion(
+          await store.conversation(input.conversationId!),
+          input.reviewMessageId,
+          input.message,
+        );
       res.json(
         await store.finishChat(
           input.requestId,
@@ -568,6 +594,13 @@ export function createApp(options: AppOptions = {}) {
       throw error;
     } finally {
       busyConversations.delete(busyId);
+      if (discussionLease) {
+        try {
+          await state.releaseLease(discussionLease.key, discussionLease.token);
+        } catch {
+          audit(res, 'server_error', 503);
+        }
+      }
       res.off('close', onDisconnect);
       for (const modelSlot of modelSlots) {
         try {

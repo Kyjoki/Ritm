@@ -284,4 +284,35 @@ export const settingsAssistantEnglish: Record<string, string> = {
   'Модель: {model}. Четыре отдельных запроса с разными ролями; каждый эксперт получает исходную идею без ответов остальных. Это оценка ИИ, без проверки фактов в интернете.':
     'Model: {model}. Four separate requests with different roles; each expert receives the original idea without the other experts’ responses. This is an AI assessment, without fact-checking on the web.',
   'Разбор идеи независимыми ИИ-экспертами': 'Idea review by independent AI experts',
+  'Эта оценка уже обновилась или недоступна. Измените сообщение и выберите последнюю оценку идеи. Если её нет, обновите диалог.':
+    'This assessment has been updated or is unavailable. Edit your message and select the latest assessment of the idea. If it is missing, refresh the conversation.',
+  'Эксперты пересматривают свои оценки…': 'Experts are revisiting their assessments…',
+  'Текущее обсуждение идеи': 'Current idea discussion',
+  'Обсуждение идеи · Оценка №{round}': 'Idea discussion · Assessment {round}',
+  'Оценка №{round}': 'Assessment {round}',
+  'Новая идея': 'New idea',
+  'Достигнуто 8 оценок этой идеи. Начните новый разбор с её обновлённым описанием.':
+    'This idea has reached 8 assessments. Start a new review with its updated description.',
+  'Появилась новая оценка. Выберите её, чтобы продолжить обсуждение.':
+    'A new assessment is available. Select it to continue the discussion.',
+  'Ответьте на вопросы или уточните идею. Каждый эксперт пересмотрит своё мнение с учётом ваших ответов.':
+    'Answer the questions or refine the idea. Each expert will revisit their opinion based on your answers.',
+  'Перейти к новой оценке': 'Select the new assessment',
+  'Эта оценка больше недоступна. Выберите сохранённый разбор или начните новую идею.':
+    'This assessment is no longer available. Select a saved review or start a new idea.',
+  'Ответ экспертам или уточнение идеи': 'Answer the experts or refine the idea',
+  'Ответьте на вопросы или уточните идею…': 'Answer the questions or refine your idea…',
+  'Что изменилось после ваших ответов': 'What changed after your answers',
+  '{expert}: {before} → {after}': '{expert}: {before} → {after}',
+  'Пересмотренные оценки': 'Revised assessments',
+  'Итоговые оценки экспертов остались прежними; аргументы обновлены выше.':
+    'The experts’ verdicts remain the same; their updated reasoning is shown above.',
+  'Модель: {model}. Каждый эксперт учитывает исходную идею, ваши уточнения и только свои прежние оценки. Общий вывод собирается после их ответов. Факты в интернете не проверяются.':
+    'Model: {model}. Each expert considers the original idea, your clarifications and only their own previous assessments. Their responses are then combined into a shared conclusion. Facts are not checked on the web.',
+  'Обсуждение выбрано': 'Discussion selected',
+  'Ответить на вопросы': 'Answer the questions',
+  'Обсудить с экспертами': 'Discuss with experts',
+  'Есть более новая оценка этой идеи — продолжите обсуждение под ней.':
+    'A newer assessment of this idea is available. Continue the discussion below it.',
+  'Вопросы экспертов ({count})': 'Expert questions ({count})',
 };

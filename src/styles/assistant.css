@@ -1259,3 +1259,68 @@
     transition: none !important;
   }
 }
+.assistant-discussion-context {
+  min-width: 0;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--soft);
+  font-size: 12px;
+}
+.assistant-discussion-log-context {
+  margin-top: 14px;
+}
+.assistant-discussion-log-context:empty {
+  display: none;
+}
+.assistant-discussion-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+}
+.assistant-discussion-heading strong {
+  color: var(--accent);
+}
+.assistant-discussion-heading .button {
+  min-height: 44px;
+  padding: 6px 9px;
+  font-size: 11px;
+}
+.assistant-discussion-context p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.assistant-discussion-context .assistant-discussion-idea {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+.assistant-discussion-questions {
+  margin-top: 5px;
+}
+.assistant-discussion-questions summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--accent);
+}
+.assistant-discussion-questions summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.assistant-discussion-questions ol {
+  max-height: 130px;
+  overflow-y: auto;
+  margin: 0 0 5px;
+  padding-left: 22px;
+  color: var(--text);
+  line-height: 1.6;
+}

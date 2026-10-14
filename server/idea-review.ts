@@ -11,6 +11,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { z } from 'zod';
 import type {
   ChatMessage,
+  Conversation,
   IdeaExpertId,
   IdeaExpertReview,
   IdeaReviewReport,
@@ -18,12 +19,14 @@ import type {
 } from '../shared/types.ts';
 import { createRestrictedOpenAIFetch } from './assistant.ts';
 import { AppError } from './errors.ts';
-import { modelSchema } from './validation.ts';
+import { idSchema, modelSchema } from './validation.ts';
 
 export const MAX_IDEA_CHARS = 6000;
 export const IDEA_REVIEW_TIMEOUT_MS = 100_000;
 export const IDEA_REVIEW_CALL_TIMEOUT_MS = 45_000;
 export const MAX_IDEA_REVIEW_PROMPT_CHARS = 96_000;
+export const MAX_IDEA_DISCUSSION_ROUNDS = 8;
+export const MAX_IDEA_DISCUSSION_CHARS = 16_000;
 const expertIds = ['value', 'feasibility', 'resources', 'risks'] as const;
 const verdictSchema = z.enum(['promising', 'needs_testing', 'weak']);
 const text = (max: number) => z.string().trim().min(1).max(max);
@@ -46,12 +49,37 @@ export const ideaReviewSynthesisSchema = z
     nextSteps: z.array(text(300)).min(1).max(6),
   })
   .strict();
+const discussionSynthesisSchema = ideaReviewSynthesisSchema
+  .extend({
+    changes: z.array(text(300)).min(1).max(6),
+  })
+  .strict();
+const discussionMetadataSchema = z
+  .object({
+    round: z.number().int().min(2).max(MAX_IDEA_DISCUSSION_ROUNDS),
+    parentMessageId: idSchema,
+    rootMessageId: idSchema,
+    changes: z.array(text(300)).min(1).max(6),
+    verdictChanges: z
+      .array(
+        z
+          .object({
+            id: z.enum(expertIds),
+            before: verdictSchema,
+            after: verdictSchema,
+          })
+          .strict(),
+      )
+      .max(4),
+  })
+  .strict();
 export const ideaReviewReportSchema = z
   .object({
     version: z.literal(1),
     model: modelSchema,
     experts: z.array(z.object({ id: z.enum(expertIds), ...expertShape }).strict()).length(4),
     synthesis: ideaReviewSynthesisSchema,
+    discussion: discussionMetadataSchema.optional(),
   })
   .strict()
   .refine((report) => new Set(report.experts.map((expert) => expert.id)).size === 4);
@@ -62,6 +90,121 @@ export interface IdeaReviewContext {
   message: string;
   language?: Language;
   signal?: AbortSignal;
+  discussion?: IdeaDiscussionContext;
+}
+export interface IdeaDiscussionContext {
+  originalIdea: string;
+  clarifications: string[];
+  clarificationTurns: { text: string; questions: string[] }[];
+  previousReport: IdeaReviewReport;
+  round: number;
+  parentMessageId: string;
+  rootMessageId: string;
+}
+const invalidDiscussion = () =>
+  new AppError(
+    409,
+    'AI_DISCUSSION_STALE',
+    'Эта оценка больше не является последней в обсуждении. Откройте новую оценку и продолжите от неё.',
+  );
+const discussionLimit = () =>
+  new AppError(
+    400,
+    'AI_DISCUSSION_LIMIT',
+    'Обсуждение достигло предела объёма или числа уточнений. Начните новую идею с кратким описанием текущего варианта.',
+  );
+
+/** Resolve only server-saved explicit lineage; unrelated user/chat text is never included. */
+export function buildIdeaDiscussion(
+  conversation: Conversation,
+  reviewMessageId: string,
+  message: string,
+): IdeaDiscussionContext {
+  const messages = conversation.messages;
+  const selectedIndex = messages.findIndex(
+    (item) => item.id === reviewMessageId && item.role === 'assistant' && item.ideaReview,
+  );
+  if (selectedIndex < 1) throw invalidDiscussion();
+  const selected = messages[selectedIndex];
+  const previousReport = ideaReviewReportSchema.safeParse(selected.ideaReview);
+  if (!previousReport.success) throw invalidDiscussion();
+  const rootMessageId = previousReport.data.discussion?.rootMessageId ?? selected.id;
+  if (
+    messages
+      .slice(selectedIndex + 1)
+      .some(
+        (item) =>
+          item.ideaReview &&
+          (item.ideaReview.discussion?.rootMessageId ?? item.id) === rootMessageId,
+      )
+  )
+    throw invalidDiscussion();
+  const clarifications: string[] = [message];
+  const clarificationTurns = [
+    { text: message, questions: previousReport.data.synthesis.questions },
+  ];
+  let cursor = selectedIndex;
+  let expectedRound = selected.ideaReview!.discussion?.round ?? 1;
+  const round = expectedRound + 1;
+  if (round > MAX_IDEA_DISCUSSION_ROUNDS) throw discussionLimit();
+  while (messages[cursor].ideaReview?.discussion) {
+    const current = messages[cursor];
+    if (!ideaReviewReportSchema.safeParse(current.ideaReview).success) throw invalidDiscussion();
+    const metadata = current.ideaReview!.discussion!;
+    const previous = messages[cursor - 1];
+    if (
+      metadata.rootMessageId !== rootMessageId ||
+      metadata.round !== expectedRound ||
+      !previous ||
+      previous.role !== 'user'
+    )
+      throw invalidDiscussion();
+    clarifications.unshift(previous.text);
+    const parentIndex = messages.findIndex(
+      (item, index) =>
+        index < cursor &&
+        item.id === metadata.parentMessageId &&
+        item.role === 'assistant' &&
+        item.ideaReview,
+    );
+    if (parentIndex < 1) throw invalidDiscussion();
+    const parentReport = ideaReviewReportSchema.safeParse(messages[parentIndex].ideaReview);
+    if (!parentReport.success) throw invalidDiscussion();
+    clarificationTurns.unshift({
+      text: previous.text,
+      questions: parentReport.data.synthesis.questions,
+    });
+    cursor = parentIndex;
+    expectedRound--;
+  }
+  const root = messages[cursor];
+  const original = messages[cursor - 1];
+  if (root.id !== rootMessageId || expectedRound !== 1 || original?.role !== 'user')
+    throw invalidDiscussion();
+  if (!ideaReviewReportSchema.safeParse(root.ideaReview).success) throw invalidDiscussion();
+  if (
+    original.text.length + clarifications.reduce((sum, item) => sum + item.length, 0) >
+    MAX_IDEA_DISCUSSION_CHARS
+  )
+    throw discussionLimit();
+  if (
+    JSON.stringify({
+      originalIdea: original.text,
+      clarificationTurns,
+      previousSynthesis: previousReport.data.synthesis,
+      opinions: previousReport.data.experts,
+    }).length > MAX_IDEA_REVIEW_PROMPT_CHARS
+  )
+    throw discussionLimit();
+  return {
+    originalIdea: original.text,
+    clarifications,
+    clarificationTurns,
+    previousReport: previousReport.data,
+    round,
+    parentMessageId: selected.id,
+    rootMessageId,
+  };
 }
 export type IdeaReviewRunner = (context: IdeaReviewContext) => Promise<IdeaReviewReport>;
 export interface IdeaGenerationRequest {
@@ -120,7 +263,10 @@ function defaultGenerator(context: IdeaReviewContext): IdeaReviewGenerator {
       output:
         request.stage === 'expert'
           ? Output.object({ schema: ideaExpertOpinionSchema, name: 'RitmIdeaOpinion' })
-          : Output.object({ schema: ideaReviewSynthesisSchema, name: 'RitmIdeaSynthesis' }),
+          : Output.object({
+              schema: context.discussion ? discussionSynthesisSchema : ideaReviewSynthesisSchema,
+              name: 'RitmIdeaSynthesis',
+            }),
       stopWhen: isStepCount(1),
       maxRetries: 0,
       maxOutputTokens: request.stage === 'expert' ? 1400 : 1800,
@@ -166,6 +312,22 @@ export async function runIdeaReview(
       'AI_SECRET_INPUT',
       'Не отправляйте API-ключ в тексте идеи. Настройте его в разделе «Настройки».',
     );
+  const discussion = context.discussion;
+  if (discussion) {
+    if (
+      discussion.round > MAX_IDEA_DISCUSSION_ROUNDS ||
+      discussion.originalIdea.length +
+        discussion.clarifications.reduce((sum, item) => sum + item.length, 0) >
+        MAX_IDEA_DISCUSSION_CHARS
+    )
+      throw discussionLimit();
+    if (containsSecret(discussion, context.apiKey))
+      throw new AppError(
+        400,
+        'AI_SECRET_INPUT',
+        'Не отправляйте API-ключ в тексте идеи. Настройте его в разделе «Настройки».',
+      );
+  }
   const model = modelSchema.safeParse(context.model);
   if (!model.success)
     throw new AppError(400, 'AI_MODEL', 'Проверьте название модели в настройках ИИ.');
@@ -225,8 +387,16 @@ export async function runIdeaReview(
       const output = await generateBounded({
         stage: 'expert',
         expertId: id,
-        instructions: `${localizedCommon}\n${roleInstructions[id]}\nЗаполни summary, strengths, concerns, assumptions и firstTest. firstTest — самый небольшой тест с наблюдаемым результатом для своей роли. Ты не видишь других оценок; не придумывай их.${languageInstruction}`,
-        prompt: serializePrompt({ idea: message.data }),
+        instructions: `${localizedCommon}\n${roleInstructions[id]}\nЗаполни summary, strengths, concerns, assumptions и firstTest. firstTest — самый небольшой тест с наблюдаемым результатом для своей роли. Ты не видишь других оценок; не придумывай их.${discussion ? '\nЭто следующий раунд обсуждения. originalIdea — исходная идея. clarificationTurns — по порядку текст уточнения пользователя и общие вопросы, на которые он отвечал; номера ответа сопоставляй с questions соответствующего шага. previousOpinion — только твоя собственная последняя оценка. Пересмотри своё мнение по существу новых данных, сохраняй нерешённые сомнения. Можно изменить verdict или оставить его; не меняй мнение ради согласия с пользователем. Утверждения пользователя о проверках не являются независимым подтверждением. Чужих мнений нет.' : ''}${languageInstruction}`,
+        prompt: serializePrompt(
+          discussion
+            ? {
+                originalIdea: discussion.originalIdea,
+                clarificationTurns: discussion.clarificationTurns,
+                previousOpinion: discussion.previousReport.experts.find((item) => item.id === id),
+              }
+            : { idea: message.data },
+        ),
       });
       signal.throwIfAborted();
       const parsed = ideaExpertOpinionSchema.safeParse(output);
@@ -253,14 +423,57 @@ export async function runIdeaReview(
     const output = await generateBounded({
       stage: 'synthesis',
       instructions:
-        synthesisInstructions.replace(commonInstructions, localizedCommon) + languageInstruction,
-      prompt: serializePrompt({ idea: message.data, opinions: experts }),
+        synthesisInstructions.replace(commonInstructions, localizedCommon) +
+        (discussion
+          ? '\nЭто повторная оценка уточнённой идеи. previousSynthesis — прежний общий вывод, opinions — четыре новые оценки. Заполни changes: кратко перечисли, что новые данные изменили в выводах и какие сомнения остались. Если мнение не изменилось, объясни почему. Не утверждай подтверждённость заявлений пользователя. В questions спрашивай только оставшееся неизвестным, не повторяй уже полученные ответы.'
+          : '') +
+        languageInstruction,
+      prompt: serializePrompt(
+        discussion
+          ? {
+              originalIdea: discussion.originalIdea,
+              clarificationTurns: discussion.clarificationTurns,
+              previousSynthesis: discussion.previousReport.synthesis,
+              opinions: experts,
+            }
+          : { idea: message.data, opinions: experts },
+      ),
     });
     signal.throwIfAborted();
-    const synthesis = ideaReviewSynthesisSchema.safeParse(output);
+    const synthesis = (
+      discussion ? discussionSynthesisSchema : ideaReviewSynthesisSchema
+    ).safeParse(output);
     if (!synthesis.success || containsSecret(synthesis.data, context.apiKey))
       throw invalidResponse();
-    return { version: 1, model: model.data, experts, synthesis: synthesis.data };
+    const synthesisData = ideaReviewSynthesisSchema.parse(
+      discussion
+        ? Object.fromEntries(Object.entries(synthesis.data).filter(([key]) => key !== 'changes'))
+        : synthesis.data,
+    );
+    return {
+      version: 1,
+      model: model.data,
+      experts,
+      synthesis: synthesisData,
+      ...(discussion
+        ? {
+            discussion: {
+              round: discussion.round,
+              parentMessageId: discussion.parentMessageId,
+              rootMessageId: discussion.rootMessageId,
+              changes: (synthesis.data as z.infer<typeof discussionSynthesisSchema>).changes,
+              verdictChanges: experts.flatMap((expert) => {
+                const before = discussion.previousReport.experts.find(
+                  (item) => item.id === expert.id,
+                )!.verdict;
+                return before === expert.verdict
+                  ? []
+                  : [{ id: expert.id, before, after: expert.verdict }];
+              }),
+            },
+          }
+        : {}),
+    };
   } catch (error) {
     // SDK exceptions can contain credentials and the complete personal idea.
     // Only known sanitized errors may leave this boundary; never log raw errors.
@@ -305,9 +518,27 @@ export async function runIdeaReview(
 }
 
 /** Validate injected runners again before saving their output to the shared history. */
-export function ideaReviewMessage(report: IdeaReviewReport): ChatMessage {
+export function ideaReviewMessage(
+  report: IdeaReviewReport,
+  discussion?: IdeaDiscussionContext,
+): ChatMessage {
   const parsed = ideaReviewReportSchema.safeParse(report);
   if (!parsed.success || containsSecret(parsed.data)) throw invalidResponse();
+  if (!!parsed.data.discussion !== !!discussion) throw invalidResponse();
+  if (discussion) {
+    parsed.data.discussion = {
+      round: discussion.round,
+      rootMessageId: discussion.rootMessageId,
+      parentMessageId: discussion.parentMessageId,
+      changes: parsed.data.discussion!.changes,
+      verdictChanges: parsed.data.experts.flatMap((expert) => {
+        const before = discussion.previousReport.experts.find(
+          (item) => item.id === expert.id,
+        )!.verdict;
+        return before === expert.verdict ? [] : [{ id: expert.id, before, after: expert.verdict }];
+      }),
+    };
+  }
   return {
     id: randomUUID(),
     role: 'assistant',

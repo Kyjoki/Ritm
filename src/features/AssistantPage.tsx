@@ -32,6 +32,11 @@ import type {
 import { formatTime } from '../lib/date';
 import { ApiError } from '../lib/api';
 import { IdeaReviewPanel, ideaExpertRoles, ideaReviewCopyText } from './IdeaReviewPanel';
+import {
+  acceptedDiscussionReview,
+  discussionIdeaText,
+  latestDiscussionReview,
+} from './idea-discussion';
 import '../styles/assistant.css';
 
 export interface AssistantPageProps {
@@ -44,6 +49,7 @@ export interface AssistantPageProps {
     message: string,
     requestId: string,
     mode?: ChatMode,
+    reviewMessageId?: string,
   ) => Promise<Conversation>;
   onApply: (conversationId: string, messageId: string, proposalIds: string[]) => Promise<void>;
   onReject: (conversationId: string, messageId: string, proposalIds: string[]) => Promise<void>;
@@ -58,9 +64,11 @@ interface SendRequest {
   message: string;
   requestId: string;
   mode: ChatMode;
+  reviewMessageId?: string;
   status: 'sending' | 'failed';
   error?: string;
   retryAt?: number;
+  retryBlocked?: boolean;
 }
 
 interface ComposerFocusRequest {
@@ -83,6 +91,10 @@ const prompts = [
 function getErrorMessage(error: unknown, t: ReturnType<typeof useI18n>['t']): string {
   const code =
     typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
+  if (code === 'AI_DISCUSSION_STALE')
+    return t(
+      'Эта оценка уже обновилась или недоступна. Измените сообщение и выберите последнюю оценку идеи. Если её нет, обновите диалог.',
+    );
   if (/stale|schedule_changed/i.test(code))
     return t(
       'Задача уже изменилась. Попросите Ritm составить новый план, чтобы использовать актуальное расписание.',
@@ -461,6 +473,8 @@ export function AssistantPage({
   const [selectedId, setSelectedId] = useState<string | undefined>(() => conversations[0]?.id);
   const [draft, setDraft] = useState('');
   const [mode, setMode] = useState<ChatMode>('assistant');
+  const [reviewMessageId, setReviewMessageId] = useState<string | undefined>();
+  const [discussionQuestionsOpen, setDiscussionQuestionsOpen] = useState(false);
   const [request, setRequest] = useState<SendRequest | null>(null);
   const [retryClock, setRetryClock] = useState(() => Date.now());
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -484,6 +498,15 @@ export function AssistantPage({
   const focusAfterHistory = useRef(false);
   const conversation = conversations.find((item) => item.id === selectedId);
   const messages = conversation?.messages ?? [];
+  const selectedReview = messages.find(
+    (message) => message.id === reviewMessageId && message.ideaReview,
+  );
+  const currentDiscussionReview = reviewMessageId
+    ? latestDiscussionReview(messages, reviewMessageId)
+    : undefined;
+  const discussionStale = !!reviewMessageId && currentDiscussionReview?.id !== reviewMessageId;
+  const discussionRound = selectedReview?.ideaReview?.discussion?.round ?? 1;
+  const discussionLimit = !!selectedReview && discussionRound >= 8;
   const sending = request?.status === 'sending';
   const retryRemaining =
     request?.status === 'failed' && request.retryAt
@@ -593,6 +616,7 @@ export function AssistantPage({
     if (initialPrompt === consumedPrompt.current) return;
     consumedPrompt.current = initialPrompt;
     setMode('assistant');
+    setReviewMessageId(undefined);
     setDraft(initialPrompt);
     inputRef.current?.focus();
     onPromptConsumed?.();
@@ -602,12 +626,18 @@ export function AssistantPage({
     if (logRef.current && nearBottom.current) {
       logRef.current.scrollTo({ top: logRef.current.scrollHeight, behavior: 'instant' });
     }
-  }, [selectedId, messages.length, request?.status]);
+  }, [selectedId, messages.length, request?.status, reviewMessageId, discussionQuestionsOpen]);
 
   function chooseConversation(id: string) {
     if (sending) return;
     focusAfterHistory.current = historyOpen && window.matchMedia('(max-width: 800px)').matches;
     setSelectedId(id);
+    setReviewMessageId(undefined);
+    setDraft('');
+    const lastAnswer = [...(conversations.find((item) => item.id === id)?.messages ?? [])]
+      .reverse()
+      .find((message) => message.role === 'assistant');
+    setMode(lastAnswer?.ideaReview ? 'idea_review' : 'assistant');
     setHistoryOpen(false);
     setPageError('');
     nearBottom.current = true;
@@ -615,6 +645,26 @@ export function AssistantPage({
 
   function choosePrompt(prompt: string) {
     setDraft(prompt);
+    inputRef.current?.focus();
+  }
+
+  function discussReview(id: string, showQuestions = false) {
+    if (sending || creating || deleting || request?.status === 'failed') return;
+    const latest = latestDiscussionReview(messages, id);
+    if (!latest || (latest.ideaReview?.discussion?.round ?? 1) >= 8) return;
+    setReviewMessageId(latest.id);
+    nearBottom.current = true;
+    setDiscussionQuestionsOpen(showQuestions);
+    setMode('idea_review');
+    setPageError('');
+    inputRef.current?.focus();
+  }
+
+  function startNewIdea() {
+    if (sending || creating || deleting || request?.status === 'failed') return;
+    setReviewMessageId(undefined);
+    setDiscussionQuestionsOpen(false);
+    setMode('idea_review');
     inputRef.current?.focus();
   }
 
@@ -626,6 +676,7 @@ export function AssistantPage({
     try {
       const created = await onCreate();
       setSelectedId(created.id);
+      setReviewMessageId(undefined);
       setDraft('');
       setHistoryOpen(false);
       deleteTriggerRef.current = null;
@@ -651,7 +702,11 @@ export function AssistantPage({
         selectedId === deleteTarget.id
           ? orderedConversations.find((item) => item.id !== deleteTarget.id)?.id
           : selectedId;
-      if (selectedId === deleteTarget.id) setSelectedId(nextId);
+      if (selectedId === deleteTarget.id) {
+        setSelectedId(nextId);
+        setReviewMessageId(undefined);
+        setDraft('');
+      }
       if (request?.conversationId === deleteTarget.id) setRequest(null);
       deleteTriggerRef.current = null;
       setDeleteTarget(null);
@@ -673,7 +728,9 @@ export function AssistantPage({
       creating ||
       deleting ||
       (!retry && request?.status === 'failed') ||
-      (retry?.retryAt !== undefined && retry.retryAt > Date.now())
+      (!retry && mode === 'idea_review' && (discussionStale || discussionLimit)) ||
+      (retry?.retryAt !== undefined && retry.retryAt > Date.now()) ||
+      retry?.retryBlocked
     )
       return;
     const next: SendRequest = retry
@@ -683,6 +740,7 @@ export function AssistantPage({
           message: text,
           requestId: crypto.randomUUID(),
           mode,
+          reviewMessageId: mode === 'idea_review' ? reviewMessageId : undefined,
           status: 'sending',
         };
     composerFocusRequest.current =
@@ -700,10 +758,24 @@ export function AssistantPage({
     setPageError('');
     nearBottom.current = true;
     try {
-      const result = await onSend(next.conversationId, next.message, next.requestId, next.mode);
+      const result = await onSend(
+        next.conversationId,
+        next.message,
+        next.requestId,
+        next.mode,
+        next.reviewMessageId,
+      );
       if (composerFocusRequest.current?.requestId === next.requestId)
         composerFocusRequest.current.conversationId = result.id;
       setSelectedId(result.id);
+      if (next.mode === 'idea_review') {
+        const latestReview = acceptedDiscussionReview(
+          result.messages,
+          next.reviewMessageId,
+          !!retry,
+        );
+        setReviewMessageId(latestReview?.id);
+      } else setReviewMessageId(undefined);
       setRequest(null);
     } catch (error) {
       const now = Date.now();
@@ -712,6 +784,9 @@ export function AssistantPage({
         ...next,
         status: 'failed',
         error: getErrorMessage(error, t),
+        retryBlocked:
+          error instanceof ApiError &&
+          ['AI_DISCUSSION_STALE', 'AI_DISCUSSION_LIMIT'].includes(error.code ?? ''),
         retryAt:
           error instanceof ApiError && error.retryAfterSeconds
             ? now + error.retryAfterSeconds * 1000
@@ -787,7 +862,12 @@ export function AssistantPage({
           <button
             type="button"
             className="button button-secondary"
-            onClick={() => setSelectedId(request.conversationId)}
+            onClick={() => {
+              setSelectedId(request.conversationId);
+              setMode(request.mode);
+              setReviewMessageId(request.reviewMessageId);
+              setDraft('');
+            }}
           >
             {t('Вернуться к сообщению')}
           </button>
@@ -906,7 +986,10 @@ export function AssistantPage({
                 type="button"
                 aria-pressed={mode === 'assistant'}
                 disabled={sending || creating || deleting || request?.status === 'failed'}
-                onClick={() => setMode('assistant')}
+                onClick={() => {
+                  setMode('assistant');
+                  setReviewMessageId(undefined);
+                }}
               >
                 {t('Помощник')}
               </button>
@@ -1009,7 +1092,19 @@ export function AssistantPage({
                     {message.role === 'user' ? t('Вы') : 'Ritm'}
                   </span>
                   {message.ideaReview ? (
-                    <IdeaReviewPanel report={message.ideaReview} />
+                    <IdeaReviewPanel
+                      report={message.ideaReview}
+                      onDiscuss={(showQuestions) => discussReview(message.id, showQuestions)}
+                      discussionSelected={mode === 'idea_review' && reviewMessageId === message.id}
+                      discussionDisabled={
+                        sending ||
+                        creating ||
+                        deleting ||
+                        request?.status === 'failed' ||
+                        (message.ideaReview.discussion?.round ?? 1) >= 8
+                      }
+                      superseded={latestDiscussionReview(messages, message.id)?.id !== message.id}
+                    />
                   ) : (
                     <div className="assistant-message-text">{message.text}</div>
                   )}
@@ -1051,7 +1146,9 @@ export function AssistantPage({
                       <span className="assistant-orb assistant-orb--small" aria-hidden="true" />
                       <span>
                         {visibleRequest.mode === 'idea_review'
-                          ? t('Эксперты оценивают идею…')
+                          ? visibleRequest.reviewMessageId
+                            ? t('Эксперты пересматривают свои оценки…')
+                            : t('Эксперты оценивают идею…')
                           : t('Ritm изучает ваши планы')}
                         <span className="assistant-thinking-dots" aria-hidden="true">
                           <i />
@@ -1068,7 +1165,12 @@ export function AssistantPage({
                         <button
                           type="button"
                           className="button button-secondary"
-                          disabled={!aiStatus.configured || sending || retryRemaining > 0}
+                          disabled={
+                            !aiStatus.configured ||
+                            sending ||
+                            retryRemaining > 0 ||
+                            visibleRequest.retryBlocked
+                          }
                           onClick={() => void sendMessage(visibleRequest)}
                         >
                           <RefreshCw size={15} aria-hidden="true" />
@@ -1082,6 +1184,7 @@ export function AssistantPage({
                           onClick={() => {
                             setDraft(visibleRequest.message);
                             setMode(visibleRequest.mode);
+                            setReviewMessageId(visibleRequest.reviewMessageId);
                             setRequest(null);
                             inputRef.current?.focus();
                           }}
@@ -1101,6 +1204,89 @@ export function AssistantPage({
                     </div>
                   )}
                 </>
+              ) : null}
+            </div>
+            <div className="assistant-discussion-log-context">
+              {mode === 'idea_review' ? (
+                selectedReview ? (
+                  <section
+                    className="assistant-discussion-context"
+                    aria-label={t('Текущее обсуждение идеи')}
+                  >
+                    <div className="assistant-discussion-heading">
+                      <strong>
+                        {t('Обсуждение идеи · Оценка №{round}', { round: discussionRound })}
+                      </strong>
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        disabled={sending || creating || deleting || request?.status === 'failed'}
+                        onClick={startNewIdea}
+                      >
+                        <Plus size={14} aria-hidden="true" />
+                        {t('Новая идея')}
+                      </button>
+                    </div>
+                    <p className="assistant-discussion-idea">
+                      {discussionIdeaText(messages, selectedReview)}
+                    </p>
+                    {selectedReview.ideaReview?.synthesis.questions.length ? (
+                      <details
+                        className="assistant-discussion-questions"
+                        open={discussionQuestionsOpen}
+                        onToggle={(event) => setDiscussionQuestionsOpen(event.currentTarget.open)}
+                      >
+                        <summary>
+                          {t('Вопросы экспертов ({count})', {
+                            count: selectedReview.ideaReview.synthesis.questions.length,
+                          })}
+                        </summary>
+                        <ol>
+                          {selectedReview.ideaReview.synthesis.questions.map((question, index) => (
+                            <li key={index}>{question}</li>
+                          ))}
+                        </ol>
+                      </details>
+                    ) : null}
+                    <p id="assistant-discussion-hint">
+                      {discussionLimit
+                        ? t(
+                            'Достигнуто 8 оценок этой идеи. Начните новый разбор с её обновлённым описанием.',
+                          )
+                        : discussionStale
+                          ? t('Появилась новая оценка. Выберите её, чтобы продолжить обсуждение.')
+                          : t(
+                              'Ответьте на вопросы или уточните идею. Каждый эксперт пересмотрит своё мнение с учётом ваших ответов.',
+                            )}
+                    </p>
+                    {discussionStale && currentDiscussionReview ? (
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        disabled={sending || request?.status === 'failed'}
+                        onClick={() => discussReview(currentDiscussionReview.id)}
+                      >
+                        {t('Перейти к новой оценке')}
+                      </button>
+                    ) : null}
+                  </section>
+                ) : reviewMessageId ? (
+                  <div className="assistant-discussion-context" role="status">
+                    <p id="assistant-discussion-hint">
+                      {t(
+                        'Эта оценка больше недоступна. Выберите сохранённый разбор или начните новую идею.',
+                      )}
+                    </p>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      disabled={sending || request?.status === 'failed'}
+                      onClick={startNewIdea}
+                    >
+                      {t('Новая идея')}
+                    </button>
+                  </div>
+                ) : null
               ) : null}
             </div>
           </div>
@@ -1138,7 +1324,9 @@ export function AssistantPage({
             <form className="assistant-composer" onSubmit={submit}>
               <label htmlFor="assistant-message-input" className="assistant-sr-only">
                 {mode === 'idea_review'
-                  ? t('Идея для разбора экспертами')
+                  ? reviewMessageId
+                    ? t('Ответ экспертам или уточнение идеи')
+                    : t('Идея для разбора экспертами')
                   : t('Сообщение ИИ-помощнику')}
               </label>
               <textarea
@@ -1149,14 +1337,18 @@ export function AssistantPage({
                 rows={2}
                 maxLength={6000}
                 placeholder={
-                  mode === 'idea_review' ? t('Опишите вашу идею…') : t('Спросите о своих планах…')
+                  mode === 'idea_review'
+                    ? reviewMessageId
+                      ? t('Ответьте на вопросы или уточните идею…')
+                      : t('Опишите вашу идею…')
+                    : t('Спросите о своих планах…')
                 }
                 disabled={sending}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={handleComposerKey}
                 aria-describedby={
                   mode === 'idea_review'
-                    ? 'assistant-idea-hint assistant-composer-hint'
+                    ? `assistant-idea-hint assistant-composer-hint${reviewMessageId ? ' assistant-discussion-hint' : ''}`
                     : 'assistant-composer-hint'
                 }
               />
@@ -1169,6 +1361,7 @@ export function AssistantPage({
                   !aiStatus.configured ||
                   creating ||
                   deleting ||
+                  (mode === 'idea_review' && (discussionStale || discussionLimit)) ||
                   request?.status === 'failed'
                 }
                 aria-label={sending ? t('Отправка сообщения') : t('Отправить сообщение')}

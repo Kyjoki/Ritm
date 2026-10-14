@@ -146,8 +146,20 @@ export const api = {
     }),
   createConversation: () => request<Conversation>('/conversations', 'POST', {}),
   deleteConversation: (id: string) => request(`/conversations/${encodeURIComponent(id)}`, 'DELETE'),
-  chat: (conversationId: string | undefined, message: string, requestId: string, mode?: ChatMode) =>
-    request<Conversation>('/chat', 'POST', { conversationId, message, requestId, mode }),
+  chat: (
+    conversationId: string | undefined,
+    message: string,
+    requestId: string,
+    mode?: ChatMode,
+    reviewMessageId?: string,
+  ) =>
+    request<Conversation>('/chat', 'POST', {
+      conversationId,
+      message,
+      requestId,
+      mode,
+      ...(reviewMessageId ? { reviewMessageId } : {}),
+    }),
   proposals: (
     action: 'apply' | 'undo',
     conversationId: string,

@@ -86,6 +86,13 @@ export interface IdeaReviewReport {
   model: string;
   experts: IdeaExpertReview[];
   synthesis: IdeaReviewSynthesis;
+  discussion?: {
+    round: number;
+    parentMessageId: string;
+    rootMessageId: string;
+    changes: string[];
+    verdictChanges: { id: IdeaExpertId; before: IdeaVerdict; after: IdeaVerdict }[];
+  };
 }
 export interface Conversation {
   id: string;
