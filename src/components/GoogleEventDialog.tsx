@@ -1,3 +1,4 @@
+import { useI18n } from '../lib/i18n';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { CalendarDays, LoaderCircle, Trash2 } from 'lucide-react';
 import type { GoogleCalendarEvent, GoogleEventInput } from '../../shared/types';
@@ -32,6 +33,7 @@ export function GoogleEventDialog({
   extendedColorsEnabled?: boolean;
   onEnableExtendedColors?: () => Promise<void>;
 }) {
+  const { t, language, locale } = useI18n();
   const [value, setValue] = useState<GoogleEventInput>(() =>
     event
       ? { ...googleEventDraft(event, timeZone), colorId: event.colorId ?? null }
@@ -74,9 +76,9 @@ export function GoogleEventDialog({
   }, [confirmDelete, busy]);
   const endpoint = (value: GoogleCalendarEvent['start']) =>
     value.date
-      ? formatDate(value.date, { day: 'numeric', month: 'long', year: 'numeric' })
+      ? formatDate(value.date, { day: 'numeric', month: 'long', year: 'numeric' }, language)
       : value.dateTime
-        ? `${new Intl.DateTimeFormat('ru-RU', {
+        ? `${new Intl.DateTimeFormat(locale, {
             timeZone,
             day: 'numeric',
             month: 'long',
@@ -84,7 +86,7 @@ export function GoogleEventDialog({
           }).format(
             new Date(value.dateTime),
           )}, ${formatTime(minutesInZone(timeZone, new Date(value.dateTime)))}`
-        : 'Не указано';
+        : t('Не указано');
   const set = <K extends keyof GoogleEventInput>(key: K, next: GoogleEventInput[K]) => {
     setValue((old) => ({ ...old, [key]: next }));
     setError('');
@@ -123,7 +125,7 @@ export function GoogleEventDialog({
       (!input.time ||
         Number(input.time.slice(0, 2)) * 60 + Number(input.time.slice(3)) + input.duration > 1440)
     ) {
-      setError('Выбери время и длительность, чтобы событие завершилось до полуночи.');
+      setError(t('Выбери время и длительность, чтобы событие завершилось до полуночи.'));
       return;
     }
     if (!attempt.current || !retryLocked)
@@ -136,10 +138,12 @@ export function GoogleEventDialog({
     } catch (failure) {
       setError(
         event && failure instanceof ApiError && failure.status === 409
-          ? `${failure.message} Закрой форму и обнови календарь перед повторным изменением.`
+          ? t('{p0} Закрой форму и обнови календарь перед повторным изменением.', {
+              p0: failure.message,
+            })
           : failure instanceof Error
             ? failure.message
-            : 'Не удалось сохранить запись.',
+            : t('Не удалось сохранить запись.'),
       );
       setRetryLocked(
         !event && (!(failure instanceof ApiError) || failure.status === 0 || failure.status >= 500),
@@ -164,10 +168,10 @@ export function GoogleEventDialog({
       setDeleteConflict(conflict);
       setError(
         conflict
-          ? `${failure.message} Закройте форму и обновите календарь перед удалением.`
+          ? t('{p0} Закройте форму и обновите календарь перед удалением.', { p0: failure.message })
           : failure instanceof Error
             ? failure.message
-            : 'Не удалось удалить запись. Попробуйте ещё раз.',
+            : t('Не удалось удалить запись. Попробуйте ещё раз.'),
       );
     } finally {
       actionLock.current = false;
@@ -176,7 +180,7 @@ export function GoogleEventDialog({
   }
   return (
     <Dialog
-      title={readOnly ? 'Запись' : event ? 'Редактировать запись' : 'Новая запись'}
+      title={readOnly ? t('Запись') : event ? t('Редактировать запись') : t('Новая запись')}
       onClose={onClose}
       busy={busy}
       className="task-dialog"
@@ -184,13 +188,16 @@ export function GoogleEventDialog({
       <p className="info-note">
         <CalendarDays size={14} aria-hidden="true" />{' '}
         {readOnly
-          ? (event?.readOnlyReason ??
-            'Эта запись доступна для просмотра. Измени её в Google Calendar.')
-          : 'Изменения синхронизируются с Google Calendar.'}
+          ? event?.readOnlyReason
+            ? t(event.readOnlyReason)
+            : t('Эта запись доступна для просмотра. Измени её в Google Calendar.')
+          : t('Изменения синхронизируются с Google Calendar.')}
       </p>
       {!readOnly && event?.recurring ? (
         <p className="field-hint">
-          Изменится только этот экземпляр повторяющейся записи. Остальные события серии сохранятся.
+          {t(
+            'Изменится только этот экземпляр повторяющейся записи. Остальные события серии сохранятся.',
+          )}
         </p>
       ) : null}
       {readOnly && event ? (
@@ -201,10 +208,10 @@ export function GoogleEventDialog({
             {endpoint(
               event.allDay && event.end.date ? { date: addDays(event.end.date, -1) } : event.end,
             )}
-            {event.allDay ? ' · весь день, даты включительно' : ''}
+            {event.allDay ? t(' · весь день, даты включительно') : ''}
           </p>
           {event.description ? <p>{event.description}</p> : null}
-          <p>{event.busy ? 'Занимает время в расписании' : 'Не блокирует свободное время'}</p>
+          <p>{event.busy ? t('Занимает время в расписании') : t('Не блокирует свободное время')}</p>
         </div>
       ) : null}
       <form onSubmit={submit}>
@@ -214,7 +221,7 @@ export function GoogleEventDialog({
             disabled={busy || retryLocked || confirmDelete || deleteConflict}
           >
             <label className="field">
-              Название
+              {t('Название')}
               <input
                 autoFocus={!readOnly}
                 required
@@ -224,7 +231,7 @@ export function GoogleEventDialog({
               />
             </label>
             <label className="field">
-              Описание
+              {t('Описание')}
               <textarea
                 rows={3}
                 maxLength={4000}
@@ -233,7 +240,7 @@ export function GoogleEventDialog({
               />
             </label>
             <label className="field">
-              Дата
+              {t('Дата')}
               <input
                 type="date"
                 required
@@ -247,12 +254,12 @@ export function GoogleEventDialog({
                 checked={value.allDay}
                 onChange={(e) => set('allDay', e.target.checked)}
               />
-              Весь день
+              {t('Весь день')}
             </label>
             {!value.allDay ? (
               <div className="form-grid">
                 <label className="field">
-                  Время
+                  {t('Время')}
                   <input
                     type="time"
                     required
@@ -261,7 +268,7 @@ export function GoogleEventDialog({
                   />
                 </label>
                 <label className="field">
-                  Длительность, мин
+                  {t('Длительность, мин')}
                   <input
                     type="number"
                     required
@@ -278,8 +285,9 @@ export function GoogleEventDialog({
             {!extendedColorsEnabled && onEnableExtendedColors ? (
               <div className="calendar-color-permission">
                 <p className="field-hint">
-                  Для новых оттенков Google попросит разрешение на управление календарями. С ним
-                  цвет будет одинаковым в Ritm и Google.
+                  {t(
+                    'Для новых оттенков Google попросит разрешение на управление календарями. С ним цвет будет одинаковым в Ritm и Google.',
+                  )}
                 </p>
                 <button
                   className="text-button"
@@ -295,7 +303,7 @@ export function GoogleEventDialog({
                       setError(
                         failure instanceof Error
                           ? failure.message
-                          : 'Не удалось открыть разрешение Google.',
+                          : t('Не удалось открыть разрешение Google.'),
                       );
                     } finally {
                       actionLock.current = false;
@@ -303,28 +311,28 @@ export function GoogleEventDialog({
                     }
                   }}
                 >
-                  Разрешить новые цвета
+                  {t('Разрешить новые цвета')}
                 </button>
                 {needsColorPermission ? (
                   <p className="field-hint" role="status">
-                    Чтобы сохранить этот оттенок, сначала разреши новые цвета в Google.
+                    {t('Чтобы сохранить этот оттенок, сначала разреши новые цвета в Google.')}
                   </p>
                 ) : null}
               </div>
             ) : null}
             {!event ? (
               <label className="field">
-                Повторение
+                {t('Повторение')}
                 <select
                   value={value.repeat ?? 'none'}
                   onChange={(change) =>
                     set('repeat', change.target.value as GoogleEventInput['repeat'])
                   }
                 >
-                  <option value="none">Не повторять</option>
-                  <option value="daily">Каждый день</option>
-                  <option value="weekly">Каждую неделю</option>
-                  <option value="monthly">Каждый месяц</option>
+                  <option value="none">{t('Не повторять')}</option>
+                  <option value="daily">{t('Каждый день')}</option>
+                  <option value="weekly">{t('Каждую неделю')}</option>
+                  <option value="monthly">{t('Каждый месяц')}</option>
                 </select>
               </label>
             ) : null}
@@ -337,21 +345,25 @@ export function GoogleEventDialog({
         ) : null}
         {retryLocked ? (
           <p className="field-hint">
-            Ответ не получен. Событие уже могло сохраниться. Повтори сохранение с теми же данными —
-            новая копия не создастся. Если закроешь форму, проверь календарь перед созданием новой
-            записи.
+            {t(
+              'Ответ не получен. Событие уже могло сохраниться. Повтори сохранение с теми же данными — новая копия не создастся. Если закроешь форму, проверь календарь перед созданием новой записи.',
+            )}
           </p>
         ) : null}
         {confirmDelete && event ? (
-          <div className="delete-confirm" role="group" aria-label="Подтверждение удаления записи">
-            <strong>Удалить эту запись из календаря?</strong>
+          <div
+            className="delete-confirm"
+            role="group"
+            aria-label={t('Подтверждение удаления записи')}
+          >
+            <strong>{t('Удалить эту запись из календаря?')}</strong>
             <p>«{event.title}»</p>
             <p>
               {event.recurring
-                ? 'Только эта встреча. Остальные события серии сохранятся.'
-                : 'Удаление синхронизируется с Google Calendar.'}
+                ? t('Только эта встреча. Остальные события серии сохранятся.')
+                : t('Удаление синхронизируется с Google Calendar.')}
             </p>
-            {busy ? <p role="status">Удаляем запись…</p> : null}
+            {busy ? <p role="status">{t('Удаляем запись…')}</p> : null}
             <div className="button-row">
               <button
                 ref={keepButtonRef}
@@ -360,7 +372,7 @@ export function GoogleEventDialog({
                 disabled={busy}
                 onClick={() => setConfirmDelete(false)}
               >
-                Оставить
+                {t('Оставить')}
               </button>
               <button
                 className="button button-danger"
@@ -369,7 +381,7 @@ export function GoogleEventDialog({
                 onClick={() => void remove()}
               >
                 {busy ? <LoaderCircle className="spinning" size={16} aria-hidden="true" /> : null}
-                {busy ? 'Удаляем…' : 'Удалить запись'}
+                {busy ? t('Удаляем…') : t('Удалить запись')}
               </button>
             </div>
           </div>
@@ -385,7 +397,7 @@ export function GoogleEventDialog({
                   disabled={busy}
                   onClick={onClose}
                 >
-                  {readOnly ? 'Закрыть' : 'Отмена'}
+                  {readOnly ? t('Закрыть') : t('Отмена')}
                 </button>
                 {!readOnly ? (
                   <button
@@ -401,12 +413,12 @@ export function GoogleEventDialog({
                   >
                     {busy ? <LoaderCircle className="spinning" size={16} /> : null}
                     {busy
-                      ? 'Сохраняем…'
+                      ? t('Сохраняем…')
                       : retryLocked
-                        ? 'Повторить сохранение'
+                        ? t('Повторить сохранение')
                         : event
-                          ? 'Сохранить изменения'
-                          : 'Создать запись'}
+                          ? t('Сохранить изменения')
+                          : t('Создать запись')}
                   </button>
                 ) : null}
               </div>
@@ -424,7 +436,7 @@ export function GoogleEventDialog({
                   }}
                 >
                   <Trash2 size={16} aria-hidden="true" />
-                  Удалить запись
+                  {t('Удалить запись')}
                 </button>
               </div>
             ) : null}

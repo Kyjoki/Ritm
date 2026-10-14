@@ -1,3 +1,4 @@
+import type { Language } from '../lib/i18n';
 import type { Task } from '../../shared/types';
 
 export interface TaskOccurrence {
@@ -17,7 +18,8 @@ export function isTimedOccurrence(
 
 const DAY = 86_400_000;
 const recordPlural = new Intl.PluralRules('ru-RU');
-export function recordWord(count: number): string {
+export function recordWord(count: number, language: Language = 'ru'): string {
+  if (language === 'en') return count === 1 ? 'entry' : 'entries';
   const category = recordPlural.select(count);
   return category === 'one' ? 'запись' : category === 'few' ? 'записи' : 'записей';
 }
@@ -60,8 +62,15 @@ export function minuteTime(minute: number): string {
   return `${String(Math.floor(normalized / 60)).padStart(2, '0')}:${String(normalized % 60).padStart(2, '0')}`;
 }
 
-export function formatDate(date: string, options: Intl.DateTimeFormatOptions): string {
-  return new Intl.DateTimeFormat('ru-RU', { ...options, timeZone: 'UTC' }).format(parseDate(date));
+export function formatDate(
+  date: string,
+  options: Intl.DateTimeFormatOptions,
+  language: Language = 'ru',
+): string {
+  return new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'ru-RU', {
+    ...options,
+    timeZone: 'UTC',
+  }).format(parseDate(date));
 }
 
 export function taskOccursOn(task: Task, date: string): boolean {
@@ -74,7 +83,11 @@ export function taskOccursOn(task: Task, date: string): boolean {
   return origin.getUTCDate() === target.getUTCDate();
 }
 
-export function getDayOccurrences(tasks: Task[], date: string): TaskOccurrence[] {
+export function getDayOccurrences(
+  tasks: Task[],
+  date: string,
+  language: Language = 'ru',
+): TaskOccurrence[] {
   const result: TaskOccurrence[] = [];
   for (const task of tasks) {
     if (taskOccursOn(task, date)) {
@@ -110,7 +123,7 @@ export function getDayOccurrences(tasks: Task[], date: string): TaskOccurrence[]
   }
   return result.sort(
     (a, b) =>
-      (a.start ?? 1441) - (b.start ?? 1441) || a.task.title.localeCompare(b.task.title, 'ru'),
+      (a.start ?? 1441) - (b.start ?? 1441) || a.task.title.localeCompare(b.task.title, language),
   );
 }
 
@@ -145,8 +158,13 @@ export function layoutOccurrences(occurrences: TaskOccurrence[]): PositionedOccu
   return result;
 }
 
-export function durationLabel(duration: number): string {
+export function durationLabel(duration: number, language: Language = 'ru'): string {
   const hours = Math.floor(duration / 60);
   const minutes = duration % 60;
-  return [hours ? `${hours} ч` : '', minutes ? `${minutes} мин` : ''].filter(Boolean).join(' ');
+  return [
+    hours ? `${hours} ${language === 'en' ? 'h' : 'ч'}` : '',
+    minutes ? `${minutes} ${language === 'en' ? 'min' : 'мин'}` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 }

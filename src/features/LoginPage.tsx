@@ -1,3 +1,4 @@
+import { useI18n } from '../lib/i18n';
 import { useLayoutEffect, useState, type FormEvent } from 'react';
 import {
   ArrowLeft,
@@ -26,6 +27,7 @@ interface Props {
 }
 
 export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
+  const { t } = useI18n();
   const [login, setLogin] = useState(''),
     [password, setPassword] = useState('');
   const [visible, setVisible] = useState(false),
@@ -48,7 +50,7 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
     if (busy) return;
     setError('');
     if (preview) {
-      setError('Неверный логин или пароль. Проверь данные и попробуй ещё раз.');
+      setError(t('Неверный логин или пароль. Проверь данные и попробуй ещё раз.'));
       return;
     }
     setBusy(true);
@@ -56,7 +58,9 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
       await onSubmit({ login: login.trim(), password });
       setPassword('');
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Не удалось войти. Попробуй ещё раз.');
+      setError(
+        failure instanceof Error ? t(failure.message) : t('Не удалось войти. Попробуй ещё раз.'),
+      );
     } finally {
       setBusy(false);
     }
@@ -71,11 +75,11 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
           Ritm
         </span>
         <div className="signin-top-actions">
-          {preview ? <span className="signin-preview-label">Дизайн входа</span> : null}
+          {preview ? <span className="signin-preview-label">{t('Дизайн входа')}</span> : null}
           <button
             type="button"
             className="signin-theme"
-            aria-label={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+            aria-label={theme === 'dark' ? t('Светлая тема') : t('Тёмная тема')}
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
           >
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
@@ -83,20 +87,21 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
         </div>
       </header>
       <main className="signin-layout">
-        <section className="signin-visual" aria-label="Личное пространство Ritm">
+        <section className="signin-visual" aria-label={t('Личное пространство Ritm')}>
           <div className="signin-visual-copy">
             <span className="signin-eyebrow">
               <span />
-              ЛИЧНОЕ ПРОСТРАНСТВО
+              {t('ЛИЧНОЕ ПРОСТРАНСТВО')}
             </span>
             <h1>
-              Войди в свой
+              {t('Войди в свой')}
               <br />
-              <span>ритм.</span>
+              <span>{t('ритм.')}</span>
             </h1>
             <p>
-              Место, где планы обретают ясность,
-              <br />а у важного появляется своё время.
+              {t('Место, где планы обретают ясность,')}
+              <br />
+              {t('а у важного появляется своё время.')}
             </p>
           </div>
           <div className="signin-art" aria-hidden="true">
@@ -121,14 +126,14 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
           <div className="signin-focus-card" aria-hidden="true">
             <div className="signin-focus-label">
               <Sparkles size={13} />
-              <span>ТВОЙ СЛЕДУЮЩИЙ ШАГ</span>
+              <span>{t('ТВОЙ СЛЕДУЮЩИЙ ШАГ')}</span>
               <span className="signin-focus-dot" />
             </div>
             <div className="signin-focus-body">
               <span className="signin-time">11:00</span>
               <div>
-                <strong>Подготовить презентацию</strong>
-                <small>Работа · 1 час</small>
+                <strong>{t('Подготовить презентацию')}</strong>
+                <small>{t('Работа · 1 час')}</small>
               </div>
               <ArrowRight size={17} />
             </div>
@@ -140,7 +145,7 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
             </div>
           </div>
           <div className="signin-visual-footer">
-            <span>Меньше шума. Больше ясности.</span>
+            <span>{t('Меньше шума. Больше ясности.')}</span>
             <span className="signin-footer-star">✦</span>
           </div>
         </section>
@@ -149,13 +154,13 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
             <div className="signin-welcome-icon">
               <LockKeyhole size={22} />
             </div>
-            <span className="signin-form-eyebrow">ТВОЙ ДЕНЬ НАЧИНАЕТСЯ ЗДЕСЬ</span>
-            <h2 id="signin-title">С возвращением</h2>
-            <p className="signin-subtitle">Войди, чтобы продолжить в своём темпе.</p>
+            <span className="signin-form-eyebrow">{t('ТВОЙ ДЕНЬ НАЧИНАЕТСЯ ЗДЕСЬ')}</span>
+            <h2 id="signin-title">{t('С возвращением')}</h2>
+            <p className="signin-subtitle">{t('Войди, чтобы продолжить в своём темпе.')}</p>
             <form className="signin-form" onSubmit={submit} aria-busy={busy}>
               <fieldset disabled={busy}>
                 <label className="signin-field" htmlFor="ritm-login">
-                  Логин
+                  {t('Логин')}
                 </label>
                 <div className="signin-input-wrap">
                   <UserRound size={18} aria-hidden="true" />
@@ -172,13 +177,13 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
                     }}
                     required
                     maxLength={100}
-                    placeholder="Твой логин"
+                    placeholder={t('Твой логин')}
                     aria-invalid={Boolean(error)}
                     aria-describedby={error ? 'signin-error' : undefined}
                   />
                 </div>
                 <label className="signin-field" htmlFor="ritm-password">
-                  Пароль
+                  {t('Пароль')}
                 </label>
                 <div className="signin-input-wrap">
                   <LockKeyhole size={18} aria-hidden="true" />
@@ -197,14 +202,14 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
                     onBlur={() => setCapsLock(false)}
                     required
                     maxLength={512}
-                    placeholder="Введи пароль"
+                    placeholder={t('Введи пароль')}
                     aria-invalid={Boolean(error)}
                     aria-describedby={error ? 'signin-error' : capsLock ? 'signin-caps' : undefined}
                   />
                   <button
                     className="signin-password-toggle"
                     type="button"
-                    aria-label={visible ? 'Скрыть пароль' : 'Показать пароль'}
+                    aria-label={visible ? t('Скрыть пароль') : t('Показать пароль')}
                     aria-pressed={visible}
                     onClick={() => setVisible(!visible)}
                   >
@@ -213,12 +218,12 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
                 </div>
                 {capsLock ? (
                   <p className="signin-caps" id="signin-caps" role="status">
-                    Включён Caps Lock
+                    {t('Включён Caps Lock')}
                   </p>
                 ) : null}
                 {error ? (
                   <p id="signin-error" className="signin-error" role="alert">
-                    {error}
+                    {t(error)}
                   </p>
                 ) : null}
                 <button
@@ -229,11 +234,11 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
                   {busy ? (
                     <>
                       <LoaderCircle size={18} className="spinning" />
-                      Входим…
+                      {t('Входим…')}
                     </>
                   ) : (
                     <>
-                      Войти в Ritm
+                      {t('Войти в Ritm')}
                       <ArrowRight size={18} />
                     </>
                   )}
@@ -244,23 +249,23 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
               <span className="signin-note-line" />
               <span>
                 <LockKeyhole size={12} />
-                Личный аккаунт
+                {t('Личный аккаунт')}
               </span>
               <span className="signin-note-line" />
             </div>
-            <p className="signin-form-bottom">Твои планы уже ждут тебя.</p>
+            <p className="signin-form-bottom">{t('Твои планы уже ждут тебя.')}</p>
             {preview && onBack ? (
               <button className="signin-back" type="button" onClick={onBack}>
                 <ArrowLeft size={15} />
-                Вернуться в приложение
+                {t('Вернуться в приложение')}
               </button>
             ) : null}
           </div>
         </section>
       </main>
       <footer className="signin-page-footer">
-        <span>Ritm · В своём ритме</span>
-        <span>Твоё время для важного</span>
+        <span>{t('Ritm · В своём ритме')}</span>
+        <span>{t('Твоё время для важного')}</span>
       </footer>
     </div>
   );

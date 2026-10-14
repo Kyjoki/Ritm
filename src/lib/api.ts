@@ -15,6 +15,8 @@ import type {
   Task,
   TaskInput,
 } from '../../shared/types';
+import { getLanguage, translate } from './i18n';
+const tr = (source: string) => translate(getLanguage(), source);
 
 export class ApiError extends Error {
   constructor(
@@ -38,14 +40,16 @@ async function request<T>(
     response = await fetch(`/api${path}`, {
       method,
       credentials: 'same-origin',
-      headers:
-        method === 'GET' || method === 'HEAD' ? undefined : { 'Content-Type': 'application/json' },
+      headers: {
+        'Accept-Language': getLanguage(),
+        ...(method === 'GET' || method === 'HEAD' ? {} : { 'Content-Type': 'application/json' }),
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal,
     });
   } catch {
     throw new ApiError(
-      'Не удалось связаться с сервером. Проверьте соединение и попробуйте снова.',
+      tr('Не удалось связаться с сервером. Проверьте соединение и попробуйте снова.'),
       0,
       'NETWORK',
     );
@@ -63,7 +67,7 @@ async function request<T>(
     if (data?.code === 'AUTH_REQUIRED' && typeof window !== 'undefined')
       window.dispatchEvent(new Event('ritm:auth-required'));
     throw new ApiError(
-      data?.error ?? 'Не удалось выполнить действие.',
+      data?.error ?? tr('Не удалось выполнить действие.'),
       response.status,
       data?.code,
       response.status === 429 && Number.isInteger(delay) && delay! > 0 && delay! <= 3600
@@ -73,7 +77,7 @@ async function request<T>(
   }
   if (data === null || typeof data !== 'object')
     throw new ApiError(
-      'Сервер вернул некорректный ответ. Обновите страницу или проверьте настройку сервера.',
+      tr('Сервер вернул некорректный ответ. Обновите страницу или проверьте настройку сервера.'),
       502,
       'INVALID_RESPONSE',
     );
@@ -119,7 +123,7 @@ export const api = {
   createGoogleEvent: (event: GoogleEventInput, requestId: string) =>
     request<GoogleCalendarEvent>('/integrations/google/events', 'POST', { event, requestId }),
   completeGoogleTask: (event: GoogleCalendarEvent, completed: boolean) => {
-    if (!event.googleTask) throw new Error('Подключи Google Tasks, чтобы отмечать выполнение.');
+    if (!event.googleTask) throw new Error(tr('Подключи Google Tasks, чтобы отмечать выполнение.'));
     return request<{ event: GoogleCalendarEvent }>(
       `/integrations/google/events/${encodeURIComponent(event.id)}/task`,
       'PATCH',

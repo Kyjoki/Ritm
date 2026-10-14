@@ -1,3 +1,4 @@
+import { useI18n, translate, type Language } from '../lib/i18n';
 import {
   CalendarDays,
   Clock3,
@@ -22,10 +23,14 @@ const dateOptions: Intl.DateTimeFormatOptions = {
   year: 'numeric',
 };
 
-function instantLabel(value: string | undefined, timeZone: string): string {
+function instantLabel(value: string | undefined, timeZone: string, language: Language): string {
+  const t = (source: string) => translate(language, source);
   const instant = new Date(value ?? '');
-  if (!Number.isFinite(instant.getTime())) return 'Время не указано';
-  const date = new Intl.DateTimeFormat('ru-RU', { ...dateOptions, timeZone }).format(instant);
+  if (!Number.isFinite(instant.getTime())) return t('Время не указано');
+  const date = new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'ru-RU', {
+    ...dateOptions,
+    timeZone,
+  }).format(instant);
   const time = new Intl.DateTimeFormat('en-US', {
     timeZone,
     hour: 'numeric',
@@ -36,27 +41,38 @@ function instantLabel(value: string | undefined, timeZone: string): string {
   return `${date}, ${time}`;
 }
 
-function scheduleLabel(entry: CalendarOccurrence, date: string, timeZone: string): string {
+function scheduleLabel(
+  entry: CalendarOccurrence,
+  date: string,
+  timeZone: string,
+  language: Language,
+): string {
+  const t = (source: string, values?: Record<string, string | number>) =>
+    translate(language, source, values);
   if (entry.source === 'google') {
     const { event } = entry;
     if (event.allDay) {
-      if (!event.start.date || !event.end.date) return 'Дата не указана';
+      if (!event.start.date || !event.end.date) return t('Дата не указана');
       // Google ends all-day events at the beginning of the following day.
       const lastDate = addDays(event.end.date, -1);
-      const first = formatDate(event.start.date, dateOptions);
+      const first = formatDate(event.start.date, dateOptions, language);
       return event.start.date === lastDate
-        ? `${first} · Весь день`
-        : `${first} — ${formatDate(lastDate, dateOptions)} · Весь день, даты включительно`;
+        ? t('{p0} · Весь день', { p0: first })
+        : t('{p0} — {p1} · Весь день, даты включительно', {
+            p0: first,
+            p1: formatDate(lastDate, dateOptions, language),
+          });
     }
-    return `${instantLabel(event.start.dateTime, timeZone)} → ${instantLabel(event.end.dateTime, timeZone)}`;
+    return `${instantLabel(event.start.dateTime, timeZone, language)} → ${instantLabel(event.end.dateTime, timeZone, language)}`;
   }
   // An occurrence can be a continuation after midnight: display its original interval.
   const firstDate = entry.continued ? addDays(entry.date || date, -1) : entry.date || date;
-  if (!entry.task.time) return `${formatDate(firstDate, dateOptions)} · Без времени`;
+  if (!entry.task.time)
+    return t('{p0} · Без времени', { p0: formatDate(firstDate, dateOptions, language) });
   const start = timeMinutes(entry.task.time);
   const end = start + entry.task.duration;
   const lastDate = addDays(firstDate, Math.floor(end / 1440));
-  return `${formatDate(firstDate, dateOptions)}, ${formatTime(start)} → ${formatDate(lastDate, dateOptions)}, ${formatTime(end)}`;
+  return `${formatDate(firstDate, dateOptions, language)}, ${formatTime(start)} → ${formatDate(lastDate, dateOptions, language)}, ${formatTime(end)}`;
 }
 
 export function EventPreviewDialog({
@@ -78,6 +94,7 @@ export function EventPreviewDialog({
   taskBusy?: boolean;
   onEnableGoogleTasks?: () => Promise<void>;
 }) {
+  const { t, language } = useI18n();
   const [actionError, setActionError] = useState('');
   const [connecting, setConnecting] = useState(false);
   const googleTaskEvent = entry?.source === 'google' && entry.event.taskLink ? entry.event : null;
@@ -88,7 +105,7 @@ export function EventPreviewDialog({
       await onGoogleTaskToggle(googleTaskEvent);
     } catch (error) {
       setActionError(
-        error instanceof Error ? error.message : 'Не удалось сохранить выполнение в Google.',
+        error instanceof Error ? error.message : t('Не удалось сохранить выполнение в Google.'),
       );
     }
   }
@@ -101,17 +118,19 @@ export function EventPreviewDialog({
     entry?.source === 'google' ? entry.event.recurring : entry?.task.repeat !== 'none';
   const readOnlyReason = googleTaskEvent
     ? googleTaskEvent.googleTask
-      ? 'Статус выполнения синхронизируется с Google Tasks. Дату и время можно изменить в Google Calendar.'
+      ? t(
+          'Статус выполнения синхронизируется с Google Tasks. Дату и время можно изменить в Google Calendar.',
+        )
       : (googleTaskEvent.taskUnavailableReason ??
-        'Подключи Google Tasks, чтобы отмечать выполнение.')
+        t('Подключи Google Tasks, чтобы отмечать выполнение.'))
     : entry?.source === 'google' && !editable
       ? (entry.event.readOnlyReason ??
-        'Эта запись доступна только для просмотра. Измени её в Google Calendar.')
+        t('Эта запись доступна только для просмотра. Измени её в Google Calendar.'))
       : null;
 
   return (
     <Dialog
-      title={googleTaskEvent?.googleTask ? 'Задача Google Tasks' : 'Просмотр события'}
+      title={googleTaskEvent?.googleTask ? t('Задача Google Tasks') : t('Просмотр события')}
       onClose={onClose}
       busy={taskBusy || connecting}
       className="event-preview-dialog"
@@ -126,17 +145,17 @@ export function EventPreviewDialog({
           </div>
           <div className="event-preview-detail">
             <CalendarDays size={19} aria-hidden="true" />
-            <p>{scheduleLabel(entry, date, timeZone)}</p>
+            <p>{scheduleLabel(entry, date, timeZone, language)}</p>
           </div>
           {!entry.allDay && (entry.source === 'google' || entry.task.time) ? (
             <div className="event-preview-detail event-preview-muted">
               <Clock3 size={18} aria-hidden="true" />
-              <p>Часовой пояс: {timeZone}</p>
+              <p>{t('Часовой пояс: {zone}', { zone: timeZone })}</p>
             </div>
           ) : null}
           {description ? (
-            <section className="event-preview-description" aria-label="Описание события">
-              <h4>Описание</h4>
+            <section className="event-preview-description" aria-label={t('Описание события')}>
+              <h4>{t('Описание')}</h4>
               <p>{description}</p>
             </section>
           ) : null}
@@ -146,16 +165,23 @@ export function EventPreviewDialog({
               <p>
                 {entry.source === 'google'
                   ? editable
-                    ? 'Повторяющееся событие. При редактировании изменится только эта запись.'
-                    : 'Повторяющееся событие.'
-                  : `Повторение: ${{ daily: 'ежедневно', weekly: 'еженедельно', monthly: 'ежемесячно', none: 'нет' }[entry.task.repeat]}.`}
+                    ? t('Повторяющееся событие. При редактировании изменится только эта запись.')
+                    : t('Повторяющееся событие.')
+                  : t('Повторение: {p0}.', {
+                      p0: {
+                        daily: t('ежедневно'),
+                        weekly: t('еженедельно'),
+                        monthly: t('ежемесячно'),
+                        none: t('нет'),
+                      }[entry.task.repeat],
+                    })}
               </p>
             </div>
           ) : null}
           {readOnlyReason ? (
             <div className="event-preview-detail event-preview-readonly">
               <LockKeyhole size={18} aria-hidden="true" />
-              <p>{readOnlyReason}</p>
+              <p>{t(readOnlyReason)}</p>
             </div>
           ) : null}
           {actionError ? (
@@ -176,19 +202,19 @@ export function EventPreviewDialog({
                     setActionError(
                       error instanceof Error
                         ? error.message
-                        : 'Не удалось подключить Google Tasks.',
+                        : t('Не удалось подключить Google Tasks.'),
                     ),
                   )
                   .finally(() => setConnecting(false));
               }}
             >
-              Подключить Google Tasks
+              {t('Подключить Google Tasks')}
             </button>
           ) : null}
         </div>
       ) : (
         <p className="event-preview-unavailable" role="status">
-          Запись обновлена или удалена. Закрой просмотр и выбери событие в календаре ещё раз.
+          {t('Запись обновлена или удалена. Закрой просмотр и выбери событие в календаре ещё раз.')}
         </p>
       )}
       <div className="dialog-actions event-preview-actions">
@@ -198,12 +224,12 @@ export function EventPreviewDialog({
           onClick={onClose}
           disabled={taskBusy || connecting}
         >
-          Закрыть
+          {t('Закрыть')}
         </button>
         {entry && editable ? (
           <button type="button" className="button button-primary" onClick={() => onEdit(entry)}>
             <Pencil size={16} aria-hidden="true" />
-            Редактировать
+            {t('Редактировать')}
           </button>
         ) : null}
         {googleTaskEvent?.googleTask && onGoogleTaskToggle ? (
@@ -219,8 +245,8 @@ export function EventPreviewDialog({
               <Check size={16} aria-hidden="true" />
             )}
             {googleTaskEvent.googleTask.status === 'completed'
-              ? 'Вернуть в задачи'
-              : 'Выполнить задачу'}
+              ? t('Вернуть в задачи')
+              : t('Выполнить задачу')}
           </button>
         ) : null}
       </div>

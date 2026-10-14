@@ -17,8 +17,7 @@ import { calendarOccurrences, type CalendarOccurrence } from '../features/google
 import { durationText, formatDate, formatTime, greeting } from '../lib/date';
 import { calendarEntryStyle } from '../lib/calendar-colors';
 import { Orb } from './Orb';
-
-const taskPlural = new Intl.PluralRules('ru-RU');
+import { useI18n } from '../lib/i18n';
 
 interface Props {
   tasks: Task[];
@@ -62,6 +61,8 @@ export function DashboardPage({
   onAI,
   onCalendar,
 }: Props) {
+  const { language, locale, t: tr } = useI18n();
+  const taskPlural = new Intl.PluralRules(locale);
   const [quickTitle, setQuickTitle] = useState('');
   const [quickBusy, setQuickBusy] = useState(false);
   const [quickError, setQuickError] = useState('');
@@ -71,13 +72,18 @@ export function DashboardPage({
   const occurrences = getDayOccurrences(
     tasks.filter((task) => task.kind === 'task'),
     today,
+    language,
   );
   const todayEntries = occurrences.sort(
     (a, b) => Number(a.completed) - Number(b.completed) || (a.start ?? 1441) - (b.start ?? 1441),
   );
-  const combined = calendarOccurrences(tasks, googleEvents, today, settings.timeZone).filter(
-    (entry) => entry.source === 'google' || entry.task.calendarEntry !== false,
-  );
+  const combined = calendarOccurrences(
+    tasks,
+    googleEvents,
+    today,
+    settings.timeZone,
+    language,
+  ).filter((entry) => entry.source === 'google' || entry.task.calendarEntry !== false);
   const googleTodos = combined
     .filter(
       (entry) => entry.source === 'google' && (entry.event.taskLink || entry.event.googleTask),
@@ -94,7 +100,7 @@ export function DashboardPage({
   const unknownGoogleCount = googleTodos.filter(
     (entry) => entry.source === 'google' && !entry.event.googleTask,
   ).length;
-  const taskCountLabel = `${todoCount} ${taskPlural.select(todoCount) === 'one' ? 'задача' : taskPlural.select(todoCount) === 'few' ? 'задачи' : 'задач'}`;
+  const taskCountLabel = `${todoCount} ${tr(taskPlural.select(todoCount) === 'one' ? tr('задача') : taskPlural.select(todoCount) === 'few' ? tr('задачи') : tr('задач'))}`;
   const waitingForPlan = googlePending && !combined.length;
   const timed = combined.filter(
     (o): o is CalendarOccurrence & { start: number; end: number } =>
@@ -138,7 +144,7 @@ export function DashboardPage({
       await onQuickAdd(title);
       setQuickTitle('');
     } catch (error) {
-      setQuickError(error instanceof Error ? error.message : 'Не удалось добавить задачу.');
+      setQuickError(error instanceof Error ? error.message : tr('Не удалось добавить задачу.'));
     } finally {
       quickInFlight.current = false;
       setQuickBusy(false);
@@ -150,7 +156,7 @@ export function DashboardPage({
       await onGoogleTaskToggle(event);
     } catch (error) {
       setGoogleTaskError(
-        error instanceof Error ? error.message : 'Не удалось изменить статус задачи Google.',
+        error instanceof Error ? error.message : tr('Не удалось изменить статус задачи Google.'),
       );
     }
   };
@@ -162,7 +168,7 @@ export function DashboardPage({
       await onEnableGoogleTasks();
     } catch (error) {
       setGoogleTaskError(
-        error instanceof Error ? error.message : 'Не удалось открыть подключение Google Tasks.',
+        error instanceof Error ? error.message : tr('Не удалось открыть подключение Google Tasks.'),
       );
     } finally {
       setPermissionBusy(false);
@@ -173,20 +179,21 @@ export function DashboardPage({
       <header className="page-heading">
         <div>
           <p className="page-eyebrow">
-            {formatDate(today, { weekday: 'long', day: 'numeric', month: 'long' })} · Мой день
+            {formatDate(today, { weekday: 'long', day: 'numeric', month: 'long' }, language)} ·{' '}
+            {tr('Мой день')}
           </p>
           <h1 className="gradient-title" id="dashboard-title">
-            {greeting(Math.floor(now / 60))}, {greetingName}
+            {tr(greeting(Math.floor(now / 60)))}, {greetingName}
           </h1>
-          <p className="page-description">Ваши дела. Ваш темп. Один ясный план.</p>
+          <p className="page-description">{tr('Ваши дела. Ваш темп. Один ясный план.')}</p>
         </div>
         <button className="button button-primary" onClick={() => onCreate({ date: today })}>
-          <CirclePlus size={18} /> Добавить запись
+          <CirclePlus size={18} /> {tr('Добавить запись')}{' '}
         </button>
       </header>
       <div className="overview-grid">
         <div className="panel progress-card">
-          <span className="card-eyebrow">Твой прогресс</span>
+          <span className="card-eyebrow">{tr('Твой прогресс')}</span>
           <div className="progress-body">
             <div
               className="progress-ring"
@@ -205,32 +212,32 @@ export function DashboardPage({
                   : googlePending && !todoCount
                     ? '…'
                     : todoCount
-                      ? `${completed} из ${todoCount}`
+                      ? tr('{completed} из {total}', { completed, total: todoCount })
                       : googleUncertain
                         ? '—'
-                        : 'Нет задач'}
+                        : tr('Нет задач')}
               </strong>
               <span>
                 {unknownGoogleCount
-                  ? 'Статус Google Tasks не проверен'
+                  ? tr('Статус Google Tasks не проверен')
                   : googlePending && !todoCount
-                    ? 'Загружаем задачи'
+                    ? tr('Загружаем задачи')
                     : todoCount
-                      ? 'задач выполнено'
+                      ? tr('задач выполнено')
                       : googleUncertain
-                        ? 'Данные Google не проверены'
-                        : 'на сегодня'}
+                        ? tr('Данные Google не проверены')
+                        : tr('на сегодня')}
               </span>
             </div>
           </div>
           <p className="card-footnote">
             {googleUncertain
-              ? 'Уточняем расписание Google'
+              ? tr('Уточняем расписание Google')
               : free
-                ? `Свободно ${durationText(free)}`
+                ? tr('Свободно {duration}', { duration: durationText(free, language) })
                 : now >= workEnd
-                  ? 'Рабочий день завершён'
-                  : 'Всё время уже в плане'}
+                  ? tr('Рабочий день завершён')
+                  : tr('Всё время уже в плане')}
           </p>
         </div>
         <button
@@ -239,61 +246,64 @@ export function DashboardPage({
         >
           <span className="card-eyebrow">
             {upcoming && upcoming.start <= now
-              ? 'Сейчас в плане'
+              ? tr('Сейчас в плане')
               : googleUncertain
-                ? 'Ближайшая известная запись'
-                : 'Ближайшее событие'}
+                ? tr('Ближайшая известная запись')
+                : tr('Ближайшее событие')}
           </span>
           <strong className="focus-time">
             {upcoming
               ? formatTime(upcoming.start)
               : waitingForPlan
-                ? 'Проверяем…'
+                ? tr('Проверяем…')
                 : googleUncertain
-                  ? 'Нет данных'
-                  : 'Без спешки'}
+                  ? tr('Нет данных')
+                  : tr('Без спешки')}
           </strong>
           <span className="focus-name">
             {upcoming?.title ??
-              (googleUncertain ? 'События Google пока не загружены' : 'Впереди свободное время')}
+              (googleUncertain
+                ? tr('События Google пока не загружены')
+                : tr('Впереди свободное время'))}
           </span>
           <span className="focus-meta">
             {upcoming
-              ? `${durationText(upcoming.duration)} · ${upcoming.source === 'google' ? 'Google Calendar' : upcoming.task.kind === 'event' ? 'Событие' : 'Задача'}`
-              : 'Открыть календарь'}
+              ? `${durationText(upcoming.duration, language)} · ${upcoming.source === 'google' ? 'Google Calendar' : upcoming.task.kind === 'event' ? tr('Событие') : tr('Задача')}`
+              : tr('Открыть календарь')}
             <ArrowUpRight size={16} />
           </span>
         </button>
         <div className="panel ai-overview">
           <div className="ai-overview-head">
             <Orb />
-            <strong>Помощник Ritm</strong>
+            <strong>{tr('Помощник Ritm')}</strong>
           </div>
           <p>
-            Поможет собрать удобный план
-            <br className="desktop-break" /> и оставить время для себя.
+            {tr('Поможет собрать удобный план')} <br className="desktop-break" />{' '}
+            {tr('и оставить время для себя.')}{' '}
           </p>
           <button
             className="button button-secondary"
-            onClick={() => onAI('Спланируй мой день с учётом приоритетов и свободного времени.')}
+            onClick={() =>
+              onAI(tr('Спланируй мой день с учётом приоритетов и свободного времени.'))
+            }
           >
-            <Sparkles size={15} /> Спланировать день
-            <ArrowUpRight size={15} />
+            <Sparkles size={15} /> {tr('Спланировать день')} <ArrowUpRight size={15} />
           </button>
         </div>
       </div>
       <div className="day-work-grid">
         <div className="panel tasks-panel">
           <div className="section-heading">
-            <h2>Задачи на сегодня</h2>
+            <h2>{tr('Задачи на сегодня')}</h2>
             <span>
               {unknownGoogleCount
                 ? taskCountLabel
                 : googlePending && !todoCount
-                  ? 'Загружаем…'
+                  ? tr('Загружаем…')
                   : googleUncertain && !todoCount
-                    ? 'Не проверено'
-                    : `${completed} из ${todoCount}`}
+                    ? tr('Не проверено')
+                    : tr('{completed} из {total}', { completed, total: todoCount })}
             </span>
           </div>
           {todoCount ? (
@@ -313,8 +323,8 @@ export function DashboardPage({
                       disabled={busy}
                       aria-label={
                         event.googleTask
-                          ? `${isComplete ? 'Вернуть в задачи' : 'Выполнить'}: ${entry.title}`
-                          : `Открыть задачу: ${entry.title}`
+                          ? `${isComplete ? tr('Вернуть в задачи') : tr('Выполнить')}: ${entry.title}`
+                          : tr('Открыть задачу: {title}', { title: entry.title })
                       }
                       aria-pressed={event.googleTask ? isComplete : undefined}
                     >
@@ -332,15 +342,15 @@ export function DashboardPage({
                       <span className="task-title">{entry.title}</span>
                       <span className="task-meta">
                         Google Tasks
-                        {isComplete ? ' · Выполнено' : ''}
+                        {isComplete ? tr(' · Выполнено') : ''}
                         {!event.googleTask
-                          ? ` · ${event.taskUnavailableReason ?? 'Статус пока недоступен'}`
+                          ? ` · ${event.taskUnavailableReason ?? tr('Статус пока недоступен')}`
                           : ''}
                       </span>
                     </button>
                     <time>
                       {entry.start === null
-                        ? 'Весь день'
+                        ? tr('Весь день')
                         : formatTime(entry.start, { compact: true })}
                     </time>
                   </div>
@@ -354,7 +364,7 @@ export function DashboardPage({
                       className="check-target"
                       onClick={() => onToggle(task, o.date, o.completed)}
                       disabled={busyIds.has(task.id)}
-                      aria-label={`${o.completed ? 'Вернуть в план' : 'Выполнить'}: ${task.title}`}
+                      aria-label={`${o.completed ? tr('Вернуть в план') : tr('Выполнить')}: ${task.title}`}
                       aria-pressed={o.completed}
                     >
                       {busyIds.has(task.id) ? (
@@ -368,14 +378,14 @@ export function DashboardPage({
                     <button className="task-copy" onClick={() => onEdit(task)}>
                       <span className="task-title">{task.title}</span>
                       <span className="task-meta">
-                        {task.calendarEntry === false ? 'Личная задача' : 'Задача'}
+                        {task.calendarEntry === false ? tr('Личная задача') : tr('Задача')}
                         {task.priority === 'high'
-                          ? ' · Высокий приоритет'
+                          ? tr(' · Высокий приоритет')
                           : task.priority === 'low'
-                            ? ' · Низкий приоритет'
-                            : ' · Обычный приоритет'}
-                        {task.time ? ` · ${durationText(task.duration)}` : ''}
-                        {task.repeat !== 'none' ? ' · Повторяется' : ''}
+                            ? tr(' · Низкий приоритет')
+                            : tr(' · Обычный приоритет')}
+                        {task.time ? ` · ${durationText(task.duration, language)}` : ''}
+                        {task.repeat !== 'none' ? tr(' · Повторяется') : ''}
                       </span>
                     </button>
                     {o.start !== null ? <time>{formatTime(o.start)}</time> : null}
@@ -390,23 +400,27 @@ export function DashboardPage({
               ) : (
                 <CircleAlert size={28} aria-hidden="true" />
               )}
-              <h3>{googlePending ? 'Загружаем задачи' : 'Задачи Google пока недоступны'}</h3>
+              <h3>
+                {googlePending ? tr('Загружаем задачи') : tr('Задачи Google пока недоступны')}
+              </h3>
               <p>
                 {googlePending
-                  ? 'Проверяем задачи на сегодня.'
-                  : 'Личные задачи можно добавить ниже. Подключение Google проверь в календаре.'}
+                  ? tr('Проверяем задачи на сегодня.')
+                  : tr(
+                      'Личные задачи можно добавить ниже. Подключение Google проверь в календаре.',
+                    )}
               </p>
               {!googlePending ? (
                 <button className="text-button" onClick={onCalendar}>
-                  Открыть календарь
+                  {tr('Открыть календарь')}{' '}
                 </button>
               ) : null}
             </div>
           ) : (
             <div className="empty-inline">
               <CheckCheck size={32} />
-              <h3>Пока нет задач на сегодня</h3>
-              <p>Добавьте первое дело ниже. Встречи и занятия — в расписании справа.</p>
+              <h3>{tr('Пока нет задач на сегодня')}</h3>
+              <p>{tr('Добавьте первое дело ниже. Встречи и занятия — в расписании справа.')}</p>
             </div>
           )}
           {tasksPermissionMessage ? (
@@ -423,7 +437,7 @@ export function DashboardPage({
                   ) : (
                     <CheckCheck size={15} />
                   )}
-                  Подключить Google Tasks
+                  {tr('Подключить Google Tasks')}{' '}
                 </button>
               ) : null}
             </div>
@@ -436,16 +450,16 @@ export function DashboardPage({
           <form
             className="dashboard-quick-add"
             onSubmit={quickAdd}
-            aria-label="Быстрое добавление задачи"
+            aria-label={tr('Быстрое добавление задачи')}
           >
             <label className="visually-hidden" htmlFor="dashboard-quick-title">
-              Новая задача на сегодня
+              {tr('Новая задача на сегодня')}{' '}
             </label>
             <input
               id="dashboard-quick-title"
               value={quickTitle}
               onChange={(event) => setQuickTitle(event.target.value)}
-              placeholder="Что нужно сделать сегодня?"
+              placeholder={tr('Что нужно сделать сегодня?')}
               maxLength={160}
               autoComplete="off"
               disabled={quickBusy}
@@ -454,18 +468,18 @@ export function DashboardPage({
               className="button button-secondary"
               type="submit"
               disabled={quickBusy || !quickTitle.trim()}
-              aria-label="Добавить задачу на сегодня"
+              aria-label={tr('Добавить задачу на сегодня')}
             >
               {quickBusy ? (
                 <LoaderCircle size={18} className="spinning" />
               ) : (
                 <CirclePlus size={18} />
               )}
-              <span>Добавить</span>
+              <span>{tr('Добавить')}</span>
             </button>
           </form>
           <p className="field-hint dashboard-quick-hint">
-            Только в списке задач — без записи в календаре.
+            {tr('Только в списке задач — без записи в календаре.')}{' '}
           </p>
           {quickError ? (
             <p className="error-note" role="alert">
@@ -475,10 +489,9 @@ export function DashboardPage({
         </div>
         <div className="panel schedule-panel">
           <div className="section-heading">
-            <h2>Расписание</h2>
+            <h2>{tr('Расписание')}</h2>
             <button className="text-button" onClick={onCalendar}>
-              Сегодня
-              <ArrowUpRight size={13} />
+              {tr('Сегодня')} <ArrowUpRight size={13} />
             </button>
           </div>
           {schedule.length ? (
@@ -494,27 +507,27 @@ export function DashboardPage({
                     <strong>{o.title}</strong>
                     <span>
                       {o.completed
-                        ? 'Завершено'
-                        : `${o.startLabel ?? formatTime(o.start)}–${o.endLabel ?? formatTime(o.end)}${o.end === 1440 ? ' · следующий день' : ''}${o.source === 'google' ? ' · Google' : ''}`}
+                        ? tr('Завершено')
+                        : `${o.startLabel ?? formatTime(o.start)}–${o.endLabel ?? formatTime(o.end)}${o.end === 1440 ? tr(' · следующий день') : ''}${o.source === 'google' ? ' · Google' : ''}`}
                     </span>
                   </button>
                 </div>
               ))}
               {schedule.length > 6 ? (
                 <button className="text-button" onClick={onCalendar}>
-                  Ещё {schedule.length - 6} в календаре
+                  {tr('Ещё {count} в календаре', { count: schedule.length - 6 })}
                 </button>
               ) : null}
             </div>
           ) : (
             <div className="empty-schedule">
               <CalendarDays size={26} />
-              <p>{googleUncertain ? 'Уточняем расписание' : 'Свободное расписание'}</p>
+              <p>{googleUncertain ? tr('Уточняем расписание') : tr('Свободное расписание')}</p>
               <button
                 className="text-button"
-                onClick={() => onAI('Найди свободное время в моём расписании на сегодня.')}
+                onClick={() => onAI(tr('Найди свободное время в моём расписании на сегодня.'))}
               >
-                <Clock3 size={14} /> Найти удобное время
+                <Clock3 size={14} /> {tr('Найти удобное время')}{' '}
               </button>
             </div>
           )}
@@ -522,17 +535,19 @@ export function DashboardPage({
             .filter((o) => o.allDay)
             .map((o) => (
               <button key={o.key} className="text-button" onClick={() => openEntry(o)}>
-                Весь день · {o.title} · Google
+                {tr('Весь день')} · {o.title} · Google
               </button>
             ))}
           {googleUncertain ? (
             <p className="field-hint" role="status">
-              Google Calendar ещё не проверен. Открой календарь, чтобы обновить события.
+              {tr(
+                'Google Calendar ещё не проверен. Открой календарь, чтобы обновить события.',
+              )}{' '}
             </p>
           ) : null}
           <div className="backlog-grid">
-            <Backlog title="Без даты" tasks={undated} onEdit={onEdit} />
-            <Backlog title="Просрочено" tasks={overdue} onEdit={onEdit} />
+            <Backlog title={tr('Без даты')} tasks={undated} onEdit={onEdit} />
+            <Backlog title={tr('Просрочено')} tasks={overdue} onEdit={onEdit} />
           </div>
         </div>
       </div>
@@ -540,20 +555,19 @@ export function DashboardPage({
         <span>
           <ListTodo size={14} />{' '}
           {completed === todoCount && todoCount
-            ? 'Все дела завершены. Можно выдохнуть.'
-            : 'Следуйте своему темпу — всё важное перед вами.'}
+            ? tr('Все дела завершены. Можно выдохнуть.')
+            : tr('Следуйте своему темпу — всё важное перед вами.')}
         </span>
         <button
           className="text-button"
-          onClick={() => onAI('Найди свободное время в моём расписании на сегодня.')}
+          onClick={() => onAI(tr('Найди свободное время в моём расписании на сегодня.'))}
         >
-          <Clock3 size={15} /> Найти свободное время
+          <Clock3 size={15} /> {tr('Найти свободное время')}{' '}
         </button>
       </div>
       <div className="ai-dock">
         <button onClick={() => onAI()}>
-          <Orb small /> Спросить ИИ
-          <Sparkles size={15} />
+          <Orb small /> {tr('Спросить ИИ')} <Sparkles size={15} />
         </button>
       </div>
     </section>
@@ -568,6 +582,7 @@ function Backlog({
   tasks: Task[];
   onEdit: (task: Task) => void;
 }) {
+  const { t: tr } = useI18n();
   const [expanded, setExpanded] = useState(false);
   return (
     <div>
@@ -582,7 +597,7 @@ function Backlog({
           </button>
         ))
       ) : (
-        <p>Всё в порядке</p>
+        <p>{tr('Всё в порядке')}</p>
       )}
       {tasks.length > 3 ? (
         <button
@@ -590,7 +605,7 @@ function Backlog({
           onClick={() => setExpanded(!expanded)}
           aria-expanded={expanded}
         >
-          {expanded ? 'Свернуть' : `Показать все ${tasks.length}`}
+          {expanded ? tr('Свернуть') : tr('Показать все {count}', { count: tasks.length })}
         </button>
       ) : null}
     </div>

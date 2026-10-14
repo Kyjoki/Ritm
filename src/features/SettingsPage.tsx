@@ -1,3 +1,4 @@
+import { useI18n } from '../lib/i18n';
 import { useEffect, useId, useRef, useState } from 'react';
 import {
   AlertCircle,
@@ -56,10 +57,10 @@ const TIME_ZONES = [
   ['UTC', 'Всемирное время · UTC'],
 ];
 
-function errorText(error: unknown): string {
+function errorText(error: unknown, t: ReturnType<typeof useI18n>['t']): string {
   return error instanceof Error
-    ? error.message
-    : 'Не удалось сохранить изменения. Попробуй ещё раз.';
+    ? t(error.message)
+    : t('Не удалось сохранить изменения. Попробуй ещё раз.');
 }
 
 export function SettingsPage({
@@ -76,6 +77,7 @@ export function SettingsPage({
   onDisconnectAI,
   onLogout,
 }: SettingsPageProps) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState<Settings>(settings);
   const [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saved' | 'error'>('idle');
@@ -108,10 +110,10 @@ export function SettingsPage({
         await onDisconnectGoogle();
         setGoogleStatusUnknown(false);
         setConfirmGoogleDisconnect(false);
-        setConnectionNotice('Google Calendar отключён от Ritm.');
+        setConnectionNotice(t('Google Calendar отключён от Ritm.'));
       } else await onConnectGoogle(extendedColors);
     } catch (error) {
-      setGoogleError(errorText(error));
+      setGoogleError(errorText(error, t));
     } finally {
       setGoogleBusy(false);
     }
@@ -125,7 +127,9 @@ export function SettingsPage({
       setGoogleStatusUnknown(false);
     } catch (failure) {
       setGoogleStatusUnknown(true);
-      setGoogleNotice(`${message} Статус подключения не обновился. Обновите страницу.`);
+      setGoogleNotice(
+        t('{message} Статус подключения не обновился. Обновите страницу.', { message: t(message) }),
+      );
       throw failure;
     }
   }
@@ -154,7 +158,7 @@ export function SettingsPage({
       .map((part) => part[0])
       .slice(0, 2)
       .join('')
-      .toUpperCase() || 'Р';
+      .toUpperCase() || t('Р');
 
   function update<K extends keyof Settings>(field: K, value: Settings[K]) {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -166,12 +170,12 @@ export function SettingsPage({
     event.preventDefault();
     if (!dirty || saving) return;
     if (!draft.displayName.trim()) {
-      setError('Введи имя, которым к тебе будет обращаться помощник.');
+      setError(t('Введи имя, которым к тебе будет обращаться помощник.'));
       setSaveState('error');
       return;
     }
     if (draft.workDayEnd <= draft.workDayStart) {
-      setError('Конец рабочего дня должен быть позже начала.');
+      setError(t('Конец рабочего дня должен быть позже начала.'));
       setSaveState('error');
       return;
     }
@@ -187,7 +191,7 @@ export function SettingsPage({
       setDraft(normalized);
       setSaveState('saved');
     } catch (failure) {
-      setError(errorText(failure));
+      setError(errorText(failure, t));
       setSaveState('error');
     } finally {
       setSaving(false);
@@ -201,7 +205,7 @@ export function SettingsPage({
       return;
     }
     if (!('Notification' in window)) {
-      setNotificationError('Этот браузер не поддерживает уведомления.');
+      setNotificationError(t('Этот браузер не поддерживает уведомления.'));
       return;
     }
     setPermissionBusy(true);
@@ -209,9 +213,9 @@ export function SettingsPage({
       const permission =
         Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
       if (permission === 'granted') update('notifications', true);
-      else setNotificationError('Разреши уведомления для Ritm в настройках браузера.');
+      else setNotificationError(t('Разреши уведомления для Ritm в настройках браузера.'));
     } catch {
-      setNotificationError('Не удалось запросить разрешение. Проверь настройки браузера.');
+      setNotificationError(t('Не удалось запросить разрешение. Проверь настройки браузера.'));
     } finally {
       setPermissionBusy(false);
     }
@@ -243,9 +247,9 @@ export function SettingsPage({
       await onConfigureAI(key.trim(), model.trim());
       setKey('');
       dialogRef.current?.close();
-      setConnectionNotice('Настройки OpenAI сохранены.');
+      setConnectionNotice(t('Настройки OpenAI сохранены.'));
     } catch (failure) {
-      setConnectionError(errorText(failure));
+      setConnectionError(errorText(failure, t));
     } finally {
       setConnectionBusy(false);
     }
@@ -257,9 +261,9 @@ export function SettingsPage({
     setConnectionError('');
     try {
       await onDisconnectAI();
-      setConnectionNotice('Сохранённый ключ удалён.');
+      setConnectionNotice(t('Сохранённый ключ удалён.'));
     } catch (failure) {
-      setConnectionError(errorText(failure));
+      setConnectionError(errorText(failure, t));
     } finally {
       setDisconnecting(false);
     }
@@ -271,7 +275,7 @@ export function SettingsPage({
     try {
       await onLogout();
     } catch (failure) {
-      setError(errorText(failure));
+      setError(errorText(failure, t));
     } finally {
       setLoggingOut(false);
     }
@@ -281,13 +285,13 @@ export function SettingsPage({
     <div className="settings-page">
       <header className="page-heading">
         <div>
-          <p className="page-eyebrow">Ritm под твой образ жизни</p>
-          <h1>Настройки</h1>
-          <p className="page-description">Твоё пространство. Твои правила.</p>
+          <p className="page-eyebrow">{t('Ritm под твой образ жизни')}</p>
+          <h1>{t('Настройки')}</h1>
+          <p className="page-description">{t('Твоё пространство. Твои правила.')}</p>
         </div>
         <span className="settings-top-status">
           <ShieldCheck size={17} aria-hidden="true" />
-          Личное пространство
+          {t('Личное пространство')}
         </span>
       </header>
       <form onSubmit={save} className="settings-form">
@@ -296,19 +300,19 @@ export function SettingsPage({
             <section className="panel settings-card">
               <div className="settings-card-title">
                 <UserRound size={19} aria-hidden="true" />
-                <h2>Аккаунт</h2>
+                <h2>{t('Аккаунт')}</h2>
               </div>
               <div className="settings-profile">
                 <div className="settings-avatar" aria-hidden="true">
                   {initials}
                 </div>
                 <div>
-                  <strong>{draft.displayName || 'Твоё имя'}</strong>
-                  <span>Твой личный Ritm</span>
+                  <strong>{draft.displayName || t('Твоё имя')}</strong>
+                  <span>{t('Твой личный Ritm')}</span>
                 </div>
               </div>
               <label className="settings-field">
-                Имя
+                {t('Имя')}
                 <input
                   className="field"
                   name="displayName"
@@ -320,7 +324,7 @@ export function SettingsPage({
                 />
               </label>
               <label className="settings-field">
-                Электронная почта
+                {t('Электронная почта')}
                 <input
                   className="field"
                   name="email"
@@ -328,11 +332,11 @@ export function SettingsPage({
                   autoComplete="email"
                   maxLength={254}
                   value={draft.email}
-                  placeholder="Твоя почта"
+                  placeholder={t('Твоя почта')}
                   onChange={(event) => update('email', event.target.value)}
                 />
                 <span className="settings-hint">
-                  Для профиля. Почтовые уведомления пока не подключены.
+                  {t('Для профиля. Почтовые уведомления пока не подключены.')}
                 </span>
               </label>
             </section>
@@ -340,15 +344,21 @@ export function SettingsPage({
             <section className="panel settings-card">
               <div className="settings-card-title">
                 <Palette size={19} aria-hidden="true" />
-                <h2>Оформление</h2>
+                <h2>{t('Оформление')}</h2>
               </div>
-              <p className="settings-card-copy">Фиолетовые оттенки в твоём любимом освещении.</p>
-              <div className="settings-theme-options" role="group" aria-label="Тема приложения">
+              <p className="settings-card-copy">
+                {t('Фиолетовые оттенки в твоём любимом освещении.')}
+              </p>
+              <div
+                className="settings-theme-options"
+                role="group"
+                aria-label={t('Тема приложения')}
+              >
                 {(
                   [
-                    { value: 'light', label: 'Светлая', icon: Sun },
-                    { value: 'dark', label: 'Тёмная', icon: Moon },
-                    { value: 'system', label: 'Системная', icon: Sparkles },
+                    { value: 'light', label: t('Светлая'), icon: Sun },
+                    { value: 'dark', label: t('Тёмная'), icon: Moon },
+                    { value: 'system', label: t('Системная'), icon: Sparkles },
                   ] as const
                 ).map(({ value, label, icon: Icon }) => (
                   <button
@@ -365,39 +375,48 @@ export function SettingsPage({
                     </span>
                     <span>
                       <Icon size={16} aria-hidden="true" />
-                      {label}
+                      {t(label)}
                       {draft.theme === value ? <Check size={14} aria-hidden="true" /> : null}
                     </span>
                   </button>
                 ))}
               </div>
               <label className="settings-field">
-                Боковая панель
+                {t('Боковая панель')}
                 <select
                   className="field"
                   value={draft.sidebar}
                   onChange={(event) => update('sidebar', event.target.value as Settings['sidebar'])}
                 >
-                  <option value="dark">Графитовая</option>
-                  <option value="light">Светлая</option>
+                  <option value="dark">{t('Графитовая')}</option>
+                  <option value="light">{t('Светлая')}</option>
                 </select>
               </label>
-              <span className="settings-hint">Новое оформление появится после сохранения.</span>
+              <span className="settings-hint">
+                {t('Новое оформление появится после сохранения.')}
+              </span>
             </section>
 
             <section className="panel settings-card">
               <div className="settings-card-title">
                 <Globe2 size={19} aria-hidden="true" />
-                <h2>Язык и время</h2>
+                <h2>{t('Язык и время')}</h2>
               </div>
               <label className="settings-field">
-                Язык интерфейса
-                <select className="field" value="ru" onChange={() => {}}>
-                  <option value="ru">Русский</option>
+                {t('Язык интерфейса')}
+                <select
+                  className="field"
+                  value={draft.language}
+                  onChange={(event) =>
+                    update('language', event.target.value as Settings['language'])
+                  }
+                >
+                  <option value="ru">{t('Русский')}</option>
+                  <option value="en">English</option>
                 </select>
               </label>
               <label className="settings-field">
-                Часовой пояс
+                {t('Часовой пояс')}
                 <select
                   className="field"
                   value={draft.timeZone}
@@ -408,14 +427,14 @@ export function SettingsPage({
                   ) : null}
                   {TIME_ZONES.map(([value, label]) => (
                     <option key={value} value={value}>
-                      {label}
+                      {t(label)}
                     </option>
                   ))}
                 </select>
               </label>
               <div className="settings-work-hours">
                 <label className="settings-field">
-                  Начало дня
+                  {t('Начало дня')}
                   <input
                     className="field"
                     type="time"
@@ -425,7 +444,7 @@ export function SettingsPage({
                   />
                 </label>
                 <label className="settings-field">
-                  Конец дня
+                  {t('Конец дня')}
                   <input
                     className="field"
                     type="time"
@@ -435,17 +454,20 @@ export function SettingsPage({
                   />
                 </label>
               </div>
-              <span className="settings-hint">Помощник учитывает эти часы при планировании.</span>
+              <span className="settings-hint">
+                {t('Помощник учитывает эти часы при планировании.')}
+              </span>
             </section>
 
             <section className="panel settings-card">
               <div className="settings-card-title">
                 <Bell size={19} aria-hidden="true" />
-                <h2>Уведомления</h2>
+                <h2>{t('Уведомления')}</h2>
               </div>
               <label className="settings-switch-row">
                 <span>
-                  Напоминания о задачах<small>За 15 минут до начала, пока Ritm открыт</small>
+                  {t('Напоминания о задачах')}
+                  <small>{t('За 15 минут до начала, пока Ritm открыт')}</small>
                 </span>
                 <input
                   className="settings-switch"
@@ -458,7 +480,8 @@ export function SettingsPage({
               </label>
               <label className="settings-switch-row">
                 <span>
-                  Утренний план<small>Сводка в начале рабочего дня, пока Ritm открыт</small>
+                  {t('Утренний план')}
+                  <small>{t('Сводка в начале рабочего дня, пока Ritm открыт')}</small>
                 </span>
                 <input
                   className="settings-switch"
@@ -472,18 +495,19 @@ export function SettingsPage({
               {notificationError ? (
                 <p className="settings-inline-error" role="alert">
                   <AlertCircle size={16} aria-hidden="true" />
-                  {notificationError}
+                  {t(notificationError)}
                 </p>
               ) : (
                 <p className="settings-hint settings-notification-note">
-                  Для напоминаний понадобится разрешение браузера.
+                  {t('Для напоминаний понадобится разрешение браузера.')}
                 </p>
               )}
               <div className="settings-quiet-note">
                 <Moon size={17} aria-hidden="true" />
                 <span>
-                  Только полезные напоминания.
-                  <br />В твоём ритме.
+                  {t('Только полезные напоминания.')}
+                  <br />
+                  {t('В твоём ритме.')}
                 </span>
               </div>
             </section>
@@ -491,7 +515,7 @@ export function SettingsPage({
             <section className="panel settings-card settings-connections">
               <div className="settings-card-title">
                 <Sparkles size={19} aria-hidden="true" />
-                <h2>Подключения</h2>
+                <h2>{t('Подключения')}</h2>
               </div>
               <div className="settings-connection-row">
                 <div className="settings-provider-icon">
@@ -503,22 +527,24 @@ export function SettingsPage({
                     className={`settings-connection-status ${aiStatus.configured ? 'settings-configured' : ''}`}
                   >
                     <i />
-                    {aiStatus.configured ? `Ключ настроен · ${aiStatus.model}` : 'Не настроен'}
+                    {aiStatus.configured
+                      ? t('Ключ настроен · {model}', { model: aiStatus.model })
+                      : t('Не настроен')}
                   </span>
                   {aiStatus.source === 'environment' ? (
-                    <small>Настройкой управляет сервер</small>
+                    <small>{t('Настройкой управляет сервер')}</small>
                   ) : null}
                 </div>
                 <div className="settings-connection-actions">
                   {aiStatus.source === 'environment' ? (
-                    <span className="settings-coming">На сервере</span>
+                    <span className="settings-coming">{t('На сервере')}</span>
                   ) : (
                     <button
                       type="button"
                       className="button button-secondary"
                       onClick={openConnection}
                     >
-                      {aiStatus.configured ? 'Изменить' : 'Настроить'}
+                      {aiStatus.configured ? t('Изменить') : t('Настроить')}
                       <ChevronRight size={16} aria-hidden="true" />
                     </button>
                   )}
@@ -529,7 +555,7 @@ export function SettingsPage({
                       disabled={disconnecting}
                       onClick={() => void disconnect()}
                     >
-                      {disconnecting ? 'Удаляем…' : 'Удалить ключ'}
+                      {disconnecting ? t('Удаляем…') : t('Удалить ключ')}
                     </button>
                   ) : null}
                 </div>
@@ -545,29 +571,31 @@ export function SettingsPage({
                   >
                     <i />
                     {googleStatusUnknown
-                      ? 'Статус подключения не обновился'
+                      ? t('Статус подключения не обновился')
                       : googleStatus.status === 'connected'
-                        ? 'Подключён'
+                        ? t('Подключён')
                         : googleStatus.status === 'reauth_required'
-                          ? 'Нужно подключить заново'
+                          ? t('Нужно подключить заново')
                           : googleConfiguredLocally
-                            ? 'Не подключён'
-                            : 'Нужна настройка OAuth-клиента'}
+                            ? t('Не подключён')
+                            : t('Нужна настройка OAuth-клиента')}
                   </span>
                   <small>
                     {googleConfiguredLocally
-                      ? 'Основной календарь · просмотр, создание и редактирование событий'
-                      : 'Добавьте Client ID и Client Secret из Google Cloud'}
+                      ? t('Основной календарь · просмотр, создание и редактирование событий')
+                      : t('Добавьте Client ID и Client Secret из Google Cloud')}
                   </small>
                   {googleStatus.status === 'connected' ? (
                     <small>
                       {googleStatus.extendedColors
-                        ? 'Полная палитра включена'
-                        : 'Для новых оттенков Google попросит разрешение на управление календарями.'}
+                        ? t('Полная палитра включена')
+                        : t(
+                            'Для новых оттенков Google попросит разрешение на управление календарями.',
+                          )}
                     </small>
                   ) : null}
                   {googleStatus.tasksEnabled ? (
-                    <small>Google Tasks: отметки выполнения подключены</small>
+                    <small>{t('Google Tasks: отметки выполнения подключены')}</small>
                   ) : null}
                 </div>
                 <div className="settings-connection-actions">
@@ -581,7 +609,7 @@ export function SettingsPage({
                       setGoogleSetupOpen(true);
                     }}
                   >
-                    {googleConfiguredLocally ? 'Настройки' : 'Настроить'}
+                    {googleConfiguredLocally ? t('Настройки') : t('Настроить')}
                   </button>
                   {googleConfiguredLocally ? (
                     <button
@@ -591,15 +619,15 @@ export function SettingsPage({
                       onClick={() => void googleAction()}
                     >
                       {googleBusy
-                        ? 'Подождите…'
+                        ? t('Подождите…')
                         : !googleStatusUnknown &&
                             ['connected', 'reauth_required'].includes(googleStatus.status)
-                          ? 'Переподключить'
-                          : 'Подключить'}
+                          ? t('Переподключить')
+                          : t('Подключить')}
                     </button>
                   ) : null}
                   {googleTasksMessage ? (
-                    <p className="settings-connection-detail">{googleTasksMessage}</p>
+                    <p className="settings-connection-detail">{t(googleTasksMessage)}</p>
                   ) : null}
                   {googleConfiguredLocally &&
                   googleStatus.status === 'connected' &&
@@ -613,11 +641,11 @@ export function SettingsPage({
                         setGoogleBusy(true);
                         setGoogleError('');
                         void onConnectGoogleTasks()
-                          .catch((error) => setGoogleError(errorText(error)))
+                          .catch((error) => setGoogleError(errorText(error, t)))
                           .finally(() => setGoogleBusy(false));
                       }}
                     >
-                      Подключить Google Tasks
+                      {t('Подключить Google Tasks')}
                     </button>
                   ) : null}
                   {googleConfiguredLocally &&
@@ -629,7 +657,7 @@ export function SettingsPage({
                       disabled={googleBusy}
                       onClick={() => void googleAction(false, true)}
                     >
-                      Разрешить новые цвета
+                      {t('Разрешить новые цвета')}
                     </button>
                   ) : null}
                   {googleConfiguredLocally &&
@@ -643,7 +671,7 @@ export function SettingsPage({
                         setConfirmGoogleDisconnect(true);
                       }}
                     >
-                      Отключить
+                      {t('Отключить')}
                     </button>
                   ) : null}
                 </div>
@@ -651,25 +679,25 @@ export function SettingsPage({
               {googleNotice ? (
                 <p className="settings-connection-notice" role="status">
                   <CheckCircle2 size={16} aria-hidden="true" />
-                  {googleNotice}
+                  {t(googleNotice)}
                 </p>
               ) : null}
               {googleError && !confirmGoogleDisconnect ? (
                 <p className="settings-inline-error" role="alert">
                   <AlertCircle size={16} aria-hidden="true" />
-                  {googleError}
+                  {t(googleError)}
                 </p>
               ) : null}
               {connectionNotice ? (
                 <p className="settings-connection-notice" role="status">
                   <CheckCircle2 size={16} aria-hidden="true" />
-                  {connectionNotice}
+                  {t(connectionNotice)}
                 </p>
               ) : null}
               {connectionError && !dialogRef.current?.open ? (
                 <p className="settings-inline-error" role="alert">
                   <AlertCircle size={16} aria-hidden="true" />
-                  {connectionError}
+                  {t(connectionError)}
                 </p>
               ) : null}
             </section>
@@ -683,24 +711,24 @@ export function SettingsPage({
             {saving ? (
               <>
                 <LoaderCircle size={16} className="settings-spinner" aria-hidden="true" />
-                Сохраняем…
+                {t('Сохраняем…')}
               </>
             ) : error ? (
               <>
                 <AlertCircle size={16} aria-hidden="true" />
-                {error}
+                {t(error)}
               </>
             ) : dirty ? (
-              'Есть несохранённые изменения'
+              t('Есть несохранённые изменения')
             ) : saveState === 'saved' ? (
               <>
                 <CheckCircle2 size={16} aria-hidden="true" />
-                Настройки сохранены
+                {t('Настройки сохранены')}
               </>
             ) : (
               <>
                 <Check size={16} aria-hidden="true" />
-                Всё сохранено
+                {t('Всё сохранено')}
               </>
             )}
           </div>
@@ -716,11 +744,11 @@ export function SettingsPage({
                   setSaveState('idle');
                 }}
               >
-                Отменить изменения
+                {t('Отменить изменения')}
               </button>
             ) : null}
             <button className="button button-primary" type="submit" disabled={!dirty || saving}>
-              {saving ? 'Сохраняем…' : 'Сохранить настройки'}
+              {saving ? t('Сохраняем…') : t('Сохранить настройки')}
             </button>
           </div>
         </div>
@@ -730,17 +758,18 @@ export function SettingsPage({
       ) : null}
       {confirmGoogleDisconnect ? (
         <Dialog
-          title="Отключить Google Calendar?"
+          title={t('Отключить Google Calendar?')}
           onClose={() => setConfirmGoogleDisconnect(false)}
           busy={googleBusy}
         >
           <p className="dialog-copy">
-            Ritm перестанет получать и изменять события. События в Google и подключение другого
-            приложения сохранятся.
+            {t(
+              'Ritm перестанет получать и изменять события. События в Google и подключение другого приложения сохранятся.',
+            )}
           </p>
           {googleError ? (
             <p className="error-note" role="alert">
-              {googleError}
+              {t(googleError)}
             </p>
           ) : null}
           <div className="dialog-actions">
@@ -750,7 +779,7 @@ export function SettingsPage({
               disabled={googleBusy}
               onClick={() => setConfirmGoogleDisconnect(false)}
             >
-              Отмена
+              {t('Отмена')}
             </button>
             <button
               type="button"
@@ -758,7 +787,7 @@ export function SettingsPage({
               disabled={googleBusy}
               onClick={() => void googleAction(true)}
             >
-              {googleBusy ? 'Отключаем…' : 'Отключить'}
+              {googleBusy ? t('Отключаем…') : t('Отключить')}
             </button>
           </div>
         </Dialog>
@@ -771,7 +800,7 @@ export function SettingsPage({
           disabled={loggingOut}
         >
           <LogOut size={17} aria-hidden="true" />
-          {loggingOut ? 'Выходим…' : 'Выйти из аккаунта'}
+          {loggingOut ? t('Выходим…') : t('Выйти из аккаунта')}
         </button>
       ) : null}
 
@@ -808,19 +837,19 @@ export function SettingsPage({
             <button
               type="button"
               className="settings-close"
-              aria-label="Закрыть настройку OpenAI"
+              aria-label={t('Закрыть настройку OpenAI')}
               disabled={connectionBusy}
               onClick={closeConnection}
             >
               <X size={21} aria-hidden="true" />
             </button>
           </header>
-          <h2 id={titleId}>Твой помощник на связи</h2>
+          <h2 id={titleId}>{t('Твой помощник на связи')}</h2>
           <p className="settings-dialog-copy">
-            Добавь ключ OpenAI, чтобы планировать день и разбирать задачи вместе с Ritm.
+            {t('Добавь ключ OpenAI, чтобы планировать день и разбирать задачи вместе с Ritm.')}
           </p>
           <label className="settings-field">
-            API-ключ OpenAI
+            {t('API-ключ OpenAI')}
             <input
               ref={secretInputRef}
               className="field"
@@ -838,25 +867,25 @@ export function SettingsPage({
             />
           </label>
           <label className="settings-field">
-            Модель
+            {t('Модель')}
             <input
               className="field"
               value={model}
               required
               maxLength={100}
-              placeholder="Название модели"
+              placeholder={t('Название модели')}
               onChange={(event) => setModel(event.target.value)}
               disabled={connectionBusy}
             />
           </label>
           <p className="settings-key-security">
             <ShieldCheck size={17} aria-hidden="true" />
-            Ключ передаётся серверу и не сохраняется в браузере.
+            {t('Ключ передаётся серверу и не сохраняется в браузере.')}
           </p>
           {connectionError ? (
             <p className="settings-inline-error" role="alert">
               <AlertCircle size={17} aria-hidden="true" />
-              {connectionError}
+              {t(connectionError)}
             </p>
           ) : null}
           <div className="settings-dialog-actions">
@@ -866,7 +895,7 @@ export function SettingsPage({
               disabled={connectionBusy}
               onClick={closeConnection}
             >
-              Отмена
+              {t('Отмена')}
             </button>
             <button
               type="submit"
@@ -876,10 +905,10 @@ export function SettingsPage({
               {connectionBusy ? (
                 <>
                   <LoaderCircle className="settings-spinner" size={17} aria-hidden="true" />
-                  Сохраняем…
+                  {t('Сохраняем…')}
                 </>
               ) : (
-                'Сохранить ключ'
+                t('Сохранить ключ')
               )}
             </button>
           </div>

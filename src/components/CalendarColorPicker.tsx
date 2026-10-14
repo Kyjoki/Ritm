@@ -2,6 +2,7 @@ import { Check } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import { CALENDAR_PALETTE } from '../../shared/calendar-colors';
 import '../styles/calendar-colors.css';
+import { useI18n } from '../lib/i18n';
 
 export function CalendarColorPicker({
   value,
@@ -12,30 +13,31 @@ export function CalendarColorPicker({
   onChange: (id: string | null) => void;
   disabled?: boolean;
 }) {
+  const { t: tr } = useI18n();
   const current = CALENDAR_PALETTE.find((color) => color.id === value || color.hex === value);
   const selected = current?.id ?? value ?? '';
   const custom =
     !current && value && /^#[0-9a-f]{6}$/i.test(value)
-      ? [{ id: value, name: 'Цвет Google', hex: value }]
+      ? [{ id: value, name: tr('Цвет Google'), hex: value }]
       : [];
   const colors = [
     ...CALENDAR_PALETTE,
     ...custom,
-    { id: '', name: 'По умолчанию', hex: 'var(--accent)' },
+    { id: '', name: tr('По умолчанию'), hex: 'var(--accent)' },
   ];
   return (
     <fieldset className="calendar-color-picker" disabled={disabled}>
-      <legend>Цвет записи</legend>
+      <legend>{tr('Цвет записи')}</legend>
       <div className="calendar-color-options">
         {colors.map((color) => (
-          <label className="calendar-color-option" key={color.id} title={color.name}>
+          <label className="calendar-color-option" key={color.id} title={tr(color.name)}>
             <input
               type="radio"
               name="calendar-color"
               value={color.id}
               checked={selected === color.id}
               onChange={() => onChange(color.id || null)}
-              aria-label={color.name}
+              aria-label={tr(color.name)}
             />
             <span
               style={
@@ -52,7 +54,7 @@ export function CalendarColorPicker({
           </label>
         ))}
       </div>
-      <small>{current?.name ?? (value ? 'Цвет Google' : 'По умолчанию')}</small>
+      <small>{tr(current?.name ?? (value ? tr('Цвет Google') : tr('По умолчанию')))}</small>
     </fieldset>
   );
 }

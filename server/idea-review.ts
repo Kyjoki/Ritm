@@ -14,6 +14,7 @@ import type {
   IdeaExpertId,
   IdeaExpertReview,
   IdeaReviewReport,
+  Language,
 } from '../shared/types.ts';
 import { createRestrictedOpenAIFetch } from './assistant.ts';
 import { AppError } from './errors.ts';
@@ -59,6 +60,7 @@ export interface IdeaReviewContext {
   apiKey: string;
   model: string;
   message: string;
+  language?: Language;
   signal?: AbortSignal;
 }
 export type IdeaReviewRunner = (context: IdeaReviewContext) => Promise<IdeaReviewReport>;
@@ -146,6 +148,15 @@ export async function runIdeaReview(
     callTimeoutMs?: number;
   } = {},
 ): Promise<IdeaReviewReport> {
+  const language = context.language === 'en' ? 'en' : 'ru';
+  const languageInstruction =
+    language === 'en'
+      ? '\nTrusted response language: English. Write every user-facing summary, strength, concern, assumption, test, agreement, disagreement, question and next step in English, regardless of the input language. Preserve original names and machine enum values. This only changes response language; all isolation, evidence and safety rules remain in force.'
+      : '\nЯзык ответа установлен сервером: русский. Все текстовые поля оценки и общего вывода пиши по-русски; исходные названия и машинные enum сохраняй.';
+  const localizedCommon = commonInstructions.replace(
+    'на русском языке',
+    language === 'en' ? 'на английском языке' : 'на русском языке',
+  );
   const message = z.string().trim().min(1).max(MAX_IDEA_CHARS).safeParse(context.message);
   if (!message.success)
     throw new AppError(400, 'AI_IDEA_INPUT', 'Опишите идею текстом до 6000 символов.');
@@ -214,7 +225,7 @@ export async function runIdeaReview(
       const output = await generateBounded({
         stage: 'expert',
         expertId: id,
-        instructions: `${commonInstructions}\n${roleInstructions[id]}\nЗаполни summary, strengths, concerns, assumptions и firstTest. firstTest — самый небольшой тест с наблюдаемым результатом для своей роли. Ты не видишь других оценок; не придумывай их.`,
+        instructions: `${localizedCommon}\n${roleInstructions[id]}\nЗаполни summary, strengths, concerns, assumptions и firstTest. firstTest — самый небольшой тест с наблюдаемым результатом для своей роли. Ты не видишь других оценок; не придумывай их.${languageInstruction}`,
         prompt: serializePrompt({ idea: message.data }),
       });
       signal.throwIfAborted();
@@ -241,7 +252,8 @@ export async function runIdeaReview(
     }
     const output = await generateBounded({
       stage: 'synthesis',
-      instructions: synthesisInstructions,
+      instructions:
+        synthesisInstructions.replace(commonInstructions, localizedCommon) + languageInstruction,
       prompt: serializePrompt({ idea: message.data, opinions: experts }),
     });
     signal.throwIfAborted();

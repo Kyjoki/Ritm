@@ -1,3 +1,4 @@
+import { useI18n } from '../lib/i18n';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ChevronDown, LoaderCircle, Trash2 } from 'lucide-react';
 import type { Task, TaskInput } from '../../shared/types';
@@ -12,6 +13,7 @@ interface Props {
   onDelete: (task: Task) => Promise<void>;
 }
 export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
+  const { t } = useI18n();
   const [value, setValue] = useState<TaskInput>(() => {
     const source = task ?? draft;
     return {
@@ -52,7 +54,9 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
       Number(value.time.slice(0, 2)) * 60 + Number(value.time.slice(3)) + value.duration > 1440
     ) {
       setError(
-        'Запись должна завершиться до полуночи. Уменьшите длительность или выберите другое время.',
+        t(
+          'Запись должна завершиться до полуночи. Уменьшите длительность или выберите другое время.',
+        ),
       );
       return;
     }
@@ -72,7 +76,7 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
       );
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Задача не сохранилась. Попробуйте ещё раз.');
+      setError(e instanceof Error ? e.message : t('Задача не сохранилась. Попробуйте ещё раз.'));
     } finally {
       setBusy(false);
     }
@@ -85,14 +89,14 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
       await onDelete(task);
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Не удалось удалить задачу.');
+      setError(e instanceof Error ? e.message : t('Не удалось удалить задачу.'));
     } finally {
       setBusy(false);
     }
   };
   return (
     <Dialog
-      title={task ? 'Редактировать задачу' : 'Новая задача'}
+      title={task ? t('Редактировать задачу') : t('Новая задача')}
       onClose={onClose}
       busy={busy}
       className="task-dialog"
@@ -100,22 +104,24 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
       <form onSubmit={submit}>
         <fieldset className="task-form" disabled={busy}>
           {task?.repeat !== 'none' && task ? (
-            <p className="info-note">Повторяющаяся задача: изменения применятся ко всей серии.</p>
+            <p className="info-note">
+              {t('Повторяющаяся задача: изменения применятся ко всей серии.')}
+            </p>
           ) : null}
           <label className="field">
-            Название
+            {t('Название')}
             <input
               autoFocus
               required
               maxLength={160}
-              placeholder="Что нужно сделать?"
+              placeholder={t('Что нужно сделать?')}
               value={value.title}
               onChange={(e) => set('title', e.target.value)}
             />
           </label>
           <div className="form-grid">
             <label className="field">
-              Дата
+              {t('Дата')}
               <input
                 type="date"
                 value={value.date ?? ''}
@@ -131,7 +137,7 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
             </label>
             {value.calendarEntry !== false ? (
               <label className="field">
-                Время
+                {t('Время')}
                 <input
                   type="time"
                   value={value.time ?? ''}
@@ -144,7 +150,7 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
           <div className="form-grid">
             {value.calendarEntry !== false ? (
               <label className="field">
-                Длительность
+                {t('Длительность')}
                 <select
                   value={value.duration}
                   onChange={(e) => set('duration', Number(e.target.value))}
@@ -166,21 +172,21 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
                     .sort((a, b) => a - b)
                     .map((n) => (
                       <option key={n} value={n}>
-                        {n < 60 ? `${n} минут` : `${n / 60} ч`}
+                        {n < 60 ? t('{p0} минут', { p0: n }) : t('{p0} ч', { p0: n / 60 })}
                       </option>
                     ))}
                 </select>
               </label>
             ) : null}
             <label className="field">
-              Приоритет
+              {t('Приоритет')}
               <select
                 value={value.priority}
                 onChange={(e) => set('priority', e.target.value as TaskInput['priority'])}
               >
-                <option value="low">Низкий</option>
-                <option value="normal">Обычный</option>
-                <option value="high">Высокий</option>
+                <option value="low">{t('Низкий')}</option>
+                <option value="normal">{t('Обычный')}</option>
+                <option value="high">{t('Высокий')}</option>
               </select>
             </label>
           </div>
@@ -191,43 +197,44 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
             onClick={() => setAdvanced(!advanced)}
             aria-expanded={advanced}
           >
-            <ChevronDown size={16} className={advanced ? 'rotated' : ''} /> Дополнительные поля
+            <ChevronDown size={16} className={advanced ? 'rotated' : ''} />
+            {t('Дополнительные поля')}
           </button>
           {advanced ? (
             <div className="advanced-fields">
               <label className="field">
-                Описание
+                {t('Описание')}
                 <textarea
                   value={value.description}
                   rows={3}
                   maxLength={2000}
-                  placeholder="Детали и важные шаги"
+                  placeholder={t('Детали и важные шаги')}
                   onChange={(e) => set('description', e.target.value)}
                 />
               </label>
               <div className="form-grid">
                 <label className="field">
-                  Повторение
+                  {t('Повторение')}
                   <select
                     value={value.repeat}
                     disabled={!value.date}
                     onChange={(e) => set('repeat', e.target.value as TaskInput['repeat'])}
                   >
-                    <option value="none">Не повторять</option>
-                    <option value="daily">Каждый день</option>
-                    <option value="weekly">Каждую неделю</option>
-                    <option value="monthly">Каждый месяц</option>
+                    <option value="none">{t('Не повторять')}</option>
+                    <option value="daily">{t('Каждый день')}</option>
+                    <option value="weekly">{t('Каждую неделю')}</option>
+                    <option value="monthly">{t('Каждый месяц')}</option>
                   </select>
                 </label>
                 {value.calendarEntry !== false ? (
                   <label className="field">
-                    Тип
+                    {t('Тип')}
                     <select
                       value={value.kind}
                       onChange={(e) => set('kind', e.target.value as TaskInput['kind'])}
                     >
-                      <option value="task">Задача</option>
-                      <option value="event">Событие</option>
+                      <option value="task">{t('Задача')}</option>
+                      <option value="event">{t('Событие')}</option>
                     </select>
                   </label>
                 ) : null}
@@ -236,15 +243,15 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
           ) : null}
           {value.calendarEntry === false ? (
             <p className="field-hint">
-              Личная задача остаётся в списке дел и не занимает время в календаре.
+              {t('Личная задача остаётся в списке дел и не занимает время в календаре.')}
             </p>
           ) : !value.date ? (
             <p className="field-hint">
-              Без даты — задача останется в списке, пока вы не запланируете её.
+              {t('Без даты — задача останется в списке, пока вы не запланируете её.')}
             </p>
           ) : value.time ? (
             <p className="field-hint">
-              Выберите длительность, чтобы запись завершилась до полуночи.
+              {t('Выберите длительность, чтобы запись завершилась до полуночи.')}
             </p>
           ) : null}
           {error ? (
@@ -253,11 +260,15 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
             </p>
           ) : null}
           {confirmDelete ? (
-            <div className="delete-confirm" role="group" aria-label="Подтверждение удаления задачи">
+            <div
+              className="delete-confirm"
+              role="group"
+              aria-label={t('Подтверждение удаления задачи')}
+            >
               <strong>
-                {task?.repeat !== 'none' ? 'Удалить всю серию' : 'Удалить'} «{task?.title}»?
+                {task?.repeat !== 'none' ? t('Удалить всю серию') : t('Удалить')} «{task?.title}»?
               </strong>
-              <p>После удаления задачу можно будет восстановить.</p>
+              <p>{t('После удаления задачу можно будет восстановить.')}</p>
               <div className="button-row">
                 <button
                   className="button button-danger"
@@ -265,7 +276,7 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
                   disabled={busy}
                   onClick={remove}
                 >
-                  Удалить
+                  {t('Удалить')}
                 </button>
                 <button
                   className="button button-secondary"
@@ -274,7 +285,7 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
                   ref={keepButton}
                   onClick={() => setConfirmDelete(false)}
                 >
-                  Оставить
+                  {t('Оставить')}
                 </button>
               </div>
             </div>
@@ -284,7 +295,7 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
                 <button
                   className="icon-button danger"
                   type="button"
-                  aria-label="Удалить задачу"
+                  aria-label={t('Удалить задачу')}
                   ref={deleteButton}
                   onClick={() => setConfirmDelete(true)}
                   disabled={busy}
@@ -301,7 +312,7 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
                   disabled={busy}
                   onClick={onClose}
                 >
-                  Отмена
+                  {t('Отмена')}
                 </button>
                 <button
                   className="button button-primary"
@@ -309,7 +320,7 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
                   disabled={busy || !value.title.trim()}
                 >
                   {busy ? <LoaderCircle size={17} className="spinning" /> : null}
-                  {busy ? 'Сохраняем…' : task ? 'Сохранить' : 'Создать задачу'}
+                  {busy ? t('Сохраняем…') : task ? t('Сохранить') : t('Создать задачу')}
                 </button>
               </div>
             </div>

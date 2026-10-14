@@ -9,6 +9,7 @@ import './styles/app.css';
 import './styles/calendar-settings.css';
 import './styles/assistant.css';
 import App from './App';
+import { I18nProvider, getLanguage, translate } from './lib/i18n';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -19,10 +20,15 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean
     return this.state.failed ? (
       <div className="startup">
         <div className="startup-card">
-          <h1>Не удалось открыть экран</h1>
-          <p>Ваши данные сохранены на сервере. Обновите страницу, чтобы продолжить.</p>
+          <h1>{translate(getLanguage(), 'Не удалось открыть экран')}</h1>
+          <p>
+            {translate(
+              getLanguage(),
+              'Ваши данные сохранены на сервере. Обновите страницу, чтобы продолжить.',
+            )}
+          </p>
           <button className="button button-primary" onClick={() => window.location.reload()}>
-            Обновить страницу
+            {translate(getLanguage(), 'Обновить страницу')}
           </button>
         </div>
       </div>
@@ -33,6 +39,8 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean
 }
 createRoot(document.getElementById('root')!).render(
   <ErrorBoundary>
-    <App />
+    <I18nProvider>
+      <App />
+    </I18nProvider>
   </ErrorBoundary>,
 );

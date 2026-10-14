@@ -100,7 +100,7 @@ export const settingsPatchSchema = z
     email: z.union([z.literal(''), z.email().max(254)]),
     theme: z.enum(['light', 'dark', 'system']),
     sidebar: z.enum(['dark', 'light']),
-    language: z.literal('ru'),
+    language: z.enum(['ru', 'en']),
     timeZone: z
       .string()
       .max(80)

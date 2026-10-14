@@ -82,7 +82,13 @@ test('idea mode skips Calendar, stores four opinions, replays without new genera
     ideaReviewer: async (context) => {
       reviews++;
       assert.equal(context.message, 'Моя идея');
-      assert.deepEqual(Object.keys(context).sort(), ['apiKey', 'message', 'model', 'signal']);
+      assert.deepEqual(Object.keys(context).sort(), [
+        'apiKey',
+        'language',
+        'message',
+        'model',
+        'signal',
+      ]);
       return structuredClone(report);
     },
     assistant: async () => {

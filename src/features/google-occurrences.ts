@@ -1,3 +1,4 @@
+import type { Language } from '../lib/i18n';
 import type { GoogleCalendarEvent, GoogleEventInput, Task } from '../../shared/types';
 import { addDays, dateKey, getDayOccurrences, parseDate, startOfWeek } from './calendar-utils';
 import { formatTime } from '../lib/date';
@@ -209,10 +210,12 @@ export function calendarOccurrences(
   googleEvents: GoogleCalendarEvent[],
   date: string,
   timeZone: string,
+  language: Language = 'ru',
 ): CalendarOccurrence[] {
   const local: CalendarOccurrence[] = getDayOccurrences(
     tasks.filter((task) => task.calendarEntry !== false),
     date,
+    language,
   ).map((entry) => ({
     source: 'ritm',
     task: entry.task,
@@ -244,7 +247,7 @@ export function calendarOccurrences(
       (a, b) =>
         Number(b.allDay) - Number(a.allDay) ||
         (a.start ?? 1441) - (b.start ?? 1441) ||
-        a.title.localeCompare(b.title, 'ru') ||
+        a.title.localeCompare(b.title, language) ||
         a.key.localeCompare(b.key),
     );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
+import { useI18n } from '../lib/i18n';
 
 export function Dialog({
   title,
@@ -14,6 +15,7 @@ export function Dialog({
   busy?: boolean;
   className?: string;
 }) {
+  const { t: tr } = useI18n();
   const ref = useRef<HTMLDialogElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -59,13 +61,13 @@ export function Dialog({
     >
       <div className="dialog-head">
         <div>
-          <span className="page-eyebrow">RITM · ВАШ ПЛАН</span>
+          <span className="page-eyebrow">{tr('RITM · ВАШ ПЛАН')}</span>
           <h2 id="dialog-title">{title}</h2>
         </div>
         <button
           type="button"
           className="icon-button"
-          aria-label="Закрыть"
+          aria-label={tr('Закрыть')}
           onClick={onClose}
           disabled={busy}
         >

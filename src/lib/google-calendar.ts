@@ -7,6 +7,7 @@ import type {
 import { api } from './api';
 import { addDays } from '../features/calendar-utils';
 import { googleAuthorizationUrl } from './navigation';
+import { useI18n } from './i18n';
 
 export const unconfiguredGoogle: GoogleCalendarStatus = {
   configured: false,
@@ -16,6 +17,7 @@ export const unconfiguredGoogle: GoogleCalendarStatus = {
   lastFetchedAt: null,
 };
 export function useGoogleCalendar(enabled: boolean, timeZone: string, today: string) {
+  const { t: tr } = useI18n();
   const [status, setStatus] = useState<GoogleCalendarStatus>(unconfiguredGoogle);
   const [statusChecked, setStatusChecked] = useState(false);
   const [result, setResult] = useState<GoogleCalendarResult | null>(null),
@@ -54,7 +56,9 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
       .catch((failure) => {
         if (active)
           setError(
-            failure instanceof Error ? failure.message : 'Не удалось проверить подключение Google.',
+            failure instanceof Error
+              ? failure.message
+              : tr('Не удалось проверить подключение Google.'),
           );
       })
       .finally(() => {
@@ -63,7 +67,7 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
     return () => {
       active = false;
     };
-  }, [enabled]);
+  }, [enabled, tr]);
   const setRange = useCallback(
     (from: string, to: string) =>
       setRangeState((old) => (old.from === from && old.to === to ? old : { from, to })),
@@ -95,7 +99,9 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
       .catch((failure) => {
         if (version === requestVersion.current) {
           setError(
-            failure instanceof Error ? failure.message : 'Не удалось загрузить календарь Google.',
+            failure instanceof Error
+              ? failure.message
+              : tr('Не удалось загрузить календарь Google.'),
           );
           void refreshStatus().catch(() => {});
         }
@@ -115,7 +121,7 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
         readBusy.current = false;
       }
     };
-  }, [enabled, status.status, range.from, range.to, timeZone, revision, refreshStatus]);
+  }, [enabled, status.status, range.from, range.to, timeZone, revision, refreshStatus, tr]);
   const refresh = useCallback(() => {
     if (!enabledRef.current || refreshBusy.current || readBusy.current) return;
     refreshBusy.current = true;
@@ -127,7 +133,9 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
       .catch((failure) => {
         if (enabledRef.current) {
           setError(
-            failure instanceof Error ? failure.message : 'Не удалось проверить Google Calendar.',
+            failure instanceof Error
+              ? failure.message
+              : tr('Не удалось проверить Google Calendar.'),
           );
           setLoading(false);
         }
@@ -135,7 +143,7 @@ export function useGoogleCalendar(enabled: boolean, timeZone: string, today: str
       .finally(() => {
         refreshBusy.current = false;
       });
-  }, [refreshStatus]);
+  }, [refreshStatus, tr]);
   useEffect(() => {
     if (!enabled) return;
     const refreshVisible = () => {

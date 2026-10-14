@@ -1,4 +1,5 @@
 export type Theme = 'light' | 'dark' | 'system';
+export type Language = 'ru' | 'en';
 export type Priority = 'low' | 'normal' | 'high';
 export type Repeat = 'none' | 'daily' | 'weekly' | 'monthly';
 export type TaskKind = 'task' | 'event';
@@ -27,7 +28,7 @@ export interface Settings {
   email: string;
   theme: Theme;
   sidebar: 'dark' | 'light';
-  language: 'ru';
+  language: Language;
   timeZone: string;
   notifications: boolean;
   dailyBriefing: boolean;

@@ -23,6 +23,12 @@ import { SecretStore } from './secrets.ts';
 import { Security } from './security.ts';
 import { AppError, conflict } from './errors.ts';
 import {
+  localizeError,
+  localizeGoogleEvent,
+  localizeGoogleResult,
+  requestLanguage,
+} from './localization.ts';
+import {
   apiRequestGuard,
   createSecurityAudit,
   requestIdentity,
@@ -310,7 +316,12 @@ export function createApp(options: AppOptions = {}) {
     if (input.timeZone && input.timeZone !== settings.timeZone)
       throw new AppError(400, 'GOOGLE_TIMEZONE', 'Используйте часовой пояс из настроек Ritm.');
     await security.limit(req, 'google-read', 60, 60_000);
-    res.json(await google.listEvents({ ...input, timeZone: settings.timeZone }));
+    res.json(
+      localizeGoogleResult(
+        await google.listEvents({ ...input, timeZone: settings.timeZone }),
+        requestLanguage(req.get('Accept-Language')),
+      ),
+    );
   });
   app.post('/api/integrations/google/events', async (req, res) => {
     const { event, requestId } = z
@@ -318,7 +329,14 @@ export function createApp(options: AppOptions = {}) {
       .strict()
       .parse(req.body);
     await security.limit(req, 'google-write', 20, 60_000);
-    res.status(201).json(await google.createEvent(event, requestId));
+    res
+      .status(201)
+      .json(
+        localizeGoogleEvent(
+          await google.createEvent(event, requestId),
+          requestLanguage(req.get('Accept-Language')),
+        ),
+      );
   });
   app.patch('/api/integrations/google/events/:id', async (req, res) => {
     const { event, etag } = z
@@ -326,7 +344,12 @@ export function createApp(options: AppOptions = {}) {
       .strict()
       .parse(req.body);
     await security.limit(req, 'google-write', 20, 60_000);
-    res.json(await google.updateEvent(googleEventIdSchema.parse(req.params.id), event, etag));
+    res.json(
+      localizeGoogleEvent(
+        await google.updateEvent(googleEventIdSchema.parse(req.params.id), event, etag),
+        requestLanguage(req.get('Accept-Language')),
+      ),
+    );
   });
   app.patch('/api/integrations/google/events/:id/task', async (req, res) => {
     const input = z
@@ -341,7 +364,11 @@ export function createApp(options: AppOptions = {}) {
     await security.limit(req, 'google-write', 20, 60_000);
     if (!google.completeTask)
       throw new AppError(503, 'GOOGLE_TASKS_UNAVAILABLE', 'Google Tasks пока недоступен.');
-    res.json(await google.completeTask(googleEventIdSchema.parse(req.params.id), input));
+    const result = await google.completeTask(googleEventIdSchema.parse(req.params.id), input);
+    res.json({
+      ...result,
+      event: localizeGoogleEvent(result.event, requestLanguage(req.get('Accept-Language'))),
+    });
   });
   app.delete('/api/integrations/google/connection', async (req, res) => {
     await security.limit(req, 'google-connect', 10, 60_000);
@@ -361,7 +388,11 @@ export function createApp(options: AppOptions = {}) {
     z.object({}).strict().parse(req.body);
     const id = idSchema.parse(req.params.id);
     await security.limit(req, 'google-write', 20, 60_000);
-    res.json(await transferTaskToGoogle(id));
+    const result = await transferTaskToGoogle(id);
+    res.json({
+      ...result,
+      event: localizeGoogleEvent(result.event, requestLanguage(req.get('Accept-Language'))),
+    });
   });
   app.patch('/api/tasks/:id', async (req, res) => {
     res.json(
@@ -503,6 +534,7 @@ export function createApp(options: AppOptions = {}) {
             await (options.ideaReviewer ?? runIdeaReview)({
               ...credential,
               message: input.message,
+              language: settings.language,
               signal: controller.signal,
             }),
           )
@@ -581,6 +613,7 @@ export function createApp(options: AppOptions = {}) {
   }
   const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
     if (res.headersSent) return;
+    const language = requestLanguage(req.get('Accept-Language'));
     if (error instanceof AppError && [401, 403, 405, 413, 414, 415, 429].includes(error.status))
       audit(res, 'request_blocked', error.status);
     else if (error?.type === 'entity.too.large') audit(res, 'request_blocked', 413);
@@ -602,7 +635,7 @@ export function createApp(options: AppOptions = {}) {
           : undefined;
       if (retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(retryAfterSeconds));
       res.status(error.status).json({
-        error: error.message,
+        error: localizeError(error.message, error.code, language),
         code: error.code,
         ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
       });
@@ -624,30 +657,47 @@ export function createApp(options: AppOptions = {}) {
                   : path.startsWith('/api/proposals/')
                     ? 'Не удалось выбрать изменения. Обновите диалог и повторите.'
                     : 'Проверьте заполненные поля: название, дату, время и длительность.';
-      res.status(400).json({ error: message, code: 'VALIDATION_ERROR' });
+      res.status(400).json({
+        error: localizeError(message, 'VALIDATION_ERROR', language),
+        code: 'VALIDATION_ERROR',
+      });
       return;
     }
     if (error?.type === 'entity.too.large') {
-      res
-        .status(413)
-        .json({ error: 'Запрос слишком большой. Сократите текст.', code: 'REQUEST_TOO_LARGE' });
+      res.status(413).json({
+        error: localizeError(
+          'Запрос слишком большой. Сократите текст.',
+          'REQUEST_TOO_LARGE',
+          language,
+        ),
+        code: 'REQUEST_TOO_LARGE',
+      });
       return;
     }
     if (['encoding.unsupported', 'charset.unsupported'].includes(error?.type)) {
-      res
-        .status(415)
-        .json({ error: 'Отправьте JSON в UTF-8 без сжатия.', code: 'INVALID_ENCODING' });
+      res.status(415).json({
+        error: localizeError('Отправьте JSON в UTF-8 без сжатия.', 'INVALID_ENCODING', language),
+        code: 'INVALID_ENCODING',
+      });
       return;
     }
     if (error instanceof SyntaxError && 'body' in error) {
-      res
-        .status(400)
-        .json({ error: 'Не удалось прочитать запрос. Попробуйте снова.', code: 'INVALID_JSON' });
+      res.status(400).json({
+        error: localizeError(
+          'Не удалось прочитать запрос. Попробуйте снова.',
+          'INVALID_JSON',
+          language,
+        ),
+        code: 'INVALID_JSON',
+      });
       return;
     }
     res.status(500).json({
-      error:
+      error: localizeError(
         'Не удалось выполнить действие. Ваши сохранённые данные доступны после обновления страницы.',
+        'SERVER_ERROR',
+        language,
+      ),
       code: 'SERVER_ERROR',
     });
   };

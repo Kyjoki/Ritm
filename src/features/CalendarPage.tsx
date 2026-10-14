@@ -1,3 +1,4 @@
+import { useI18n, translate, type Language } from '../lib/i18n';
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import {
   CalendarDays,
@@ -92,13 +93,14 @@ function freeIntervals(entries: CalendarOccurrence[]): { start: number; end: num
   return intervals.filter((interval) => interval.end - interval.start >= 30);
 }
 
-function occurrenceLabel(entry: CalendarOccurrence): string {
+function occurrenceLabel(entry: CalendarOccurrence, language: Language): string {
+  const t = (source: string) => translate(language, source);
   const time = entry.allDay
-    ? 'Весь день'
+    ? t('Весь день')
     : entry.start === null
-      ? 'Без времени'
+      ? t('Без времени')
       : `${entry.startLabel ?? formatTime(entry.start)}–${entry.endLabel ?? formatTime(entry.end ?? entry.start)}`;
-  return `${entry.title}, ${time}${entry.source === 'google' ? ', Google Calendar' : ', Ritm'}${entry.completed ? ', выполнено' : ''}${entry.source === 'ritm' && entry.task.repeat !== 'none' ? ', повторяющаяся запись, редактировать серию' : ''}${entry.source === 'google' && entry.event.readOnly ? ', только просмотр' : ''}${entry.clockChange ? ', перевод часов' : ''}`;
+  return `${entry.title}, ${time}${entry.source === 'google' ? ', Google Calendar' : ', Ritm'}${entry.completed ? t(', выполнено') : ''}${entry.source === 'ritm' && entry.task.repeat !== 'none' ? t(', повторяющаяся запись, редактировать серию') : ''}${entry.source === 'google' && entry.event.readOnly ? t(', только просмотр') : ''}${entry.clockChange ? t(', перевод часов') : ''}`;
 }
 
 function entryTime(entry: CalendarOccurrence, edge: 'start' | 'end'): string {
@@ -115,12 +117,13 @@ function AgendaEntry({
   entry: CalendarOccurrence;
   onEdit: (entry: CalendarOccurrence) => void;
 }) {
+  const { t, language } = useI18n();
   return (
     <button
       type="button"
       className={`cal-agenda-entry ${entry.completed ? 'cal-completed' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''}`}
       onClick={() => onEdit(entry)}
-      aria-label={occurrenceLabel(entry)}
+      aria-label={occurrenceLabel(entry, language)}
       style={calendarEntryStyle(entry)}
     >
       <span className="cal-agenda-time">
@@ -139,21 +142,23 @@ function AgendaEntry({
           {entry.source === 'google'
             ? 'Google Calendar'
             : entry.task.kind === 'event'
-              ? 'Событие Ritm'
-              : 'Задача Ritm'}{' '}
-          · {entry.allDay ? 'Весь день' : durationLabel(Math.ceil(entry.duration))}
-          {entry.source === 'ritm' && entry.task.priority === 'high' ? ' · Высокий приоритет' : ''}
-          {entry.continued ? ' · Продолжение' : ''}
-          {entry.clockChange ? ' · Перевод часов' : ''}
-          {entry.source === 'google' && entry.event.readOnly ? ' · Просмотр' : ''}
-          {entry.source === 'google' && !entry.busy ? ' · Время свободно' : ''}
+              ? t('Событие Ritm')
+              : t('Задача Ritm')}{' '}
+          · {entry.allDay ? t('Весь день') : durationLabel(Math.ceil(entry.duration), language)}
+          {entry.source === 'ritm' && entry.task.priority === 'high'
+            ? t(' · Высокий приоритет')
+            : ''}
+          {entry.continued ? t(' · Продолжение') : ''}
+          {entry.clockChange ? t(' · Перевод часов') : ''}
+          {entry.source === 'google' && entry.event.readOnly ? t(' · Просмотр') : ''}
+          {entry.source === 'google' && !entry.busy ? t(' · Время свободно') : ''}
         </span>
       </span>
       {entry.source === 'ritm' && entry.task.repeat !== 'none' ? (
-        <Repeat2 size={16} aria-label="Повторяющаяся запись" />
+        <Repeat2 size={16} aria-label={t('Повторяющаяся запись')} />
       ) : null}
       {entry.completed ? (
-        <Check size={18} aria-label="Выполнено" />
+        <Check size={18} aria-label={t('Выполнено')} />
       ) : (
         <ChevronRight size={17} aria-hidden="true" />
       )}
@@ -182,6 +187,7 @@ export function CalendarPage({
   onGoogleRefresh,
   onOpenSettings,
 }: CalendarPageProps) {
+  const { t, language, locale } = useI18n();
   const [selectedDate, setSelectedDate] = useState(today);
   const googleConnected = googleStatus?.status === 'connected';
   const sourceAvailable = googleConnected && Boolean(onGoogleCreate);
@@ -241,13 +247,13 @@ export function CalendarPage({
     () =>
       periodDays.map((date) => ({
         date,
-        entries: calendarOccurrences(tasks, googleEvents, date, timeZone),
+        entries: calendarOccurrences(tasks, googleEvents, date, timeZone, language),
       })),
-    [tasks, googleEvents, periodDays, timeZone],
+    [tasks, googleEvents, periodDays, timeZone, language],
   );
   const selectedEntries = useMemo(
-    () => calendarOccurrences(tasks, googleEvents, selectedDate, timeZone),
-    [tasks, googleEvents, selectedDate, timeZone],
+    () => calendarOccurrences(tasks, googleEvents, selectedDate, timeZone, language),
+    [tasks, googleEvents, selectedDate, timeZone, language],
   );
   const overlapsByDay = useMemo(
     () =>
@@ -267,11 +273,11 @@ export function CalendarPage({
       const date = addDays(first, index);
       return {
         date,
-        entries: calendarOccurrences(tasks, googleEvents, date, timeZone),
+        entries: calendarOccurrences(tasks, googleEvents, date, timeZone, language),
         currentMonth: date.slice(0, 7) === selectedDate.slice(0, 7),
       };
     });
-  }, [tasks, googleEvents, selectedDate, timeZone]);
+  }, [tasks, googleEvents, selectedDate, timeZone, language]);
   const gridHeight = HOURS.length * HOUR_HEIGHT;
   useEffect(() => {
     if ((isMobile && view === 'day') || view === 'month') {
@@ -287,10 +293,10 @@ export function CalendarPage({
   const noDateTasks = tasks.filter((task) => task.date === null && !task.completed);
   const periodLabel =
     view === 'month'
-      ? formatDate(selectedDate, { month: 'long', year: 'numeric' })
+      ? formatDate(selectedDate, { month: 'long', year: 'numeric' }, language)
       : view === 'day'
-        ? formatDate(selectedDate, { day: 'numeric', month: 'long', weekday: 'short' })
-        : `${formatDate(weekStart, { day: 'numeric', month: 'short' })} — ${formatDate(addDays(weekStart, 6), { day: 'numeric', month: 'short', year: 'numeric' })}`;
+        ? formatDate(selectedDate, { day: 'numeric', month: 'long', weekday: 'short' }, language)
+        : `${formatDate(weekStart, { day: 'numeric', month: 'short' }, language)} — ${formatDate(addDays(weekStart, 6), { day: 'numeric', month: 'short', year: 'numeric' }, language)}`;
 
   function navigate(direction: number) {
     setSelectedDate((date) =>
@@ -331,7 +337,7 @@ export function CalendarPage({
     else onEdit(entry.task);
   }
   const previewEntry = preview
-    ? (calendarOccurrences(tasks, googleEvents, preview.date, timeZone).find(
+    ? (calendarOccurrences(tasks, googleEvents, preview.date, timeZone, language).find(
         (entry) => entry.key === preview.key,
       ) ?? null)
     : null;
@@ -377,8 +383,8 @@ export function CalendarPage({
     }
   }
   const pickerEntries = eventPicker
-    ? calendarOccurrences(tasks, googleEvents, eventPicker.date, timeZone).filter((entry) =>
-        eventPicker.keys.includes(entry.key),
+    ? calendarOccurrences(tasks, googleEvents, eventPicker.date, timeZone, language).filter(
+        (entry) => eventPicker.keys.includes(entry.key),
       )
     : [];
   const uncertainGoogle =
@@ -391,7 +397,7 @@ export function CalendarPage({
   const initialGoogleLoading = googleLoading && !googleFetchedAt;
   const fetchedLabel =
     fetchedDate && Number.isFinite(fetchedDate.getTime())
-      ? new Intl.DateTimeFormat('ru-RU', {
+      ? new Intl.DateTimeFormat(locale, {
           timeZone,
           day: 'numeric',
           month: 'short',
@@ -402,18 +408,18 @@ export function CalendarPage({
     <div className={`cal-page ${isMobile && view === 'week' ? 'cal-mobile-week' : ''}`}>
       <header className="page-heading">
         <div>
-          <p className="page-eyebrow">Пространство для твоих планов</p>
-          <h1>Календарь</h1>
-          <p className="page-description">Находи время для того, что важно.</p>
+          <p className="page-eyebrow">{t('Пространство для твоих планов')}</p>
+          <h1>{t('Календарь')}</h1>
+          <p className="page-description">{t('Находи время для того, что важно.')}</p>
         </div>
         <button
           type="button"
           className="button button-primary"
-          aria-label="Добавить запись"
+          aria-label={t('Добавить запись')}
           onClick={() => addEntry(selectedDate)}
         >
           <Plus size={17} aria-hidden="true" />
-          <span>Добавить запись</span>
+          <span>{t('Добавить запись')}</span>
         </button>
       </header>
       <div className="cal-toolbar">
@@ -421,7 +427,7 @@ export function CalendarPage({
           <button
             className="cal-icon-button"
             type="button"
-            aria-label={`Предыдущий период: ${VIEW_LABELS[view].toLowerCase()}`}
+            aria-label={t('Предыдущий период: {p0}', { p0: t(VIEW_LABELS[view]).toLowerCase() })}
             onClick={() => navigate(-1)}
           >
             <ChevronLeft size={19} aria-hidden="true" />
@@ -430,7 +436,7 @@ export function CalendarPage({
           <button
             className="cal-icon-button"
             type="button"
-            aria-label={`Следующий период: ${VIEW_LABELS[view].toLowerCase()}`}
+            aria-label={t('Следующий период: {p0}', { p0: t(VIEW_LABELS[view]).toLowerCase() })}
             onClick={() => navigate(1)}
           >
             <ChevronRight size={19} aria-hidden="true" />
@@ -440,20 +446,21 @@ export function CalendarPage({
             type="button"
             onClick={() => setSelectedDate(today)}
           >
-            Сегодня
+            {t('Сегодня')}
           </button>
           {view !== 'month' && (!isMobile || view === 'week') ? (
             <button
               className="button button-secondary cal-now"
               type="button"
               onClick={showNow}
-              aria-label="Показать текущее время"
+              aria-label={t('Показать текущее время')}
             >
-              <Clock3 size={15} aria-hidden="true" /> Сейчас
+              <Clock3 size={15} aria-hidden="true" />
+              {t('Сейчас')}
             </button>
           ) : null}
         </div>
-        <div className="cal-segment" role="group" aria-label="Вид календаря">
+        <div className="cal-segment" role="group" aria-label={t('Вид календаря')}>
           {(Object.keys(VIEW_LABELS) as CalendarView[]).map((value) => (
             <button
               key={value}
@@ -462,18 +469,18 @@ export function CalendarPage({
               aria-pressed={view === value}
               onClick={() => setView(value)}
             >
-              {VIEW_LABELS[value]}
+              {t(VIEW_LABELS[value])}
             </button>
           ))}
         </div>
       </div>
 
       {view === 'month' ? (
-        <section className="panel cal-month-panel" aria-label="Календарь на месяц">
+        <section className="panel cal-month-panel" aria-label={t('Календарь на месяц')}>
           <div className="cal-month-grid">
             {WEEKDAYS.map((day) => (
               <span key={day} className="cal-weekday">
-                {day}
+                {t(day)}
               </span>
             ))}
             {monthDays.map(({ date, entries, currentMonth }) => (
@@ -484,7 +491,10 @@ export function CalendarPage({
                 <button
                   className="cal-month-day"
                   type="button"
-                  aria-label={`${formatDate(date, { day: 'numeric', month: 'long' })}, записей: ${entries.length}. Открыть день`}
+                  aria-label={t('{p0}, записей: {p1}. Открыть день', {
+                    p0: formatDate(date, { day: 'numeric', month: 'long' }, language),
+                    p1: entries.length,
+                  })}
                   onClick={() => {
                     setSelectedDate(date);
                     setView('day');
@@ -492,7 +502,9 @@ export function CalendarPage({
                 >
                   <span>{parseDate(date).getUTCDate()}</span>
                   <small>
-                    {entries.length ? `${entries.length} ${recordWord(entries.length)}` : ''}
+                    {entries.length
+                      ? `${entries.length} ${recordWord(entries.length, language)}`
+                      : ''}
                   </small>
                 </button>
                 <div className="cal-month-events">
@@ -513,8 +525,8 @@ export function CalendarPage({
                           className={`cal-month-event ${entry.completed ? 'cal-completed' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''}`}
                           type="button"
                           onClick={() => editEntry(entry)}
-                          aria-label={occurrenceLabel(entry)}
-                          title={occurrenceLabel(entry)}
+                          aria-label={occurrenceLabel(entry, language)}
+                          title={occurrenceLabel(entry, language)}
                           style={calendarEntryStyle(entry)}
                         >
                           {entry.source === 'google' && entry.event.googleTask
@@ -527,14 +539,18 @@ export function CalendarPage({
                         </button>
                       ))}
                   {!isMobile && entries.length > 2 ? (
-                    <span className="cal-month-more">Ещё {entries.length - 2}</span>
+                    <span className="cal-month-more">
+                      {t('Ещё {count}', { count: entries.length - 2 })}
+                    </span>
                   ) : null}
                 </div>
                 {!isMobile ? (
                   <button
                     className="cal-month-add"
                     type="button"
-                    aria-label={`Добавить запись на ${formatDate(date, { day: 'numeric', month: 'long' })}`}
+                    aria-label={t('Добавить запись на {p0}', {
+                      p0: formatDate(date, { day: 'numeric', month: 'long' }, language),
+                    })}
                     onClick={() => addEntry(date)}
                   >
                     <Plus size={15} aria-hidden="true" />
@@ -549,8 +565,10 @@ export function CalendarPage({
           {occurrencesByDay.map(({ date, entries }) => (
             <div className="cal-agenda-day" key={date}>
               <div className="cal-section-head">
-                <h2>{formatDate(date, { weekday: 'long', day: 'numeric', month: 'long' })}</h2>
-                <span>Записей: {entries.length}</span>
+                <h2>
+                  {formatDate(date, { weekday: 'long', day: 'numeric', month: 'long' }, language)}
+                </h2>
+                <span>{t('Записей: {count}', { count: entries.length })}</span>
               </div>
               {entries.length ? (
                 entries.map((entry) => (
@@ -561,8 +579,8 @@ export function CalendarPage({
                   <CalendarDays size={24} aria-hidden="true" />
                   <p>
                     {uncertainGoogle
-                      ? 'В Ritm на этот день пока нет планов'
-                      : 'На этот день пока нет планов'}
+                      ? t('В Ritm на этот день пока нет планов')
+                      : t('На этот день пока нет планов')}
                   </p>
                 </div>
               )}
@@ -582,7 +600,7 @@ export function CalendarPage({
                   >
                     <Plus size={16} aria-hidden="true" />
                     <span>
-                      {googleConnected ? 'Свободно' : 'Свободно в Ritm'}{' '}
+                      {googleConnected ? t('Свободно') : t('Свободно в Ritm')}{' '}
                       {formatTime(interval.start, { compact: true })}–
                       {formatTime(interval.end, { compact: true })}
                     </span>
@@ -591,7 +609,7 @@ export function CalendarPage({
               </div>
               <button className="cal-mobile-add" type="button" onClick={() => addEntry(date)}>
                 <Plus size={17} aria-hidden="true" />
-                Добавить запись
+                {t('Добавить запись')}
               </button>
             </div>
           ))}
@@ -599,7 +617,7 @@ export function CalendarPage({
       ) : (
         <section
           className="panel cal-calendar-panel"
-          aria-label={view === 'week' ? 'Расписание недели' : 'Расписание дня'}
+          aria-label={view === 'week' ? t('Расписание недели') : t('Расписание дня')}
         >
           <div
             className="cal-grid-header"
@@ -622,9 +640,11 @@ export function CalendarPage({
                   setSelectedDate(date);
                   setView('day');
                 }}
-                aria-label={`Показать ${formatDate(date, { day: 'numeric', month: 'long' })}`}
+                aria-label={t('Показать {p0}', {
+                  p0: formatDate(date, { day: 'numeric', month: 'long' }, language),
+                })}
               >
-                <span>{formatDate(date, { weekday: 'short' })}</span>
+                <span>{formatDate(date, { weekday: 'short' }, language)}</span>
                 <strong>{parseDate(date).getUTCDate()}</strong>
               </button>
             ))}
@@ -636,7 +656,7 @@ export function CalendarPage({
             >
               <span
                 className="cal-overlap-row-label"
-                title="Пересекающиеся записи"
+                title={t('Пересекающиеся записи')}
                 aria-hidden="true"
               >
                 <Layers2 size={13} />
@@ -651,8 +671,12 @@ export function CalendarPage({
                       setEventPicker({ date, keys: entries.map((entry) => entry.key) })
                     }
                     aria-haspopup="dialog"
-                    aria-label={`${formatDate(date, { day: 'numeric', month: 'long' })}: ${entries.length} ${recordWord(entries.length)} с пересечением. Выбрать событие`}
-                    title="Открыть пересекающиеся записи"
+                    aria-label={t('{p0}: {p1} {p2} с пересечением. Выбрать событие', {
+                      p0: formatDate(date, { day: 'numeric', month: 'long' }, language),
+                      p1: entries.length,
+                      p2: recordWord(entries.length, language),
+                    })}
+                    title={t('Открыть пересекающиеся записи')}
                   >
                     <Layers2 size={11} aria-hidden="true" />
                     <span>{entries.length}</span>
@@ -670,7 +694,7 @@ export function CalendarPage({
                 gridTemplateColumns: `${isMobile ? 40 : GRID_TIME_COLUMN}px repeat(${periodDays.length}, minmax(0, 1fr))`,
               }}
             >
-              <span>Весь день / без времени</span>
+              <span>{t('Весь день / без времени')}</span>
               {occurrencesByDay.map(({ date, entries }) => (
                 <div key={date}>
                   {entries
@@ -681,7 +705,7 @@ export function CalendarPage({
                         key={entry.key}
                         className={`cal-all-day-event ${entry.source === 'google' ? 'cal-google-entry' : ''}`}
                         onClick={() => editEntry(entry)}
-                        aria-label={occurrenceLabel(entry)}
+                        aria-label={occurrenceLabel(entry, language)}
                         style={calendarEntryStyle(entry)}
                       >
                         {entry.title}
@@ -737,7 +761,10 @@ export function CalendarPage({
                           top: ((hour * 60 + minute) / 60) * HOUR_HEIGHT,
                           height: HOUR_HEIGHT / 2,
                         }}
-                        aria-label={`Добавить запись: ${formatDate(date, { day: 'numeric', month: 'long' })}, ${formatTime(hour * 60 + minute)}`}
+                        aria-label={t('Добавить запись: {p0}, {p1}', {
+                          p0: formatDate(date, { day: 'numeric', month: 'long' }, language),
+                          p1: formatTime(hour * 60 + minute),
+                        })}
                         onClick={() => addEntry(date, minuteTime(hour * 60 + minute))}
                       >
                         <Plus size={15} aria-hidden="true" />
@@ -759,8 +786,8 @@ export function CalendarPage({
                           left: `calc(${(entry.lane * 100) / entry.lanes}% + ${isMobile ? 1 : 4}px)`,
                         }}
                         onClick={() => editEntry(entry)}
-                        title={occurrenceLabel(entry)}
-                        aria-label={occurrenceLabel(entry)}
+                        title={occurrenceLabel(entry, language)}
+                        aria-label={occurrenceLabel(entry, language)}
                       >
                         <strong>
                           {entry.source === 'google' && entry.event.googleTask
@@ -773,7 +800,7 @@ export function CalendarPage({
                         <span className="cal-event-time">
                           {entryTime(entry, 'start')}–{entryTime(entry, 'end')}
                           {entry.source === 'ritm' && entry.task.repeat !== 'none' ? ' · ↻' : ''}
-                          {entry.clockChange ? ' · Перевод часов' : ''}
+                          {entry.clockChange ? t(' · Перевод часов') : ''}
                         </span>
                       </button>
                     );
@@ -790,8 +817,8 @@ export function CalendarPage({
             </div>
           </div>
           <footer className="cal-calendar-foot">
-            <span>Одно расписание · Google Calendar</span>
-            <span>Выбери свободный интервал, чтобы добавить запись</span>
+            <span>{t('Одно расписание · Google Calendar')}</span>
+            <span>{t('Выбери свободный интервал, чтобы добавить запись')}</span>
           </footer>
         </section>
       )}
@@ -811,35 +838,41 @@ export function CalendarPage({
           <div className="cal-google-status-copy">
             <strong>
               {initialGoogleLoading
-                ? 'Загружаем Google Calendar…'
+                ? t('Загружаем Google Calendar…')
                 : googleError
-                  ? 'Google Calendar требует внимания'
+                  ? t('Google Calendar требует внимания')
                   : googleStatus?.status === 'reauth_required'
-                    ? 'Подключи Google Calendar заново'
+                    ? t('Подключи Google Calendar заново')
                     : googlePartial
-                      ? 'Загружена часть событий Google'
+                      ? t('Загружена часть событий Google')
                       : googleConnected
-                        ? 'Календарь синхронизирован'
-                        : 'Google Calendar пока не подключён'}
+                        ? t('Календарь синхронизирован')
+                        : t('Google Calendar пока не подключён')}
             </strong>
             <span>
               {googleError
-                ? `${googleError} Показанные события могут быть неактуальны.`
+                ? t('{p0} Показанные события могут быть неактуальны.', { p0: googleError })
                 : googlePartial
-                  ? 'Часть событий не загружена. Свободное время нужно уточнить в Google Calendar.'
+                  ? t(
+                      'Часть событий не загружена. Свободное время нужно уточнить в Google Calendar.',
+                    )
                   : initialGoogleLoading
-                    ? 'Обновляем выбранный период и синхронизируем записи.'
+                    ? t('Обновляем выбранный период и синхронизируем записи.')
                     : googleStatus?.status === 'reauth_required'
-                      ? 'Разрешение нужно обновить в настройках.'
+                      ? t('Разрешение нужно обновить в настройках.')
                       : googleConnected
-                        ? 'Изменения сохраняются в Google Calendar. Расписание обновляется автоматически.'
-                        : 'Подключи Google Calendar в настройках, чтобы работать с единым расписанием.'}
+                        ? t(
+                            'Изменения сохраняются в Google Calendar. Расписание обновляется автоматически.',
+                          )
+                        : t(
+                            'Подключи Google Calendar в настройках, чтобы работать с единым расписанием.',
+                          )}
             </span>
             {fetchedLabel ? (
               <small className="cal-google-updated">
-                Последнее обновление:{' '}
+                {t('Последнее обновление:')}{' '}
                 <time dateTime={googleFetchedAt ?? undefined}>{fetchedLabel}</time>
-                {googleLoading ? ' · Обновляем…' : ''}
+                {googleLoading ? t(' · Обновляем…') : ''}
               </small>
             ) : null}
           </div>
@@ -852,12 +885,12 @@ export function CalendarPage({
                 onClick={onGoogleRefresh}
               >
                 <RefreshCw size={15} aria-hidden="true" />
-                Обновить
+                {t('Обновить')}
               </button>
             ) : null}
             {onOpenSettings && !googleConnected ? (
               <button type="button" className="cal-google-settings" onClick={onOpenSettings}>
-                Настройки
+                {t('Настройки')}
                 <ChevronRight size={15} aria-hidden="true" />
               </button>
             ) : null}
@@ -870,35 +903,35 @@ export function CalendarPage({
           <div className="cal-section-head">
             <h2>
               <Sparkles size={17} aria-hidden="true" />
-              Твой темп
+              {t('Твой темп')}
             </h2>
             <span>
               {view === 'month'
-                ? 'Выбранный день'
+                ? t('Выбранный день')
                 : view === 'week'
-                  ? 'Эта неделя'
-                  : 'Выбранный день'}
+                  ? t('Эта неделя')
+                  : t('Выбранный день')}
             </span>
           </div>
           <p>
             {(view === 'month' ? selectedEntries.length : visibleCount) ? (
               <>
-                {uncertainGoogle ? 'Показано' : 'В плане'}{' '}
+                {uncertainGoogle ? t('Показано') : t('В плане')}{' '}
                 <strong>{view === 'month' ? selectedEntries.length : visibleCount}</strong>{' '}
-                {recordWord(view === 'month' ? selectedEntries.length : visibleCount)}. Оставь
-                немного времени для себя.
+                {recordWord(view === 'month' ? selectedEntries.length : visibleCount, language)}
+                {t('. Оставь немного времени для себя.')}
               </>
             ) : uncertainGoogle ? (
-              'Обновляем расписание. Дождись синхронизации.'
+              t('Обновляем расписание. Дождись синхронизации.')
             ) : (
-              'Пока всё свободно. Начни с одного важного дела.'
+              t('Пока всё свободно. Начни с одного важного дела.')
             )}
           </p>
-          <small>При редактировании повторения изменится только выбранная запись.</small>
+          <small>{t('При редактировании повторения изменится только выбранная запись.')}</small>
         </section>
         <section className="panel cal-backlog">
           <div className="cal-section-head">
-            <h2>Без даты</h2>
+            <h2>{t('Без даты')}</h2>
             <span>{noDateTasks.length}</span>
           </div>
           {noDateTasks.length ? (
@@ -909,22 +942,28 @@ export function CalendarPage({
               </button>
             ))
           ) : (
-            <p>Все дела уже нашли своё место в расписании.</p>
+            <p>{t('Все дела уже нашли своё место в расписании.')}</p>
           )}
           {noDateTasks.length > 4 ? (
-            <small>Ещё {noDateTasks.length - 4} в разделе «Мой день»</small>
+            <small>
+              {t('Ещё {count} в разделе «Мой день»', { count: noDateTasks.length - 4 })}
+            </small>
           ) : null}
         </section>
       </div>
       {eventPicker && isMobile && view === 'week' ? (
         <Dialog
-          title="Пересекающиеся события"
+          title={t('Пересекающиеся события')}
           className="cal-event-picker"
           onClose={() => setEventPicker(null)}
         >
           <p className="cal-picker-description">
-            {formatDate(eventPicker.date, { weekday: 'long', day: 'numeric', month: 'long' })}.
-            Выбери запись, чтобы посмотреть подробности или изменить её.
+            {formatDate(
+              eventPicker.date,
+              { weekday: 'long', day: 'numeric', month: 'long' },
+              language,
+            )}
+            {t('. Выбери запись, чтобы посмотреть подробности или изменить её.')}
           </p>
           <div className="cal-picker-list">
             {pickerEntries.map((entry) => (
@@ -937,18 +976,20 @@ export function CalendarPage({
                   setEventPicker(null);
                   editEntry(entry);
                 }}
-                aria-label={occurrenceLabel(entry)}
+                aria-label={occurrenceLabel(entry, language)}
               >
                 <span className="cal-picker-color" aria-hidden="true" />
                 <span className="cal-picker-copy">
                   <strong>{entry.title}</strong>
                   <span>
                     {entry.allDay
-                      ? 'Весь день'
+                      ? t('Весь день')
                       : entry.start === null
-                        ? 'Без времени'
+                        ? t('Без времени')
                         : `${entryTime(entry, 'start')}–${entryTime(entry, 'end')}`}
-                    {entry.source === 'google' && entry.event.readOnly ? ' · Только просмотр' : ''}
+                    {entry.source === 'google' && entry.event.readOnly
+                      ? t(' · Только просмотр')
+                      : ''}
                   </span>
                 </span>
                 <ChevronRight size={18} aria-hidden="true" />
@@ -956,7 +997,9 @@ export function CalendarPage({
             ))}
             {!pickerEntries.length ? (
               <p className="cal-picker-description">
-                Эти события уже изменились. Закрой список и выбери запись в обновлённом календаре.
+                {t(
+                  'Эти события уже изменились. Закрой список и выбери запись в обновлённом календаре.',
+                )}
               </p>
             ) : null}
           </div>
@@ -966,7 +1009,7 @@ export function CalendarPage({
               className="button button-secondary"
               onClick={() => setEventPicker(null)}
             >
-              Закрыть список
+              {t('Закрыть список')}
             </button>
           </div>
         </Dialog>

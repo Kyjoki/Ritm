@@ -25,6 +25,7 @@ import type {
   TaskInput,
 } from '../shared/types';
 import { api, ApiError } from './lib/api';
+import { useI18n, getLanguage, translate } from './lib/i18n';
 import { dateInZone, minutesInZone } from './lib/date';
 import { addDays, getDayOccurrences, isTimedOccurrence } from './features/calendar-utils';
 import { CalendarPage } from './features/CalendarPage';
@@ -53,6 +54,7 @@ function currentPage(): Page {
 }
 type Toast = { message: string; error?: boolean; undo?: () => Promise<void>; id: number };
 export default function App() {
+  const { language, t: tr, setLanguage } = useI18n();
   const [data, setData] = useState<Bootstrap | null>(null),
     [page, setPage] = useState<Page>(currentPage);
   const [requiresLogin, setRequiresLogin] = useState(false),
@@ -101,14 +103,22 @@ export default function App() {
         return;
       }
       const next = await api.bootstrap();
-      if (generation === loadGeneration.current) setData(next);
+      if (generation === loadGeneration.current) {
+        setLanguage(next.settings.language);
+        setData(next);
+      }
     } catch (e) {
       if (generation === loadGeneration.current)
-        setLoadError(e instanceof Error ? e.message : 'Не удалось загрузить Ritm.');
+        setLoadError(
+          e instanceof Error ? e.message : translate(getLanguage(), 'Не удалось загрузить Ritm.'),
+        );
     } finally {
       if (generation === loadGeneration.current) setLoading(false);
     }
-  }, []);
+  }, [setLanguage]);
+  useEffect(() => {
+    if (data) setLanguage(data.settings.language);
+  }, [data?.settings.language, setLanguage]);
   useEffect(() => {
     void load();
     return () => {
@@ -173,8 +183,8 @@ export default function App() {
     return () => media.removeEventListener('change', update);
   }, [theme, page]);
   useEffect(() => {
-    document.title = `${page === 'login-preview' ? 'Вход' : navigation.find((n) => n.id === page)?.label} — Ritm`;
-  }, [page]);
+    document.title = `${tr(page === 'login-preview' ? tr('Вход') : (navigation.find((n) => n.id === page)?.label ?? tr('Мой день')))} — Ritm`;
+  }, [page, tr]);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(
@@ -196,6 +206,7 @@ export default function App() {
         google.result?.events ?? [],
         googlePreview.date,
         data?.settings.timeZone ?? 'Asia/Qyzylorda',
+        language,
       ).find((entry) => entry.source === 'google' && entry.event.id === googlePreview.id) ?? null)
     : null;
   const synchronizeTask = useCallback(
@@ -252,7 +263,7 @@ export default function App() {
           setMigrationError(
             failure instanceof Error
               ? failure.message
-              : 'Не удалось синхронизировать запись. Нажми «Обновить», чтобы повторить.',
+              : tr('Не удалось синхронизировать запись. Нажми «Обновить», чтобы повторить.'),
           );
           // Pause the whole batch during an outage/auth/rate failure; retry explicitly.
           if (
@@ -295,15 +306,15 @@ export default function App() {
         const connected = outcome === 'connected' && status.status === 'connected';
         notify(
           connected
-            ? 'Google Calendar подключён'
-            : 'Не удалось подключить Google Calendar. Повтори подключение в настройках.',
+            ? tr('Google Calendar подключён')
+            : tr('Не удалось подключить Google Calendar. Повтори подключение в настройках.'),
           !connected,
         );
       })
       .catch((handle) => {
         if (active)
           notify(
-            handle instanceof Error ? handle.message : 'Не удалось проверить Google Calendar.',
+            handle instanceof Error ? handle.message : tr('Не удалось проверить Google Calendar.'),
             true,
           );
       });
@@ -325,7 +336,7 @@ export default function App() {
         notify(`${title}: ${body}`);
       }
     };
-    for (const o of getDayOccurrences(data.tasks, today).filter(isTimedOccurrence)) {
+    for (const o of getDayOccurrences(data.tasks, today, language).filter(isTimedOccurrence)) {
       const key = `${o.key}:${o.task.updatedAt}`;
       if (
         !o.completed &&
@@ -335,7 +346,7 @@ export default function App() {
         !notified.current.has(key)
       ) {
         notified.current.add(key);
-        remind('Ritm · Через 15 минут', o.task.title, key);
+        remind(tr('Ritm · Через 15 минут'), o.task.title, key);
       }
     }
     if (
@@ -345,14 +356,18 @@ export default function App() {
       !notified.current.has(`brief:${today}`)
     ) {
       notified.current.add(`brief:${today}`);
-      const count = getDayOccurrences(data.tasks, today).filter((o) => !o.completed).length;
+      const count = getDayOccurrences(data.tasks, today, language).filter(
+        (o) => !o.completed,
+      ).length;
       remind(
-        'Ritm · Ваш день',
-        `В плане на сегодня: ${count}. Откройте «Мой день», чтобы выбрать первый шаг.`,
+        tr('Ritm · Ваш день'),
+        tr('В плане на сегодня: {count}. Откройте «Мой день», чтобы выбрать первый шаг.', {
+          count,
+        }),
         `brief:${today}`,
       );
     }
-  }, [data, today, now, notify]);
+  }, [data, today, now, notify, tr, language]);
   const go = useCallback((next: Page) => {
     setPage(next);
     window.location.hash = next;
@@ -364,9 +379,9 @@ export default function App() {
         setData(null);
         setRequiresLogin(true);
       }
-      notify(error instanceof Error ? error.message : 'Не удалось выполнить действие.', true);
+      notify(error instanceof Error ? error.message : tr('Не удалось выполнить действие.'), true);
     },
-    [notify],
+    [notify, tr],
   );
   const putTask = (task: Task) =>
     setData((old) =>
@@ -392,7 +407,7 @@ export default function App() {
     );
   const saveTask = async (value: TaskInput, id?: string) => {
     if (value.calendarEntry !== false && value.date && google.status.status !== 'connected')
-      throw new Error('Подключи Google Calendar в настройках, чтобы назначить дату записи.');
+      throw new Error(tr('Подключи Google Calendar в настройках, чтобы назначить дату записи.'));
     if (
       value.calendarEntry !== false &&
       value.date &&
@@ -400,24 +415,26 @@ export default function App() {
       !google.status.extendedColors
     )
       throw new Error(
-        'Разреши новые цвета в Настройках → Google Calendar, чтобы сохранить этот оттенок в календаре.',
+        tr(
+          'Разреши новые цвета в Настройках → Google Calendar, чтобы сохранить этот оттенок в календаре.',
+        ),
       );
     const task = id ? await api.updateTask(id, value) : await api.createTask(value);
     putTask(task);
     notify(
       value.calendarEntry !== false && value.date
-        ? 'Синхронизируем запись с календарём'
+        ? tr('Синхронизируем запись с календарём')
         : id
-          ? 'Изменения сохранены'
-          : 'Задача добавлена',
+          ? tr('Изменения сохранены')
+          : tr('Задача добавлена'),
     );
   };
   const deleteTask = async (task: Task) => {
     const result = await api.deleteTask(task.id);
     setData((old) => (old ? { ...old, tasks: old.tasks.filter((t) => t.id !== task.id) } : old));
-    notify('Задача удалена', false, async () => {
+    notify(tr('Задача удалена'), false, async () => {
       putTask(await api.restoreTask(result.deletedTask));
-      notify('Задача восстановлена');
+      notify(tr('Задача восстановлена'));
     });
   };
   const quickAddTask = async (title: string) => {
@@ -473,10 +490,14 @@ export default function App() {
         occurrenceDate: date,
       });
       putTask(changed);
-      notify(!completed ? 'Задача выполнена' : 'Задача возвращена в план', false, async () => {
-        putTask(await api.updateTask(task.id, { completed, occurrenceDate: date }));
-        notify('Действие отменено');
-      });
+      notify(
+        !completed ? tr('Задача выполнена') : tr('Задача возвращена в план'),
+        false,
+        async () => {
+          putTask(await api.updateTask(task.id, { completed, occurrenceDate: date }));
+          notify(tr('Действие отменено'));
+        },
+      );
     } catch (e) {
       handleError(e);
     } finally {
@@ -548,7 +569,7 @@ export default function App() {
             ))}
           </div>
           <p>
-            <LoaderCircle size={18} className="spinning" /> Собираем ваш день…
+            <LoaderCircle size={18} className="spinning" /> {tr('Собираем ваш день…')}{' '}
           </p>
         </div>
       </div>
@@ -559,10 +580,10 @@ export default function App() {
         <Brand />
         <div className="startup-card startup-error">
           <CircleAlert size={36} />
-          <h1>Не удалось загрузить план</h1>
+          <h1>{tr('Не удалось загрузить план')}</h1>
           <p>{loadError}</p>
           <button className="button button-primary" onClick={() => void load()}>
-            <RefreshCw size={17} /> Попробовать снова
+            <RefreshCw size={17} /> {tr('Попробовать снова')}{' '}
           </button>
         </div>
       </div>
@@ -586,13 +607,17 @@ export default function App() {
           document.getElementById('main-content')?.focus();
         }}
       >
-        Перейти к содержимому
+        {tr('Перейти к содержимому')}{' '}
       </a>
       <aside className="sidebar">
-        <button className="brand-button" onClick={() => go('day')} aria-label="Ritm — Мой день">
+        <button
+          className="brand-button"
+          onClick={() => go('day')}
+          aria-label={tr('Ritm — Мой день')}
+        >
           <Brand />
         </button>
-        <nav className="sidebar-nav" aria-label="Основная навигация">
+        <nav className="sidebar-nav" aria-label={tr('Основная навигация')}>
           {navigation.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -601,20 +626,21 @@ export default function App() {
               aria-current={page === id ? 'page' : undefined}
             >
               <Icon size={18} />
-              <span>{label}</span>
+              <span>{tr(label)}</span>
               {page === id ? <span className="nav-dot" /> : null}
             </button>
           ))}
         </nav>
         <div className="sidebar-bottom">
           <div className="sidebar-note">
-            <span className="status-dot" />В своём ритме
+            <span className="status-dot" />
+            {tr('В своём ритме')}{' '}
           </div>
           <button className="profile-button" onClick={() => go('settings')}>
             <span className="avatar">{data.settings.displayName.slice(0, 1).toUpperCase()}</span>
             <span>
               <strong>{data.settings.displayName}</strong>
-              <small>Личное пространство</small>
+              <small>{tr('Личное пространство')}</small>
             </span>
             <Settings2 size={15} />
           </button>
@@ -625,11 +651,13 @@ export default function App() {
           <div className="workspace-brand">
             <Brand />
           </div>
-          <span>ЛИЧНОЕ ПРОСТРАНСТВО</span>
+          <span>{tr('ЛИЧНОЕ ПРОСТРАНСТВО')}</span>
           <button
             className="icon-button theme-switch"
             onClick={() => void themeToggle()}
-            aria-label={resolvedTheme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему'}
+            aria-label={
+              resolvedTheme === 'dark' ? tr('Включить светлую тему') : tr('Включить тёмную тему')
+            }
           >
             {resolvedTheme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </button>
@@ -681,7 +709,7 @@ export default function App() {
               }}
               onCreate={(draft) => {
                 if (google.status.status !== 'connected') {
-                  notify('Подключи Google Calendar в настройках, чтобы добавить запись.', true);
+                  notify(tr('Подключи Google Calendar в настройках, чтобы добавить запись.'), true);
                   go('settings');
                   return;
                 }
@@ -706,7 +734,7 @@ export default function App() {
               timeZone={data.settings.timeZone}
               onEdit={(task) => setTaskDialog({ task })}
               onCreate={() => {
-                notify('Подключи Google Calendar в настройках, чтобы добавить запись.', true);
+                notify(tr('Подключи Google Calendar в настройках, чтобы добавить запись.'), true);
                 go('settings');
               }}
               googleStatus={google.status}
@@ -765,7 +793,7 @@ export default function App() {
                       }
                     : old,
                 );
-                notify('Выбранные изменения применены');
+                notify(tr('Выбранные изменения применены'));
               }}
               onReject={async (c, m, ids) => {
                 putConversation(await api.reject(c, m, ids));
@@ -783,7 +811,7 @@ export default function App() {
                       }
                     : old,
                 );
-                notify('Изменения расписания отменены');
+                notify(tr('Изменения расписания отменены'));
               }}
               onOpenSettings={() => go('settings')}
               initialPrompt={prompt}
@@ -817,10 +845,10 @@ export default function App() {
         </div>
         <footer className="app-footer">
           <span>Ritm</span>
-          <span>Меньше шума. Больше ясности.</span>
+          <span>{tr('Меньше шума. Больше ясности.')}</span>
         </footer>
       </main>
-      <nav className="mobile-nav" aria-label="Основная мобильная навигация">
+      <nav className="mobile-nav" aria-label={tr('Основная мобильная навигация')}>
         {navigation.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -829,7 +857,7 @@ export default function App() {
             aria-current={page === id ? 'page' : undefined}
           >
             <Icon size={21} />
-            <span>{label}</span>
+            <span>{tr(label)}</span>
           </button>
         ))}
       </nav>
@@ -872,13 +900,13 @@ export default function App() {
               : await api.createGoogleEvent(input, requestId);
             google.upsertEvent(saved);
             google.refresh();
-            notify(event ? 'Изменения синхронизированы' : 'Запись добавлена в календарь');
+            notify(event ? tr('Изменения синхронизированы') : tr('Запись добавлена в календарь'));
           }}
           onDelete={async (event) => {
             await api.deleteGoogleEvent(event.id, event.etag);
             google.removeEvent(event.id);
             google.refresh();
-            notify('Запись удалена из календаря');
+            notify(tr('Запись удалена из календаря'));
           }}
         />
       ) : null}
@@ -892,13 +920,13 @@ export default function App() {
           {toast.undo ? (
             <button disabled={undoBusy} onClick={() => void runUndo()}>
               {undoBusy ? <LoaderCircle size={15} className="spinning" /> : <Undo2 size={15} />}
-              Отменить
+              {tr('Отменить')}{' '}
             </button>
           ) : null}
           <button
             className="toast-close"
             onClick={() => setToast(null)}
-            aria-label="Закрыть уведомление"
+            aria-label={tr('Закрыть уведомление')}
           >
             <X size={16} />
           </button>

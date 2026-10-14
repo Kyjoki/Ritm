@@ -1,3 +1,4 @@
+import { useI18n } from '../lib/i18n';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import {
   ArrowRight,
@@ -79,29 +80,35 @@ const prompts = [
   },
 ];
 
-function getErrorMessage(error: unknown): string {
+function getErrorMessage(error: unknown, t: ReturnType<typeof useI18n>['t']): string {
   const code =
     typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
   if (/stale|schedule_changed/i.test(code))
-    return 'Задача уже изменилась. Попросите Ritm составить новый план, чтобы использовать актуальное расписание.';
+    return t(
+      'Задача уже изменилась. Попросите Ritm составить новый план, чтобы использовать актуальное расписание.',
+    );
   if (/not_configured|missing_key/i.test(code))
-    return 'Подключите OpenAI в настройках и повторите запрос.';
+    return t('Подключите OpenAI в настройках и повторите запрос.');
   if (error instanceof ApiError && error.retryAfterSeconds && /rate_limit/i.test(code))
     return code === 'IDEA_REVIEW_RATE_LIMIT'
-      ? 'Достигнут лимит частоты разбора идей в Ritm. Повтор станет доступен после паузы.'
-      : 'Достигнут лимит частоты запросов в Ritm. Повтор станет доступен после паузы.';
-  if (error instanceof Error && error.message) return error.message;
-  return 'Не удалось выполнить действие. Проверьте соединение и попробуйте ещё раз.';
+      ? t('Достигнут лимит частоты разбора идей в Ritm. Повтор станет доступен после паузы.')
+      : t('Достигнут лимит частоты запросов в Ritm. Повтор станет доступен после паузы.');
+  if (error instanceof Error && error.message) return t(error.message);
+  return t('Не удалось выполнить действие. Проверьте соединение и попробуйте ещё раз.');
 }
 
-function formatSchedule(schedule: ScheduleTime) {
+function formatSchedule(
+  schedule: ScheduleTime,
+  locale: string,
+  t: ReturnType<typeof useI18n>['t'],
+) {
   const date = schedule.date
-    ? new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }).format(
+    ? new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'long', year: 'numeric' }).format(
         new Date(`${schedule.date}T12:00:00`),
       )
-    : 'Без даты';
-  const time = schedule.time ? formatTime(schedule.time) : 'Время не выбрано';
-  return { date, time, duration: `${schedule.duration} мин` };
+    : t('Без даты');
+  const time = schedule.time ? formatTime(schedule.time) : t('Время не выбрано');
+  return { date, time, duration: t('{count} мин', { count: schedule.duration }) };
 }
 
 const proposalStatus: Record<ScheduleProposal['status'], string> = {
@@ -112,6 +119,7 @@ const proposalStatus: Record<ScheduleProposal['status'], string> = {
 };
 
 function MessageCopyButton({ message }: { message: ChatMessage }) {
+  const { t, locale } = useI18n();
   const [status, setStatus] = useState<'idle' | 'copied' | 'error'>('idle');
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyAttempt = useRef(0);
@@ -128,17 +136,17 @@ function MessageCopyButton({ message }: { message: ChatMessage }) {
     const attempt = ++copyAttempt.current;
     if (resetTimer.current) clearTimeout(resetTimer.current);
     const steps = message.steps.length
-      ? `Понятные шаги\n${message.steps.map((step, index) => `${index + 1}. ${step}`).join('\n')}`
+      ? `${t('Понятные шаги')}\n${message.steps.map((step, index) => `${index + 1}. ${step}`).join('\n')}`
       : '';
     const proposals = message.proposals.length
-      ? `Предлагаемые изменения\n${message.proposals
+      ? `${t('Предлагаемые изменения')}\n${message.proposals
           .map((proposal) => {
-            const before = formatSchedule(proposal.before);
-            const after = formatSchedule(proposal.after);
+            const before = formatSchedule(proposal.before, locale, t);
+            const after = formatSchedule(proposal.after, locale, t);
             return [
-              `${proposal.title} — ${proposalStatus[proposal.status]}`,
-              `Было: ${before.date}, ${before.time}, ${before.duration}`,
-              `Станет: ${after.date}, ${after.time}, ${after.duration}`,
+              `${proposal.title} — ${t(proposalStatus[proposal.status])}`,
+              t('Было: {date}, {time}, {duration}', before),
+              t('Станет: {date}, {time}, {duration}', after),
               proposal.reason,
             ]
               .filter(Boolean)
@@ -149,7 +157,7 @@ function MessageCopyButton({ message }: { message: ChatMessage }) {
     try {
       await navigator.clipboard.writeText(
         message.ideaReview
-          ? ideaReviewCopyText(message.ideaReview)
+          ? ideaReviewCopyText(message.ideaReview, t)
           : [message.text, steps, proposals].filter(Boolean).join('\n\n'),
       );
       if (copyAttempt.current !== attempt) return;
@@ -168,16 +176,16 @@ function MessageCopyButton({ message }: { message: ChatMessage }) {
         ) : (
           <Copy size={14} aria-hidden="true" />
         )}
-        {status === 'copied' ? 'Скопировано' : 'Копировать ответ'}
+        {status === 'copied' ? t('Скопировано') : t('Копировать ответ')}
       </button>
       <span
         role="status"
         className={status === 'error' ? 'assistant-copy-error' : 'assistant-sr-only'}
       >
         {status === 'copied'
-          ? 'Ответ скопирован'
+          ? t('Ответ скопирован')
           : status === 'error'
-            ? 'Не удалось скопировать. Выделите текст и скопируйте вручную.'
+            ? t('Не удалось скопировать. Выделите текст и скопируйте вручную.')
             : ''}
       </span>
     </div>
@@ -193,6 +201,7 @@ interface ProposalCardProps {
 }
 
 function ProposalCard({ conversationId, message, onApply, onReject, onUndo }: ProposalCardProps) {
+  const { t, locale } = useI18n();
   const [selected, setSelected] = useState<string[]>([]);
   const [confirmation, setConfirmation] = useState<'apply' | 'undo' | null>(null);
   const [busy, setBusy] = useState(false);
@@ -259,7 +268,7 @@ function ProposalCard({ conversationId, message, onApply, onReject, onUndo }: Pr
       setSelected((current) => current.filter((id) => !ids.includes(id)));
       setConfirmation(null);
     } catch (caught) {
-      setError(getErrorMessage(caught));
+      setError(getErrorMessage(caught, t));
       setConfirmation(null);
     } finally {
       actionLock.current = false;
@@ -272,25 +281,25 @@ function ProposalCard({ conversationId, message, onApply, onReject, onUndo }: Pr
       ref={sectionRef}
       tabIndex={-1}
       className="assistant-proposals"
-      aria-label="Предлагаемые изменения расписания"
+      aria-label={t('Предлагаемые изменения расписания')}
       aria-busy={busy}
     >
       <div className="assistant-proposal-heading">
         <Sparkles size={16} aria-hidden="true" />
-        <h3>Предлагаемые изменения</h3>
+        <h3>{t('Предлагаемые изменения')}</h3>
         <span>{message.proposals.length}</span>
       </div>
       <p className="assistant-proposal-hint">
         {pending.length
-          ? 'Выберите подходящие изменения. Ritm применит их после вашего подтверждения.'
+          ? t('Выберите подходящие изменения. Ritm применит их после вашего подтверждения.')
           : applied.length
-            ? 'Выберите применённые изменения, чтобы вернуть прежнее расписание.'
-            : 'Этот план сохранён в истории диалога.'}
+            ? t('Выберите применённые изменения, чтобы вернуть прежнее расписание.')
+            : t('Этот план сохранён в истории диалога.')}
       </p>
       <div className="assistant-proposal-list">
         {message.proposals.map((proposal) => {
-          const before = formatSchedule(proposal.before);
-          const after = formatSchedule(proposal.after);
+          const before = formatSchedule(proposal.before, locale, t);
+          const after = formatSchedule(proposal.after, locale, t);
           const canSelect = proposal.status === 'pending' || proposal.status === 'applied';
           return (
             <article
@@ -305,7 +314,7 @@ function ProposalCard({ conversationId, message, onApply, onReject, onUndo }: Pr
                       checked={selected.includes(proposal.id)}
                       disabled={busy}
                       onChange={() => toggle(proposal.id)}
-                      aria-label={`Выбрать изменение: ${proposal.title}`}
+                      aria-label={t('Выбрать изменение: {title}', { title: proposal.title })}
                     />
                     <strong>{proposal.title}</strong>
                   </label>
@@ -316,12 +325,12 @@ function ProposalCard({ conversationId, message, onApply, onReject, onUndo }: Pr
                   className={`assistant-proposal-status assistant-proposal-status--${proposal.status}`}
                 >
                   {proposal.status === 'applied' ? <Check size={12} aria-hidden="true" /> : null}
-                  {proposalStatus[proposal.status]}
+                  {t(proposalStatus[proposal.status])}
                 </span>
               </div>
               <div className="assistant-comparison">
                 <div>
-                  <span>Было</span>
+                  <span>{t('Было')}</span>
                   <strong>{before.time}</strong>
                   <small>
                     {before.date} · {before.duration}
@@ -329,7 +338,7 @@ function ProposalCard({ conversationId, message, onApply, onReject, onUndo }: Pr
                 </div>
                 <ArrowRight size={18} aria-hidden="true" />
                 <div className="assistant-comparison-after">
-                  <span>Станет</span>
+                  <span>{t('Станет')}</span>
                   <strong>{after.time}</strong>
                   <small>
                     {after.date} · {after.duration}
@@ -345,19 +354,23 @@ function ProposalCard({ conversationId, message, onApply, onReject, onUndo }: Pr
       </div>
       {error ? (
         <p className="assistant-inline-error" role="alert">
-          {error}
+          {t(error)}
         </p>
       ) : null}
       {confirmation ? (
         <div
           className="assistant-apply-confirmation"
           role="group"
-          aria-label="Подтверждение изменений"
+          aria-label={t('Подтверждение изменений')}
         >
           <p>
             {confirmation === 'apply'
-              ? `Применить выбранные изменения (${selectedPending.length}) к вашему расписанию?`
-              : `Вернуть прежнее расписание для выбранных задач (${selectedApplied.length})?`}
+              ? t('Применить выбранные изменения ({count}) к вашему расписанию?', {
+                  count: selectedPending.length,
+                })
+              : t('Вернуть прежнее расписание для выбранных задач ({count})?', {
+                  count: selectedApplied.length,
+                })}
           </p>
           <div className="assistant-proposal-actions">
             <button
@@ -374,7 +387,7 @@ function ProposalCard({ conversationId, message, onApply, onReject, onUndo }: Pr
               ) : (
                 <Check size={15} aria-hidden="true" />
               )}
-              {confirmation === 'apply' ? 'Подтвердить изменения' : 'Подтвердить отмену'}
+              {confirmation === 'apply' ? t('Подтвердить изменения') : t('Подтвердить отмену')}
             </button>
             <button
               ref={confirmationCancelRef}
@@ -383,7 +396,7 @@ function ProposalCard({ conversationId, message, onApply, onReject, onUndo }: Pr
               disabled={busy}
               onClick={() => setConfirmation(null)}
             >
-              Назад
+              {t('Назад')}
             </button>
           </div>
         </div>
@@ -399,7 +412,8 @@ function ProposalCard({ conversationId, message, onApply, onReject, onUndo }: Pr
                 onClick={() => askConfirmation('apply')}
               >
                 <Check size={15} aria-hidden="true" />
-                Применить выбранные{selectedPending.length ? ` (${selectedPending.length})` : ''}
+                {t('Применить выбранные')}
+                {selectedPending.length ? ` (${selectedPending.length})` : ''}
               </button>
               <button
                 className="button button-secondary"
@@ -408,7 +422,7 @@ function ProposalCard({ conversationId, message, onApply, onReject, onUndo }: Pr
                 onClick={() => void runAction('reject')}
               >
                 <X size={15} aria-hidden="true" />
-                Отклонить
+                {t('Отклонить')}
               </button>
             </>
           ) : null}
@@ -421,7 +435,7 @@ function ProposalCard({ conversationId, message, onApply, onReject, onUndo }: Pr
               onClick={() => askConfirmation('undo')}
             >
               <Undo2 size={15} aria-hidden="true" />
-              Отменить изменения
+              {t('Отменить изменения')}
             </button>
           ) : null}
         </div>
@@ -443,6 +457,7 @@ export function AssistantPage({
   initialPrompt,
   onPromptConsumed,
 }: AssistantPageProps) {
+  const { t, locale } = useI18n();
   const [selectedId, setSelectedId] = useState<string | undefined>(() => conversations[0]?.id);
   const [draft, setDraft] = useState('');
   const [mode, setMode] = useState<ChatMode>('assistant');
@@ -618,7 +633,7 @@ export function AssistantPage({
       nearBottom.current = true;
       inputRef.current?.focus();
     } catch (error) {
-      setPageError(getErrorMessage(error));
+      setPageError(getErrorMessage(error, t));
     } finally {
       createLock.current = false;
       setCreating(false);
@@ -642,7 +657,7 @@ export function AssistantPage({
       setDeleteTarget(null);
       setFocusAfterDelete(nextId ?? null);
     } catch (error) {
-      setPageError(getErrorMessage(error));
+      setPageError(getErrorMessage(error, t));
     } finally {
       deleteLock.current = false;
       setDeleting(false);
@@ -696,7 +711,7 @@ export function AssistantPage({
       setRequest({
         ...next,
         status: 'failed',
-        error: getErrorMessage(error),
+        error: getErrorMessage(error, t),
         retryAt:
           error instanceof ApiError && error.retryAfterSeconds
             ? now + error.retryAfterSeconds * 1000
@@ -722,9 +737,9 @@ export function AssistantPage({
     <div className="assistant-page">
       <header className="page-heading assistant-page-heading">
         <div>
-          <p className="page-eyebrow">Меньше рутины. Больше твоего времени.</p>
-          <h1>ИИ-помощник</h1>
-          <p className="page-description">Вместе найдём твой темп.</p>
+          <p className="page-eyebrow">{t('Меньше рутины. Больше твоего времени.')}</p>
+          <h1>{t('ИИ-помощник')}</h1>
+          <p className="page-description">{t('Вместе найдём твой темп.')}</p>
         </div>
         <div className="assistant-heading-actions">
           <button
@@ -735,7 +750,7 @@ export function AssistantPage({
             onClick={() => setHistoryOpen((value) => !value)}
           >
             <History size={17} aria-hidden="true" />
-            История
+            {t('История')}
             <ChevronDown size={14} aria-hidden="true" />
           </button>
           <button
@@ -750,16 +765,16 @@ export function AssistantPage({
             ) : (
               <Plus size={16} aria-hidden="true" />
             )}
-            Новый диалог
+            {t('Новый диалог')}
           </button>
         </div>
       </header>
       {pageError ? (
         <div className="assistant-page-error" role="alert">
-          {pageError}
+          {t(pageError)}
           <button
             type="button"
-            aria-label="Закрыть сообщение об ошибке"
+            aria-label={t('Закрыть сообщение об ошибке')}
             onClick={() => setPageError('')}
           >
             <X size={16} aria-hidden="true" />
@@ -768,13 +783,13 @@ export function AssistantPage({
       ) : null}
       {request?.status === 'failed' && !requestIsVisible ? (
         <div className="assistant-retry-outside" role="status">
-          <span>В другом диалоге осталось неотправленное сообщение.</span>
+          <span>{t('В другом диалоге осталось неотправленное сообщение.')}</span>
           <button
             type="button"
             className="button button-secondary"
             onClick={() => setSelectedId(request.conversationId)}
           >
-            Вернуться к сообщению
+            {t('Вернуться к сообщению')}
           </button>
         </div>
       ) : null}
@@ -783,10 +798,10 @@ export function AssistantPage({
           ref={historyRef}
           className={`panel assistant-history ${historyOpen ? 'assistant-history--open' : ''}`}
           id="assistant-history"
-          aria-label="История диалогов"
+          aria-label={t('История диалогов')}
         >
           <div className="assistant-history-title">
-            <h2>Диалоги</h2>
+            <h2>{t('Диалоги')}</h2>
             <span>{conversations.length}</span>
           </div>
           {orderedConversations.length ? (
@@ -799,20 +814,22 @@ export function AssistantPage({
                   <button
                     className="assistant-conversation-button"
                     data-conversation-id={item.id}
-                    title={item.title || 'Новый диалог'}
+                    title={item.title || t('Новый диалог')}
                     aria-current={selectedId === item.id ? 'true' : undefined}
                     type="button"
                     disabled={sending || deleting}
                     onClick={() => chooseConversation(item.id)}
                   >
                     <MessageSquare size={15} aria-hidden="true" />
-                    <span>{item.title || 'Новый диалог'}</span>
+                    <span>{item.title || t('Новый диалог')}</span>
                   </button>
                   <button
                     className="assistant-conversation-delete"
                     type="button"
                     disabled={sending || deleting}
-                    aria-label={`Удалить диалог «${item.title || 'Новый диалог'}»`}
+                    aria-label={t('Удалить диалог «{title}»', {
+                      title: item.title || t('Новый диалог'),
+                    })}
                     onClick={(event) => {
                       deleteTriggerRef.current = event.currentTarget;
                       setDeleteTarget(item);
@@ -826,17 +843,21 @@ export function AssistantPage({
           ) : (
             <div className="assistant-history-empty">
               <MessageSquare size={23} aria-hidden="true" />
-              <p>Ваши диалоги появятся здесь.</p>
+              <p>{t('Ваши диалоги появятся здесь.')}</p>
             </div>
           )}
           {deleteTarget ? (
             <div
               className="assistant-delete-confirmation"
               role="group"
-              aria-label="Подтверждение удаления диалога"
+              aria-label={t('Подтверждение удаления диалога')}
             >
-              <strong>Удалить диалог?</strong>
-              <p>«{deleteTarget.title || 'Новый диалог'}» и его сообщения будут удалены.</p>
+              <strong>{t('Удалить диалог?')}</strong>
+              <p>
+                {t('«{title}» и его сообщения будут удалены.', {
+                  title: deleteTarget.title || t('Новый диалог'),
+                })}
+              </p>
               <div>
                 <button
                   ref={deleteCancelRef}
@@ -845,7 +866,7 @@ export function AssistantPage({
                   disabled={deleting}
                   onClick={() => setDeleteTarget(null)}
                 >
-                  Оставить
+                  {t('Оставить')}
                 </button>
                 <button
                   type="button"
@@ -853,41 +874,41 @@ export function AssistantPage({
                   disabled={deleting}
                   onClick={() => void deleteConversation()}
                 >
-                  {deleting ? 'Удаляем…' : 'Удалить'}
+                  {deleting ? t('Удаляем…') : t('Удалить')}
                 </button>
               </div>
             </div>
           ) : null}
           <div className="assistant-history-note">
             <ShieldCheck size={17} aria-hidden="true" />
-            <p>Расписание меняется только с вашего согласия.</p>
+            <p>{t('Расписание меняется только с вашего согласия.')}</p>
           </div>
         </aside>
-        <section className="panel assistant-chat" aria-label="Диалог с помощником Ritm">
+        <section className="panel assistant-chat" aria-label={t('Диалог с помощником Ritm')}>
           <header className="assistant-chat-header">
             <span className="assistant-orb" aria-hidden="true" />
             <div>
-              <h2>{mode === 'idea_review' ? 'Разбор идей' : 'Помощник Ritm'}</h2>
+              <h2>{mode === 'idea_review' ? t('Разбор идей') : t('Помощник Ritm')}</h2>
               <p>
                 {aiStatus.configured
-                  ? 'Готов к вашему запросу'
-                  : 'Настройте OpenAI для начала диалога'}
+                  ? t('Готов к вашему запросу')
+                  : t('Настройте OpenAI для начала диалога')}
               </p>
             </div>
             <span
               className={`assistant-connection ${aiStatus.configured ? 'assistant-connection--ready' : ''}`}
             >
               <i aria-hidden="true" />
-              {aiStatus.configured ? 'Ключ настроен' : 'Не настроен'}
+              {aiStatus.configured ? t('Ключ настроен') : t('Не настроен')}
             </span>
-            <div className="assistant-mode-switch" role="group" aria-label="Режим ИИ">
+            <div className="assistant-mode-switch" role="group" aria-label={t('Режим ИИ')}>
               <button
                 type="button"
                 aria-pressed={mode === 'assistant'}
                 disabled={sending || creating || deleting || request?.status === 'failed'}
                 onClick={() => setMode('assistant')}
               >
-                Помощник
+                {t('Помощник')}
               </button>
               <button
                 type="button"
@@ -895,7 +916,7 @@ export function AssistantPage({
                 disabled={sending || creating || deleting || request?.status === 'failed'}
                 onClick={() => setMode('idea_review')}
               >
-                Разбор идей
+                {t('Разбор идей')}
               </button>
             </div>
           </header>
@@ -914,32 +935,36 @@ export function AssistantPage({
                   <Sparkles size={25} />
                 </div>
                 <h3>
-                  {mode === 'idea_review' ? 'Посмотрим на идею с четырёх сторон' : 'С чего начнём?'}
+                  {mode === 'idea_review'
+                    ? t('Посмотрим на идею с четырёх сторон')
+                    : t('С чего начнём?')}
                 </h3>
                 <p>
                   {mode === 'idea_review'
-                    ? 'Опишите идею, для кого она и чего вы хотите добиться. Получите отдельные оценки экспертов и общий вывод, включая разногласия.'
-                    : 'Помогу распределить дела, найти свободное время и сделать первый шаг.'}
+                    ? t(
+                        'Опишите идею, для кого она и чего вы хотите добиться. Получите отдельные оценки экспертов и общий вывод, включая разногласия.',
+                      )
+                    : t('Помогу распределить дела, найти свободное время и сделать первый шаг.')}
                 </p>
                 {mode === 'idea_review' ? (
                   <div className="assistant-idea-roles">
                     {Object.entries(ideaExpertRoles).map(([id, role]) => (
                       <div className="assistant-idea-role" key={id}>
-                        <strong>{role.title}</strong>
-                        <p>{role.description}</p>
+                        <strong>{t(role.title)}</strong>
+                        <p>{t(role.description)}</p>
                       </div>
                     ))}
                   </div>
                 ) : (
                   <div className="assistant-welcome-prompts">
                     {prompts.map(({ title, subtitle, icon: Icon }) => (
-                      <button type="button" key={title} onClick={() => choosePrompt(title)}>
+                      <button type="button" key={title} onClick={() => choosePrompt(t(title))}>
                         <span>
                           <Icon size={19} aria-hidden="true" />
                         </span>
                         <div>
-                          <strong>{title}</strong>
-                          <small>{subtitle}</small>
+                          <strong>{t(title)}</strong>
+                          <small>{t(subtitle)}</small>
                         </div>
                         <ArrowRight size={16} aria-hidden="true" />
                       </button>
@@ -950,10 +975,11 @@ export function AssistantPage({
                   <div className="assistant-setup">
                     <Settings2 size={18} aria-hidden="true" />
                     <div>
-                      <strong>Помощник пока не подключён</strong>
+                      <strong>{t('Помощник пока не подключён')}</strong>
                       <p>
-                        Добавьте API-ключ OpenAI в настройках. После подключения Ritm сможет
-                        отвечать на ваши запросы.
+                        {t(
+                          'Добавьте API-ключ OpenAI в настройках. После подключения Ritm сможет отвечать на ваши запросы.',
+                        )}
                       </p>
                     </div>
                     <button
@@ -961,7 +987,7 @@ export function AssistantPage({
                       type="button"
                       onClick={onOpenSettings}
                     >
-                      Открыть настройки
+                      {t('Открыть настройки')}
                     </button>
                   </div>
                 ) : null}
@@ -970,7 +996,7 @@ export function AssistantPage({
             <div
               className="assistant-messages"
               role="log"
-              aria-label="Сообщения диалога"
+              aria-label={t('Сообщения диалога')}
               aria-live="polite"
               aria-relevant="additions"
             >
@@ -980,7 +1006,7 @@ export function AssistantPage({
                   key={message.id}
                 >
                   <span className="assistant-message-author">
-                    {message.role === 'user' ? 'Вы' : 'Ritm'}
+                    {message.role === 'user' ? t('Вы') : 'Ritm'}
                   </span>
                   {message.ideaReview ? (
                     <IdeaReviewPanel report={message.ideaReview} />
@@ -989,7 +1015,7 @@ export function AssistantPage({
                   )}
                   {message.steps.length ? (
                     <div className="assistant-steps">
-                      <h3>Понятные шаги</h3>
+                      <h3>{t('Понятные шаги')}</h3>
                       <ol>
                         {message.steps.map((step, index) => (
                           <li key={`${message.id}-step-${index}`}>{step}</li>
@@ -1012,12 +1038,12 @@ export function AssistantPage({
               {visibleRequest ? (
                 <>
                   <article className="assistant-message assistant-message--user assistant-message--pending">
-                    <span className="assistant-message-author">Вы</span>
+                    <span className="assistant-message-author">{t('Вы')}</span>
                     <div className="assistant-message-text">{visibleRequest.message}</div>
                     <small>
                       {visibleRequest.status === 'sending'
-                        ? 'Отправляем…'
-                        : 'Не удалось получить ответ'}
+                        ? t('Отправляем…')
+                        : t('Не удалось получить ответ')}
                     </small>
                   </article>
                   {visibleRequest.status === 'sending' ? (
@@ -1025,8 +1051,8 @@ export function AssistantPage({
                       <span className="assistant-orb assistant-orb--small" aria-hidden="true" />
                       <span>
                         {visibleRequest.mode === 'idea_review'
-                          ? 'Эксперты оценивают идею…'
-                          : 'Ritm изучает ваши планы'}
+                          ? t('Эксперты оценивают идею…')
+                          : t('Ritm изучает ваши планы')}
                         <span className="assistant-thinking-dots" aria-hidden="true">
                           <i />
                           <i />
@@ -1036,8 +1062,8 @@ export function AssistantPage({
                     </div>
                   ) : (
                     <div className="assistant-request-error" role="alert">
-                      <strong>Не удалось получить ответ</strong>
-                      <p>{visibleRequest.error}</p>
+                      <strong>{t('Не удалось получить ответ')}</strong>
+                      <p>{visibleRequest.error ? t(visibleRequest.error) : ''}</p>
                       <div>
                         <button
                           type="button"
@@ -1046,7 +1072,9 @@ export function AssistantPage({
                           onClick={() => void sendMessage(visibleRequest)}
                         >
                           <RefreshCw size={15} aria-hidden="true" />
-                          {retryRemaining > 0 ? `Повторить через ${retryRemaining} с` : 'Повторить'}
+                          {retryRemaining > 0
+                            ? t('Повторить через {count} с', { count: retryRemaining })
+                            : t('Повторить')}
                         </button>
                         <button
                           type="button"
@@ -1058,7 +1086,7 @@ export function AssistantPage({
                             inputRef.current?.focus();
                           }}
                         >
-                          Изменить сообщение
+                          {t('Изменить сообщение')}
                         </button>
                         {!aiStatus.configured ? (
                           <button
@@ -1066,7 +1094,7 @@ export function AssistantPage({
                             className="button button-secondary"
                             onClick={onOpenSettings}
                           >
-                            Настройки
+                            {t('Настройки')}
                           </button>
                         ) : null}
                       </div>
@@ -1078,36 +1106,40 @@ export function AssistantPage({
           </div>
           <div className="assistant-composer-area">
             {messages.length && mode === 'assistant' ? (
-              <div className="assistant-prompt-chips" aria-label="Быстрые запросы">
+              <div className="assistant-prompt-chips" aria-label={t('Быстрые запросы')}>
                 {prompts.map(({ title }) => (
                   <button
                     type="button"
                     key={title}
                     disabled={sending}
-                    onClick={() => choosePrompt(title)}
+                    onClick={() => choosePrompt(t(title))}
                   >
-                    {title}
+                    {t(title)}
                   </button>
                 ))}
               </div>
             ) : null}
             {!aiStatus.configured && messages.length ? (
               <div className="assistant-compact-setup">
-                <span>Для новых ответов подключите OpenAI.</span>
+                <span>{t('Для новых ответов подключите OpenAI.')}</span>
                 <button type="button" onClick={onOpenSettings}>
-                  Настройки <ArrowRight size={13} aria-hidden="true" />
+                  {t('Настройки')}
+                  <ArrowRight size={13} aria-hidden="true" />
                 </button>
               </div>
             ) : null}
             {mode === 'idea_review' ? (
               <p className="assistant-idea-hint" id="assistant-idea-hint">
-                Четыре отдельные оценки и общий вывод. Одна модель, пять запросов OpenAI; без
-                проверки фактов в интернете.
+                {t(
+                  'Четыре отдельные оценки и общий вывод. Одна модель, пять запросов OpenAI; без проверки фактов в интернете.',
+                )}
               </p>
             ) : null}
             <form className="assistant-composer" onSubmit={submit}>
               <label htmlFor="assistant-message-input" className="assistant-sr-only">
-                {mode === 'idea_review' ? 'Идея для разбора экспертами' : 'Сообщение ИИ-помощнику'}
+                {mode === 'idea_review'
+                  ? t('Идея для разбора экспертами')
+                  : t('Сообщение ИИ-помощнику')}
               </label>
               <textarea
                 id="assistant-message-input"
@@ -1117,7 +1149,7 @@ export function AssistantPage({
                 rows={2}
                 maxLength={6000}
                 placeholder={
-                  mode === 'idea_review' ? 'Опишите вашу идею…' : 'Спросите о своих планах…'
+                  mode === 'idea_review' ? t('Опишите вашу идею…') : t('Спросите о своих планах…')
                 }
                 disabled={sending}
                 onChange={(event) => setDraft(event.target.value)}
@@ -1139,9 +1171,11 @@ export function AssistantPage({
                   deleting ||
                   request?.status === 'failed'
                 }
-                aria-label={sending ? 'Отправка сообщения' : 'Отправить сообщение'}
+                aria-label={sending ? t('Отправка сообщения') : t('Отправить сообщение')}
                 title={
-                  !aiStatus.configured ? 'Сначала подключите OpenAI в настройках' : 'Отправить'
+                  !aiStatus.configured
+                    ? t('Сначала подключите OpenAI в настройках')
+                    : t('Отправить')
                 }
               >
                 {sending ? (
@@ -1155,11 +1189,11 @@ export function AssistantPage({
               <ShieldCheck size={13} aria-hidden="true" />
               <span>
                 {mode === 'idea_review'
-                  ? 'Разбор идеи не меняет ваше расписание'
-                  : 'Изменения только после вашего подтверждения'}
+                  ? t('Разбор идеи не меняет ваше расписание')
+                  : t('Изменения только после вашего подтверждения')}
               </span>
               <span className="assistant-key-hint">
-                Enter — отправить · Shift + Enter — новая строка
+                {t('Enter — отправить · Shift + Enter — новая строка')}
               </span>
             </p>
           </div>

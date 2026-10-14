@@ -26,8 +26,11 @@ export function localDate(date: string): Date {
 export function formatDate(
   date: string,
   options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'long' },
+  language: 'ru' | 'en' = 'ru',
 ): string {
-  return new Intl.DateTimeFormat('ru-RU', options).format(localDate(date));
+  return new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'ru-RU', options).format(
+    localDate(date),
+  );
 }
 export function formatTime(value: number | string, options: { compact?: boolean } = {}): string {
   let minutes: number;
@@ -44,11 +47,16 @@ export function formatTime(value: number | string, options: { compact?: boolean 
   const minuteLabel = options.compact && minute === 0 ? '' : `:${String(minute).padStart(2, '0')}`;
   return `${hour % 12 || 12}${minuteLabel} ${suffix}`;
 }
-export function durationText(minutes: number): string {
+export function durationText(minutes: number, language: 'ru' | 'en' = 'ru'): string {
   const hours = Math.floor(minutes / 60),
     rest = minutes % 60;
   return (
-    [hours ? `${hours} ч` : '', rest ? `${rest} мин` : ''].filter(Boolean).join(' ') || '0 мин'
+    [
+      hours ? `${hours} ${language === 'en' ? 'h' : 'ч'}` : '',
+      rest ? `${rest} ${language === 'en' ? 'min' : 'мин'}` : '',
+    ]
+      .filter(Boolean)
+      .join(' ') || (language === 'en' ? '0 min' : '0 мин')
   );
 }
 export function greeting(hour: number): string {
