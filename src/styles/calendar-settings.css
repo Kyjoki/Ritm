@@ -870,6 +870,58 @@
   color: var(--muted);
   background: color-mix(in srgb, var(--line) 55%, transparent);
 }
+.settings-telegram-provider {
+  color: #589bc8;
+  background: color-mix(in srgb, #589bc8 14%, var(--panel));
+}
+.settings-telegram-setup,
+.settings-telegram-pairing {
+  margin: 0 0 16px 56px;
+  display: grid;
+  justify-items: start;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.settings-telegram-setup label {
+  color: var(--text);
+  font-weight: 600;
+}
+.settings-telegram-setup small {
+  line-height: 1.5;
+}
+.settings-telegram-input-row {
+  display: flex;
+  gap: 8px;
+  width: min(100%, 560px);
+}
+.settings-telegram-input-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+.settings-telegram-setup :focus-visible,
+.settings-telegram-pairing :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.settings-telegram-pairing p {
+  margin: 0;
+}
+@media (max-width: 600px) {
+  .settings-telegram-setup,
+  .settings-telegram-pairing {
+    margin-left: 0;
+  }
+  .settings-telegram-input-row {
+    flex-direction: column;
+  }
+}
 .settings-connection-copy {
   flex: 1;
   min-width: 0;

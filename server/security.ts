@@ -208,7 +208,15 @@ export class Security {
       const oauthCallback =
         req.method === 'GET' &&
         req.originalUrl.split('?')[0] === '/api/integrations/google/callback';
-      if (!origin && req.get('sec-fetch-site') === 'cross-site' && !oauthCallback)
+      const telegramWebhook =
+        req.method === 'POST' &&
+        req.originalUrl.split('?')[0] === '/api/integrations/telegram/webhook';
+      if (
+        !origin &&
+        req.get('sec-fetch-site') === 'cross-site' &&
+        !oauthCallback &&
+        !telegramWebhook
+      )
         throw new AppError(403, 'INVALID_ORIGIN', 'Запрос с другого сайта запрещён.');
       if (
         !['GET', 'HEAD', 'OPTIONS'].includes(req.method) &&

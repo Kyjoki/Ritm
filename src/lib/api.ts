@@ -18,6 +18,7 @@ import type {
   TaskInput,
 } from '../../shared/types';
 import { getLanguage, translate } from './i18n';
+import type { TelegramStatus } from '../../shared/types';
 const tr = (source: string) => translate(getLanguage(), source);
 
 export class ApiError extends Error {
@@ -114,6 +115,11 @@ export const api = {
   configureAI: (apiKey: string, model: string) =>
     request<AiStatus>('/settings/openai', 'POST', { apiKey, model }),
   disconnectAI: () => request<AiStatus>('/settings/openai', 'DELETE'),
+  telegramStatus: () => request<TelegramStatus>('/integrations/telegram/status'),
+  configureTelegram: (botToken: string) =>
+    request<TelegramStatus>('/integrations/telegram/configuration', 'POST', { botToken }),
+  pairTelegram: () => request<TelegramStatus>('/integrations/telegram/pairing', 'POST', {}),
+  disconnectTelegram: () => request<TelegramStatus>('/integrations/telegram/connection', 'DELETE'),
   googleConfiguration: () => request<GoogleOAuthSetup>('/integrations/google/configuration'),
   configureGoogle: (configuration: GoogleOAuthSetupInput) =>
     request<GoogleOAuthSetup>('/integrations/google/configuration', 'POST', configuration),

@@ -26,6 +26,7 @@ import type {
 } from '../../shared/types';
 import { Dialog } from '../components/Dialog';
 import { GoogleSetupDialog } from '../components/GoogleSetupDialog';
+import { TelegramConnection } from '../components/TelegramConnection';
 import '../styles/calendar-settings.css';
 
 interface SettingsPageProps {
@@ -687,6 +688,7 @@ export function SettingsPage({
                   {t(googleError)}
                 </p>
               ) : null}
+              <TelegramConnection />
               {connectionNotice ? (
                 <p className="settings-connection-notice" role="status">
                   <CheckCircle2 size={16} aria-hidden="true" />

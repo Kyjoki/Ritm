@@ -238,3 +238,11 @@ export interface GoogleTransferResult {
   event: GoogleCalendarEvent;
   transferredTaskId: string;
 }
+export interface TelegramStatus {
+  configured: boolean;
+  linked: boolean;
+  botUsername?: string;
+  account?: { username?: string; firstName: string };
+  pairingUrl?: string;
+  pairingExpiresAt?: number;
+}

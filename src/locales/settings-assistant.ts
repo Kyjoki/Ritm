@@ -63,6 +63,25 @@ export const settingsAssistantEnglish: Record<string, string> = {
   'Только полезные напоминания.': 'Only useful reminders.',
   'В твоём ритме.': 'At your own pace.',
   Подключения: 'Connections',
+  'Личный чат привязан': 'Private chat linked',
+  'Бот настроен · чат не привязан': 'Bot configured · chat not linked',
+  'Подключи своего бота, затем привяжи личный чат.':
+    'Connect your bot, then link your private chat.',
+  'Привязан: {name}': 'Linked: {name}',
+  'Пока Telegram только подтверждает связь с аккаунтом. Сообщения не передаются ИИ.':
+    'Telegram only verifies the account link for now. Messages are not sent to AI.',
+  'Сменить бота': 'Change bot',
+  'Привязать чат': 'Link chat',
+  'Токен бота от BotFather': 'Bot token from BotFather',
+  'Сохранить бота': 'Save bot',
+  'Токен хранится зашифрованным на сервере. Не отправляй его в чат.':
+    'The token is encrypted on the server. Do not send it in chat.',
+  'Открой ссылку в Telegram и нажми Start, затем вернись сюда. Ссылка действует 10 минут.':
+    'Open the link in Telegram and tap Start, then return here. The link expires in 10 minutes.',
+  'Открыть бота в Telegram': 'Open bot in Telegram',
+  'Проверить подключение': 'Check connection',
+  'Не удалось проверить Telegram.': 'Could not check Telegram.',
+  'Не удалось подключить Telegram.': 'Could not connect Telegram.',
   'Не настроен': 'Not configured',
   'Настройкой управляет сервер': 'Managed by the server',
   Настроить: 'Set up',

@@ -20,6 +20,7 @@ import {
 import type { WorkspaceRepository } from './repository.ts';
 import { SqliteRuntimeState, type RuntimeState } from './runtime-state.ts';
 import { SecretStore } from './secrets.ts';
+import { createTelegramService, TELEGRAM_WEBHOOK_PATH } from './telegram.ts';
 import { Security } from './security.ts';
 import { AppError, conflict } from './errors.ts';
 import {
@@ -87,6 +88,7 @@ export interface AppOptions {
   runtimeState?: RuntimeState;
   googleTransport?: GoogleTransport;
   googleService?: AppGoogleService;
+  telegramTransport?: typeof fetch;
   securityLogger?: SecurityLogger;
 }
 
@@ -133,6 +135,11 @@ export function createApp(options: AppOptions = {}) {
   const store: WorkspaceRepository =
     options.repository ?? postgres ?? new Store(dataDir, options.seed ?? env.SEED_DEMO !== 'false');
   const secrets = new SecretStore(dataDir, env, state, shared);
+  const telegram = createTelegramService({
+    secrets,
+    origin: env.APP_ORIGIN,
+    transport: options.telegramTransport,
+  });
   const google =
     options.googleService ??
     createGoogleCalendarService({
@@ -200,7 +207,8 @@ export function createApp(options: AppOptions = {}) {
     const publicRoute =
       (['GET', 'HEAD'].includes(req.method) && ['/api/health', '/api/session'].includes(path)) ||
       (req.method === 'POST' && path === '/api/login') ||
-      (req.method === 'GET' && path === GOOGLE_CALLBACK_PATH);
+      (req.method === 'GET' && path === GOOGLE_CALLBACK_PATH) ||
+      (req.method === 'POST' && path === TELEGRAM_WEBHOOK_PATH);
     if (publicRoute) next();
     else void security.requireAuth(req, res, next);
   });
@@ -213,6 +221,11 @@ export function createApp(options: AppOptions = {}) {
   });
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
+  });
+  app.post(TELEGRAM_WEBHOOK_PATH, async (req, res) => {
+    await security.limit(req, 'telegram-webhook', 120, 60_000);
+    await telegram.webhook(req.get('x-telegram-bot-api-secret-token'), req.body);
+    res.json({ ok: true });
   });
   app.get('/api/session', async (req, res) => {
     await security.limit(req, 'public-session', 120, 60_000);
@@ -281,6 +294,25 @@ export function createApp(options: AppOptions = {}) {
   });
   app.get('/api/integrations/google/status', async (_req, res) => {
     res.json(await google.status());
+  });
+  app.get('/api/integrations/telegram/status', async (_req, res) => {
+    res.json(await telegram.status());
+  });
+  app.post('/api/integrations/telegram/configuration', async (req, res) => {
+    await security.limit(req, 'telegram-configuration', 5, 60_000);
+    const { botToken } = z
+      .object({ botToken: z.string().max(160) })
+      .strict()
+      .parse(req.body);
+    res.json(await telegram.configure(botToken));
+  });
+  app.post('/api/integrations/telegram/pairing', async (req, res) => {
+    await security.limit(req, 'telegram-pairing', 5, 60_000);
+    res.json(await telegram.createPairing());
+  });
+  app.delete('/api/integrations/telegram/connection', async (req, res) => {
+    await security.limit(req, 'telegram-configuration', 5, 60_000);
+    res.json(await telegram.disconnect());
   });
   app.get('/api/integrations/google/configuration', async (_req, res) => {
     res.json(await google.configuration());
