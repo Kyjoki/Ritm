@@ -292,7 +292,7 @@ export default function App() {
     });
   }, [data, google.status.status, synchronizeTask, migrationRevision]);
   useEffect(() => {
-    if (page !== 'calendar') google.setRange(today, addDays(today, 1));
+    if (page !== 'calendar') google.setRange(today, addDays(today, page === 'day' ? 2 : 1));
   }, [page, today, google.setRange]);
   useEffect(() => {
     if (!data) return;
@@ -440,12 +440,12 @@ export default function App() {
       notify(tr('Задача восстановлена'));
     });
   };
-  const quickAddTask = async (title: string) => {
+  const quickAddTask = async (title: string, date: string) => {
     const generation = loadGeneration.current;
     const task = await api.createTask({
       title: title.trim(),
       description: '',
-      date: today,
+      date,
       time: null,
       duration: 30,
       priority: 'normal',
@@ -687,7 +687,7 @@ export default function App() {
                 migrationLoading ||
                 (google.status.status === 'connected' && !google.result && !google.error)
               }
-              onGoogleEdit={(event) => setGooglePreview({ id: event.id, date: today })}
+              onGoogleEdit={(event, date) => setGooglePreview({ id: event.id, date })}
               onGoogleTaskToggle={toggleGoogleTask}
               busyGoogleTaskIds={busyGoogleTaskIds}
               tasksPermissionMessage={google.result?.tasks?.message}

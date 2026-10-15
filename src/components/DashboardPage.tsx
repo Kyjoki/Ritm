@@ -12,7 +12,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type { GoogleCalendarEvent, Settings, Task, TaskInput } from '../../shared/types';
-import { getDayOccurrences } from '../features/calendar-utils';
+import { addDays, getDayOccurrences } from '../features/calendar-utils';
 import { calendarOccurrences, type CalendarOccurrence } from '../features/google-occurrences';
 import { durationText, formatDate, formatTime, greeting } from '../lib/date';
 import { calendarEntryStyle } from '../lib/calendar-colors';
@@ -24,12 +24,12 @@ interface Props {
   googleEvents: GoogleCalendarEvent[];
   googleUncertain: boolean;
   googlePending: boolean;
-  onGoogleEdit: (event: GoogleCalendarEvent) => void;
+  onGoogleEdit: (event: GoogleCalendarEvent, date: string) => void;
   onGoogleTaskToggle: (event: GoogleCalendarEvent) => Promise<void>;
   busyGoogleTaskIds?: ReadonlySet<string>;
   tasksPermissionMessage?: string;
   onEnableGoogleTasks?: () => Promise<void>;
-  onQuickAdd: (title: string) => Promise<void>;
+  onQuickAdd: (title: string, date: string) => Promise<void>;
   settings: Settings;
   today: string;
   now: number;
@@ -64,17 +64,19 @@ export function DashboardPage({
   const { language, locale, t: tr } = useI18n();
   const taskPlural = new Intl.PluralRules(locale);
   const [quickTitle, setQuickTitle] = useState('');
+  const [taskDay, setTaskDay] = useState<'today' | 'tomorrow'>('today');
   const [quickBusy, setQuickBusy] = useState(false);
   const [quickError, setQuickError] = useState('');
   const [googleTaskError, setGoogleTaskError] = useState('');
   const [permissionBusy, setPermissionBusy] = useState(false);
   const quickInFlight = useRef(false);
+  const taskDate = taskDay === 'today' ? today : addDays(today, 1);
   const occurrences = getDayOccurrences(
     tasks.filter((task) => task.kind === 'task'),
-    today,
+    taskDate,
     language,
   );
-  const todayEntries = occurrences.sort(
+  const dayEntries = occurrences.sort(
     (a, b) => Number(a.completed) - Number(b.completed) || (a.start ?? 1441) - (b.start ?? 1441),
   );
   const combined = calendarOccurrences(
@@ -84,7 +86,13 @@ export function DashboardPage({
     settings.timeZone,
     language,
   ).filter((entry) => entry.source === 'google' || entry.task.calendarEntry !== false);
-  const googleTodos = combined
+  const taskDayCombined =
+    taskDay === 'today'
+      ? combined
+      : calendarOccurrences(tasks, googleEvents, taskDate, settings.timeZone, language).filter(
+          (entry) => entry.source === 'google' || entry.task.calendarEntry !== false,
+        );
+  const googleTodos = taskDayCombined
     .filter(
       (entry) => entry.source === 'google' && (entry.event.taskLink || entry.event.googleTask),
     )
@@ -92,12 +100,35 @@ export function DashboardPage({
       (a, b) => Number(a.completed) - Number(b.completed) || (a.start ?? 1441) - (b.start ?? 1441),
     );
   const completed =
-    todayEntries.filter((entry) => entry.completed).length +
+    dayEntries.filter((entry) => entry.completed).length +
     googleTodos.filter(
       (entry) => entry.source === 'google' && entry.event.googleTask?.status === 'completed',
     ).length;
-  const todoCount = todayEntries.length + googleTodos.length;
+  const todoCount = dayEntries.length + googleTodos.length;
   const unknownGoogleCount = googleTodos.filter(
+    (entry) => entry.source === 'google' && !entry.event.googleTask,
+  ).length;
+  const todayTaskEntries =
+    taskDay === 'today'
+      ? dayEntries
+      : getDayOccurrences(
+          tasks.filter((task) => task.kind === 'task'),
+          today,
+          language,
+        );
+  const todayGoogleTodos =
+    taskDay === 'today'
+      ? googleTodos
+      : combined.filter(
+          (entry) => entry.source === 'google' && (entry.event.taskLink || entry.event.googleTask),
+        );
+  const todayCount = todayTaskEntries.length + todayGoogleTodos.length;
+  const todayCompleted =
+    todayTaskEntries.filter((entry) => entry.completed).length +
+    todayGoogleTodos.filter(
+      (entry) => entry.source === 'google' && entry.event.googleTask?.status === 'completed',
+    ).length;
+  const todayUnknownGoogleCount = todayGoogleTodos.filter(
     (entry) => entry.source === 'google' && !entry.event.googleTask,
   ).length;
   const taskCountLabel = `${todoCount} ${tr(taskPlural.select(todoCount) === 'one' ? tr('задача') : taskPlural.select(todoCount) === 'few' ? tr('задачи') : tr('задач'))}`;
@@ -111,7 +142,7 @@ export function DashboardPage({
     .sort((a, b) => a.start - b.start)[0];
   const schedule = timed.sort((a, b) => a.start - b.start);
   const openEntry = (entry: CalendarOccurrence) =>
-    entry.source === 'google' ? onGoogleEdit(entry.event) : onEdit(entry.task);
+    entry.source === 'google' ? onGoogleEdit(entry.event, entry.date) : onEdit(entry.task);
   const undated = tasks.filter((t) => !t.date && !t.completed),
     overdue = tasks.filter((t) => t.date && t.date < today && !t.completed && t.repeat === 'none');
   const workStart =
@@ -141,7 +172,7 @@ export function DashboardPage({
     setQuickBusy(true);
     setQuickError('');
     try {
-      await onQuickAdd(title);
+      await onQuickAdd(title, taskDate);
       setQuickTitle('');
     } catch (error) {
       setQuickError(error instanceof Error ? error.message : tr('Не удалось добавить задачу.'));
@@ -199,7 +230,7 @@ export function DashboardPage({
               className="progress-ring"
               style={
                 {
-                  '--progress': `${todoCount && !unknownGoogleCount ? (completed / todoCount) * 360 : 0}deg`,
+                  '--progress': `${todayCount && !todayUnknownGoogleCount ? (todayCompleted / todayCount) * 360 : 0}deg`,
                 } as CSSProperties
               }
             >
@@ -207,22 +238,25 @@ export function DashboardPage({
             </div>
             <div>
               <strong>
-                {unknownGoogleCount
+                {todayUnknownGoogleCount
                   ? '—'
-                  : googlePending && !todoCount
+                  : googlePending && !todayCount
                     ? '…'
-                    : todoCount
-                      ? tr('{completed} из {total}', { completed, total: todoCount })
+                    : todayCount
+                      ? tr('{completed} из {total}', {
+                          completed: todayCompleted,
+                          total: todayCount,
+                        })
                       : googleUncertain
                         ? '—'
                         : tr('Нет задач')}
               </strong>
               <span>
-                {unknownGoogleCount
+                {todayUnknownGoogleCount
                   ? tr('Статус Google Tasks не проверен')
-                  : googlePending && !todoCount
+                  : googlePending && !todayCount
                     ? tr('Загружаем задачи')
-                    : todoCount
+                    : todayCount
                       ? tr('задач выполнено')
                       : googleUncertain
                         ? tr('Данные Google не проверены')
@@ -295,7 +329,7 @@ export function DashboardPage({
       <div className="day-work-grid">
         <div className="panel tasks-panel">
           <div className="section-heading">
-            <h2>{tr('Задачи на сегодня')}</h2>
+            <h2>{tr(taskDay === 'today' ? 'Задачи на сегодня' : 'Задачи на завтра')}</h2>
             <span>
               {unknownGoogleCount
                 ? taskCountLabel
@@ -305,6 +339,26 @@ export function DashboardPage({
                     ? tr('Не проверено')
                     : tr('{completed} из {total}', { completed, total: todoCount })}
             </span>
+          </div>
+          <div
+            className="dashboard-task-days"
+            role="group"
+            aria-label={tr('День для списка задач')}
+          >
+            <button
+              type="button"
+              aria-pressed={taskDay === 'today'}
+              onClick={() => setTaskDay('today')}
+            >
+              {tr('Сегодня')}
+            </button>
+            <button
+              type="button"
+              aria-pressed={taskDay === 'tomorrow'}
+              onClick={() => setTaskDay('tomorrow')}
+            >
+              {tr('Завтра')}
+            </button>
           </div>
           {todoCount ? (
             <div className="today-list">
@@ -356,7 +410,7 @@ export function DashboardPage({
                   </div>
                 );
               })}
-              {todayEntries.map((o) => {
+              {dayEntries.map((o) => {
                 const task = o.task;
                 return (
                   <div className={`task-row${o.completed ? ' is-complete' : ''}`} key={o.key}>
@@ -405,7 +459,11 @@ export function DashboardPage({
               </h3>
               <p>
                 {googlePending
-                  ? tr('Проверяем задачи на сегодня.')
+                  ? tr(
+                      taskDay === 'today'
+                        ? 'Проверяем задачи на сегодня.'
+                        : 'Проверяем задачи на завтра.',
+                    )
                   : tr(
                       'Личные задачи можно добавить ниже. Подключение Google проверь в календаре.',
                     )}
@@ -419,7 +477,9 @@ export function DashboardPage({
           ) : (
             <div className="empty-inline">
               <CheckCheck size={32} />
-              <h3>{tr('Пока нет задач на сегодня')}</h3>
+              <h3>
+                {tr(taskDay === 'today' ? 'Пока нет задач на сегодня' : 'Пока нет задач на завтра')}
+              </h3>
               <p>{tr('Добавьте первое дело ниже. Встречи и занятия — в расписании справа.')}</p>
             </div>
           )}
@@ -453,13 +513,15 @@ export function DashboardPage({
             aria-label={tr('Быстрое добавление задачи')}
           >
             <label className="visually-hidden" htmlFor="dashboard-quick-title">
-              {tr('Новая задача на сегодня')}{' '}
+              {tr(taskDay === 'today' ? 'Новая задача на сегодня' : 'Новая задача на завтра')}{' '}
             </label>
             <input
               id="dashboard-quick-title"
               value={quickTitle}
               onChange={(event) => setQuickTitle(event.target.value)}
-              placeholder={tr('Что нужно сделать сегодня?')}
+              placeholder={tr(
+                taskDay === 'today' ? 'Что нужно сделать сегодня?' : 'Что нужно сделать завтра?',
+              )}
               maxLength={160}
               autoComplete="off"
               disabled={quickBusy}
@@ -468,7 +530,9 @@ export function DashboardPage({
               className="button button-secondary"
               type="submit"
               disabled={quickBusy || !quickTitle.trim()}
-              aria-label={tr('Добавить задачу на сегодня')}
+              aria-label={tr(
+                taskDay === 'today' ? 'Добавить задачу на сегодня' : 'Добавить задачу на завтра',
+              )}
             >
               {quickBusy ? (
                 <LoaderCircle size={18} className="spinning" />
@@ -554,7 +618,7 @@ export function DashboardPage({
       <div className="dashboard-bottom">
         <span>
           <ListTodo size={14} />{' '}
-          {completed === todoCount && todoCount
+          {todayCompleted === todayCount && todayCount
             ? tr('Все дела завершены. Можно выдохнуть.')
             : tr('Следуйте своему темпу — всё важное перед вами.')}
         </span>
