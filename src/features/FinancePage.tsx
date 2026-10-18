@@ -142,6 +142,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
   const [entries, setEntries] = useState<FinanceEntry[]>([]);
   const [currency, setCurrency] = useState<Currency>('KZT');
   const [view, setView] = useState<FinanceView>('account');
+  const [selectedDepositId, setSelectedDepositId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
@@ -194,6 +195,8 @@ export function FinancePage({ active = true }: { active?: boolean }) {
     (entry) => entry.type === 'income' || entry.type === 'expense',
   );
   const assets = visible.filter((entry) => entry.type === 'deposit' || entry.type === 'stock');
+  const depositEntries = visible.filter((entry) => entry.type === 'deposit');
+  const selectedDeposit = depositEntries.find((entry) => entry.id === selectedDepositId);
   const account = visible.find((entry) => entry.type === 'account');
   const accountBalance = calculateAccountBalance(visible, currency, localDate());
   const currentMonth = monthKey(localDate());
@@ -216,7 +219,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
     view === 'account'
       ? accountBalance
       : view === 'deposits'
-        ? deposits
+        ? (selectedDeposit?.valueMinor ?? deposits)
         : view === 'stocks'
           ? stocks
           : combinedTotal;
@@ -224,7 +227,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
     view === 'account'
       ? transactions.length
       : view === 'deposits'
-        ? assets.filter((entry) => entry.type === 'deposit').length
+        ? depositEntries.length
         : view === 'stocks'
           ? assets.filter((entry) => entry.type === 'stock').length
           : visible.length;
@@ -296,7 +299,9 @@ export function FinancePage({ active = true }: { active?: boolean }) {
         (entry.type === 'account' ||
           ((entry.type === 'income' || entry.type === 'expense') &&
             (!account || (entry.date >= account.asOf && entry.date <= localDate()))))) ||
-      (view === 'deposits' && entry.type === 'deposit') ||
+      (view === 'deposits' &&
+        entry.type === 'deposit' &&
+        (!selectedDeposit || entry.id === selectedDeposit.id)) ||
       (view === 'stocks' && entry.type === 'stock'),
   );
 
@@ -374,6 +379,10 @@ export function FinancePage({ active = true }: { active?: boolean }) {
           : [result.entry, ...current],
       );
       setCurrency(result.entry.currency);
+      if (!editing && result.entry.type === 'deposit') {
+        setView('deposits');
+        setSelectedDepositId(result.entry.id);
+      }
       setForm(null);
       setEditing(null);
     } catch (failure) {
@@ -389,6 +398,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
     try {
       await api.deleteFinanceEntry(entry.id, entry.updatedAt);
       setEntries((current) => current.filter((record) => record.id !== entry.id));
+      if (entry.id === selectedDepositId) setSelectedDepositId(null);
       setConfirmDelete(null);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : t('Не удалось удалить запись.'));
@@ -413,7 +423,10 @@ export function FinancePage({ active = true }: { active?: boolean }) {
             <select
               aria-label={t('Валюта для просмотра')}
               value={currency}
-              onChange={(event) => setCurrency(event.target.value as Currency)}
+              onChange={(event) => {
+                setCurrency(event.target.value as Currency);
+                setSelectedDepositId(null);
+              }}
             >
               {currencies.map((item) => (
                 <option key={item} value={item}>
@@ -461,6 +474,44 @@ export function FinancePage({ active = true }: { active?: boolean }) {
           </button>
         ))}
       </nav>
+      {view === 'deposits' && !loading && (
+        <section className="finance-deposit-picker" aria-label={t('Выбрать депозит')}>
+          <div className="finance-deposit-picker-heading">
+            <strong>{t('Выбрать депозит')}</strong>
+            <span>{t('Записей: {count}', { count: depositEntries.length })}</span>
+          </div>
+          <div className="finance-deposit-options">
+            <button
+              type="button"
+              className={`finance-deposit-option ${!selectedDeposit ? 'active' : ''}`}
+              aria-pressed={!selectedDeposit}
+              onClick={() => setSelectedDepositId(null)}
+            >
+              <strong>{t('Все депозиты')}</strong>
+              <span>{money(deposits)}</span>
+            </button>
+            {depositEntries.map((entry) => (
+              <button
+                type="button"
+                key={entry.id}
+                className={`finance-deposit-option ${selectedDeposit?.id === entry.id ? 'active' : ''}`}
+                aria-pressed={selectedDeposit?.id === entry.id}
+                onClick={() => setSelectedDepositId(entry.id)}
+              >
+                <strong>{entry.name}</strong>
+                <span>{money(entry.valueMinor)}</span>
+              </button>
+            ))}
+            <button
+              type="button"
+              className="finance-deposit-option finance-deposit-add"
+              onClick={() => openNew('deposit')}
+            >
+              <CirclePlus size={16} /> {t('Добавить депозит')}
+            </button>
+          </div>
+        </section>
+      )}
       {error && (
         <div className="finance-alert" role="alert">
           {error}{' '}
@@ -496,15 +547,17 @@ export function FinancePage({ active = true }: { active?: boolean }) {
             <div className="finance-hero panel">
               <div className="finance-hero-top">
                 <span>
-                  {t(
-                    view === 'account'
-                      ? 'Основной счёт'
-                      : view === 'deposits'
-                        ? 'Депозиты'
-                        : view === 'stocks'
-                          ? 'Акции'
-                          : 'Всего учтено',
-                  )}
+                  {view === 'deposits' && selectedDeposit
+                    ? selectedDeposit.name
+                    : t(
+                        view === 'account'
+                          ? 'Основной счёт'
+                          : view === 'deposits'
+                            ? 'Депозиты'
+                            : view === 'stocks'
+                              ? 'Акции'
+                              : 'Всего учтено',
+                      )}
                 </span>
                 <Wallet size={21} />
               </div>
@@ -544,6 +597,15 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                     onClick={() => openEdit(account)}
                   >
                     <Pencil size={15} /> {t('Изменить стартовый остаток')}
+                  </button>
+                ) : null}
+                {view === 'deposits' && selectedDeposit ? (
+                  <button
+                    type="button"
+                    className="finance-hero-action"
+                    onClick={() => openEdit(selectedDeposit)}
+                  >
+                    <Pencil size={15} /> {t('Изменить депозит')}
                   </button>
                 ) : null}
                 {view === 'deposits' || view === 'stocks' ? (
@@ -721,7 +783,9 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                   center={money(
                     view === 'all'
                       ? Math.max(0, accountBalance ?? 0) + assetTotal
-                      : (sectionTotal ?? 0),
+                      : view === 'deposits'
+                        ? deposits
+                        : (sectionTotal ?? 0),
                   )}
                   caption={t('в активах')}
                   empty={t(
@@ -747,15 +811,17 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                 <div>
                   <span>{t('Ваши записи')}</span>
                   <h2>
-                    {t(
-                      view === 'account'
-                        ? 'Операции основного счёта'
-                        : view === 'deposits'
-                          ? 'Мои депозиты'
-                          : view === 'stocks'
-                            ? 'Мои акции'
-                            : 'Операции и активы',
-                    )}
+                    {view === 'deposits' && selectedDeposit
+                      ? selectedDeposit.name
+                      : t(
+                          view === 'account'
+                            ? 'Операции основного счёта'
+                            : view === 'deposits'
+                              ? 'Мои депозиты'
+                              : view === 'stocks'
+                                ? 'Мои акции'
+                                : 'Операции и активы',
+                        )}
                   </h2>
                 </div>
                 <button
