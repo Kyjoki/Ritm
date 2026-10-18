@@ -227,7 +227,9 @@ export function FinancePage({ active = true }: { active?: boolean }) {
     view === 'account'
       ? transactions.length
       : view === 'deposits'
-        ? depositEntries.length
+        ? selectedDeposit
+          ? 1
+          : depositEntries.length
         : view === 'stocks'
           ? assets.filter((entry) => entry.type === 'stock').length
           : visible.length;
@@ -478,7 +480,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
         <section className="finance-deposit-picker" aria-label={t('Выбрать депозит')}>
           <div className="finance-deposit-picker-heading">
             <strong>{t('Выбрать депозит')}</strong>
-            <span>{t('Записей: {count}', { count: depositEntries.length })}</span>
+            <span>{t('Всего депозитов: {count}', { count: depositEntries.length })}</span>
           </div>
           <div className="finance-deposit-options">
             <button
@@ -657,7 +659,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                       : view === 'all'
                         ? deposits
                         : view === 'deposits'
-                          ? deposits
+                          ? (selectedDeposit?.valueMinor ?? deposits)
                           : stocks,
                   )}
                 </strong>
@@ -772,7 +774,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                         view === 'all'
                           ? 'Где находятся деньги'
                           : view === 'deposits'
-                            ? 'Мои депозиты'
+                            ? 'Все депозиты'
                             : 'Мои акции',
                       )}
                     </h2>
@@ -787,7 +789,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                         ? deposits
                         : (sectionTotal ?? 0),
                   )}
-                  caption={t('в активах')}
+                  caption={t(view === 'deposits' ? 'всего в депозитах' : 'в активах')}
                   empty={t(
                     view === 'all'
                       ? 'Добавьте счёт, депозит или акции, чтобы увидеть распределение.'
