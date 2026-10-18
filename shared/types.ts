@@ -8,6 +8,13 @@ export type TaskKind = 'task' | 'event';
 export type FinanceCurrency = 'KZT' | 'USD' | 'EUR' | 'RUB';
 export type FinanceEntryInput =
   | {
+      type: 'account';
+      valueMinor: number;
+      currency: FinanceCurrency;
+      asOf: string;
+      note: string;
+    }
+  | {
       type: 'income';
       amountMinor: number;
       currency: FinanceCurrency;

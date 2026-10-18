@@ -7,11 +7,46 @@ export const financeEnglish: Record<string, string> = {
   'Валюта для просмотра': 'Display currency',
   'Все суммы вводятся вручную. Курсы валют и цены акций не обновляются автоматически.':
     'All amounts are entered manually. Exchange rates and stock prices do not update automatically.',
+  'Баланс счёта и оценки активов ведутся отдельно. Учитывайте переводы между ними вручную.':
+    'Account balance and asset values are tracked separately. Record transfers between them manually.',
   'Не удалось загрузить финансовые данные.': 'Could not load your finance data.',
   'Не удалось сохранить запись.': 'Could not save the entry.',
   'Не удалось удалить запись.': 'Could not delete the entry.',
   'Загружаем финансы…': 'Loading finances…',
   'Обзор финансов': 'Finance overview',
+  'Разделы финансов': 'Finance sections',
+  'Основной счёт': 'Main account',
+  'Всё вместе': 'All together',
+  'Всего учтено': 'Total tracked',
+  'Стартовый остаток': 'Opening balance',
+  'Задать стартовый остаток': 'Set opening balance',
+  'Изменить стартовый остаток': 'Edit opening balance',
+  'Стартовый остаток плюс внесённые операции с выбранной даты.':
+    'Opening balance plus recorded transactions since the selected date.',
+  'Счёт, депозиты и акции в выбранной валюте.':
+    'Account, deposits, and stocks in the selected currency.',
+  'Стоимость по вашей последней ручной оценке.': 'Value from your latest manual estimate.',
+  'С {date} учтены все поступления и расходы.': 'Income and expenses since {date} are included.',
+  'Записей: {count}': 'Entries: {count}',
+  Позиций: 'Holdings',
+  'Сумма оценок': 'Estimated value',
+  'Валюта просмотра': 'Display currency',
+  'Операции основного счёта': 'Main account transactions',
+  'Мои депозиты': 'My deposits',
+  'Мои акции': 'My stocks',
+  'Задайте стартовый остаток или добавьте операцию.':
+    'Set an opening balance or add a transaction.',
+  'Добавьте первый депозит.': 'Add your first deposit.',
+  'Добавьте первые акции.': 'Add your first stock holding.',
+  'Добавьте счёт, депозит или акции, чтобы увидеть распределение.':
+    'Add an account, deposit, or stock holding to see the mix.',
+  'Добавьте депозит, чтобы увидеть распределение.': 'Add a deposit to see the mix.',
+  'Добавьте акции, чтобы увидеть распределение.': 'Add a stock holding to see the mix.',
+  'Отрицательный остаток счёта показан в общем итоге, но не в круговой диаграмме.':
+    'A negative account balance is included in the total but not in the donut chart.',
+  'Укажите остаток на начало выбранного дня. Все внесённые поступления и расходы с этого дня меняют расчётный баланс.':
+    'Enter the balance at the start of the selected day. All recorded income and expenses from that day change the calculated balance.',
+  'Дата начала учёта': 'Tracking start date',
   'Учтённые активы': 'Tracked assets',
   'Вклады и акции по вашей последней оценке': 'Deposits and stocks at your latest valuation',
   Депозиты: 'Deposits',

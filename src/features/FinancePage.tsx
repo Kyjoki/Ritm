@@ -14,6 +14,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import type { FinanceEntry, FinanceEntryInput } from '../../shared/types';
+import { calculateAccountBalance } from '../../shared/finance';
 import { Dialog } from '../components/Dialog';
 import { api } from '../lib/api';
 import { useI18n } from '../lib/i18n';
@@ -21,6 +22,7 @@ import '../styles/finance.css';
 
 type Currency = FinanceEntry['currency'];
 type Kind = FinanceEntry['type'];
+type FinanceView = 'account' | 'deposits' | 'stocks' | 'all';
 type FormState = {
   type: Kind;
   amount: string;
@@ -139,6 +141,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
   const { locale, t } = useI18n();
   const [entries, setEntries] = useState<FinanceEntry[]>([]);
   const [currency, setCurrency] = useState<Currency>('KZT');
+  const [view, setView] = useState<FinanceView>('account');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
@@ -191,6 +194,8 @@ export function FinancePage({ active = true }: { active?: boolean }) {
     (entry) => entry.type === 'income' || entry.type === 'expense',
   );
   const assets = visible.filter((entry) => entry.type === 'deposit' || entry.type === 'stock');
+  const account = visible.find((entry) => entry.type === 'account');
+  const accountBalance = calculateAccountBalance(visible, currency, localDate());
   const currentMonth = monthKey(localDate());
   const monthTransactions = transactions.filter((entry) => monthKey(entry.date) === currentMonth);
   const income = monthTransactions
@@ -206,6 +211,23 @@ export function FinancePage({ active = true }: { active?: boolean }) {
     .filter((entry) => entry.type === 'stock')
     .reduce((sum, entry) => sum + entry.valueMinor, 0);
   const assetTotal = deposits + stocks;
+  const combinedTotal = accountBalance === null ? null : accountBalance + assetTotal;
+  const sectionTotal =
+    view === 'account'
+      ? accountBalance
+      : view === 'deposits'
+        ? deposits
+        : view === 'stocks'
+          ? stocks
+          : combinedTotal;
+  const sectionCount =
+    view === 'account'
+      ? transactions.length
+      : view === 'deposits'
+        ? assets.filter((entry) => entry.type === 'deposit').length
+        : view === 'stocks'
+          ? assets.filter((entry) => entry.type === 'stock').length
+          : visible.length;
   const expenseGroups = Object.entries(
     monthTransactions
       .filter((entry) => entry.type === 'expense')
@@ -226,20 +248,29 @@ export function FinancePage({ active = true }: { active?: boolean }) {
         ]
       : []),
   ];
-  const assetSlices = [
-    ...assets
-      .sort((a, b) => b.valueMinor - a.valueMinor)
-      .slice(0, 5)
-      .map((entry) => ({ label: entry.name, value: entry.valueMinor })),
-    ...(assets.length > 5
+  const sectionAssets = assets.filter((entry) =>
+    view === 'deposits' ? entry.type === 'deposit' : entry.type === 'stock',
+  );
+  const sortedAssets = [...sectionAssets].sort((a, b) => b.valueMinor - a.valueMinor);
+  const sectionAssetSlices = [
+    ...sortedAssets.slice(0, 5).map((entry) => ({ label: entry.name, value: entry.valueMinor })),
+    ...(sortedAssets.length > 5
       ? [
           {
             label: t('Другое'),
-            value: assets.slice(5).reduce((sum, entry) => sum + entry.valueMinor, 0),
+            value: sortedAssets.slice(5).reduce((sum, entry) => sum + entry.valueMinor, 0),
           },
         ]
       : []),
   ];
+  const sectionSlices =
+    view === 'all'
+      ? [
+          { label: t('Основной счёт'), value: Math.max(0, accountBalance ?? 0) },
+          { label: t('Депозиты'), value: deposits },
+          { label: t('Акции'), value: stocks },
+        ].filter((item) => item.value > 0)
+      : sectionAssetSlices;
   const monthly = Array.from({ length: 6 }, (_, index) => monthOffset(new Date(), index - 5)).map(
     (month) => ({
       ...month,
@@ -258,8 +289,20 @@ export function FinancePage({ active = true }: { active?: boolean }) {
         (a.type === 'income' || a.type === 'expense' ? a.date : a.asOf) || '',
       ) || b.createdAt.localeCompare(a.createdAt),
   );
+  const records = history.filter(
+    (entry) =>
+      view === 'all' ||
+      (view === 'account' &&
+        (entry.type === 'account' ||
+          ((entry.type === 'income' || entry.type === 'expense') &&
+            (!account || (entry.date >= account.asOf && entry.date <= localDate()))))) ||
+      (view === 'deposits' && entry.type === 'deposit') ||
+      (view === 'stocks' && entry.type === 'stock'),
+  );
 
-  function openNew(type: Kind = 'expense') {
+  function openNew(
+    type: Kind = view === 'deposits' ? 'deposit' : view === 'stocks' ? 'stock' : 'expense',
+  ) {
     setEditing(null);
     setForm(emptyForm(currency, type));
     setFormError('');
@@ -270,13 +313,16 @@ export function FinancePage({ active = true }: { active?: boolean }) {
     setForm({
       type: entry.type,
       amount: String(
-        (entry.type === 'deposit' || entry.type === 'stock'
+        (entry.type === 'account' || entry.type === 'deposit' || entry.type === 'stock'
           ? entry.valueMinor
           : entry.amountMinor) / 100,
       ),
       currency: entry.currency,
-      date: entry.type === 'deposit' || entry.type === 'stock' ? entry.asOf : entry.date,
-      category: entry.type === 'deposit' || entry.type === 'stock' ? '' : entry.category,
+      date:
+        entry.type === 'account' || entry.type === 'deposit' || entry.type === 'stock'
+          ? entry.asOf
+          : entry.date,
+      category: entry.type === 'income' || entry.type === 'expense' ? entry.category : '',
       name: entry.type === 'deposit' || entry.type === 'stock' ? entry.name : '',
       note: entry.note,
     });
@@ -307,13 +353,15 @@ export function FinancePage({ active = true }: { active?: boolean }) {
             category: form.category.trim(),
             ...common,
           }
-        : {
-            type: form.type,
-            valueMinor: minor,
-            asOf: form.date,
-            name: form.name.trim(),
-            ...common,
-          };
+        : form.type === 'account'
+          ? { type: 'account', valueMinor: minor, asOf: form.date, ...common }
+          : {
+              type: form.type,
+              valueMinor: minor,
+              asOf: form.date,
+              name: form.name.trim(),
+              ...common,
+            };
     setSaving(true);
     setFormError('');
     try {
@@ -384,6 +432,35 @@ export function FinancePage({ active = true }: { active?: boolean }) {
         <Coins size={15} />
         {t('Все суммы вводятся вручную. Курсы валют и цены акций не обновляются автоматически.')}
       </div>
+      {view === 'all' && (
+        <div className="finance-info-note">
+          <Wallet size={15} />
+          {t(
+            'Баланс счёта и оценки активов ведутся отдельно. Учитывайте переводы между ними вручную.',
+          )}
+        </div>
+      )}
+      <nav className="finance-views" aria-label={t('Разделы финансов')}>
+        {(['account', 'deposits', 'stocks', 'all'] as FinanceView[]).map((item) => (
+          <button
+            key={item}
+            type="button"
+            className={view === item ? 'active' : ''}
+            aria-pressed={view === item}
+            onClick={() => setView(item)}
+          >
+            {t(
+              item === 'account'
+                ? 'Основной счёт'
+                : item === 'deposits'
+                  ? 'Депозиты'
+                  : item === 'stocks'
+                    ? 'Акции'
+                    : 'Всё вместе',
+            )}
+          </button>
+        ))}
+      </nav>
       {error && (
         <div className="finance-alert" role="alert">
           {error}{' '}
@@ -396,7 +473,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
         <div className="panel finance-loading" role="status">
           <LoaderCircle className="spinning" size={20} /> {t('Загружаем финансы…')}
         </div>
-      ) : !visible.length ? (
+      ) : !visible.length && view === 'all' ? (
         <div className="panel finance-empty finance-empty-page">
           <Coins size={28} />
           <strong>
@@ -418,143 +495,268 @@ export function FinancePage({ active = true }: { active?: boolean }) {
           <section className="finance-top-grid" aria-label={t('Обзор финансов')}>
             <div className="finance-hero panel">
               <div className="finance-hero-top">
-                <span>{t('Учтённые активы')}</span>
+                <span>
+                  {t(
+                    view === 'account'
+                      ? 'Основной счёт'
+                      : view === 'deposits'
+                        ? 'Депозиты'
+                        : view === 'stocks'
+                          ? 'Акции'
+                          : 'Всего учтено',
+                  )}
+                </span>
                 <Wallet size={21} />
               </div>
-              <strong className="finance-hero-value">{money(assetTotal)}</strong>
-              <p>{t('Вклады и акции по вашей последней оценке')}</p>
+              <strong className="finance-hero-value">
+                {sectionTotal === null ? '—' : money(sectionTotal)}
+              </strong>
+              <p>
+                {t(
+                  view === 'account'
+                    ? 'Стартовый остаток плюс внесённые операции с выбранной даты.'
+                    : view === 'all'
+                      ? 'Счёт, депозиты и акции в выбранной валюте.'
+                      : 'Стоимость по вашей последней ручной оценке.',
+                )}
+              </p>
               <div className="finance-hero-split">
-                <span>
-                  <Landmark size={17} />
+                {view === 'account' && account ? (
                   <span>
-                    {t('Депозиты')} <strong>{money(deposits)}</strong>
+                    {t('С {date} учтены все поступления и расходы.', {
+                      date: dateLabel(account.asOf),
+                    })}
                   </span>
-                </span>
-                <span>
-                  <ChartNoAxesCombined size={17} />
-                  <span>
-                    {t('Акции')} <strong>{money(stocks)}</strong>
-                  </span>
-                </span>
+                ) : null}
+                {(view === 'account' || view === 'all') && !account ? (
+                  <button
+                    type="button"
+                    className="finance-hero-action"
+                    onClick={() => openNew('account')}
+                  >
+                    <CirclePlus size={16} /> {t('Задать стартовый остаток')}
+                  </button>
+                ) : null}
+                {(view === 'account' || view === 'all') && account ? (
+                  <button
+                    type="button"
+                    className="finance-hero-action"
+                    onClick={() => openEdit(account)}
+                  >
+                    <Pencil size={15} /> {t('Изменить стартовый остаток')}
+                  </button>
+                ) : null}
+                {view === 'deposits' || view === 'stocks' ? (
+                  <span>{t('Записей: {count}', { count: sectionCount })}</span>
+                ) : null}
               </div>
             </div>
             <div className="finance-overview-tiles">
               <div className="panel finance-summary-tile">
                 <span className="finance-tile-icon income">
-                  <ArrowDownLeft size={18} />
+                  {view === 'account' ? <ArrowDownLeft size={18} /> : <Wallet size={18} />}
                 </span>
-                <span className="finance-tile-label">{t('Поступило за месяц')}</span>
-                <strong>{money(income)}</strong>
+                <span className="finance-tile-label">
+                  {t(
+                    view === 'account'
+                      ? 'Поступило за месяц'
+                      : view === 'all'
+                        ? 'Основной счёт'
+                        : 'Позиций',
+                  )}
+                </span>
+                <strong>
+                  {view === 'account'
+                    ? money(income)
+                    : view === 'all'
+                      ? accountBalance === null
+                        ? '—'
+                        : money(accountBalance)
+                      : sectionCount}
+                </strong>
               </div>
               <div className="panel finance-summary-tile">
                 <span className="finance-tile-icon expense">
-                  <ArrowUpRight size={18} />
+                  {view === 'account' ? <ArrowUpRight size={18} /> : <Landmark size={18} />}
                 </span>
-                <span className="finance-tile-label">{t('Потрачено за месяц')}</span>
-                <strong>{money(expense)}</strong>
+                <span className="finance-tile-label">
+                  {t(
+                    view === 'account'
+                      ? 'Потрачено за месяц'
+                      : view === 'all'
+                        ? 'Депозиты'
+                        : 'Сумма оценок',
+                  )}
+                </span>
+                <strong>
+                  {money(
+                    view === 'account'
+                      ? expense
+                      : view === 'all'
+                        ? deposits
+                        : view === 'deposits'
+                          ? deposits
+                          : stocks,
+                  )}
+                </strong>
               </div>
               <div className="panel finance-summary-tile finance-net-tile">
                 <span className="finance-tile-icon net">
-                  <Banknote size={18} />
+                  {view === 'all' ? <ChartNoAxesCombined size={18} /> : <Banknote size={18} />}
                 </span>
-                <span className="finance-tile-label">{t('Разница за месяц')}</span>
-                <strong>{money(income - expense)}</strong>
+                <span className="finance-tile-label">
+                  {t(
+                    view === 'account'
+                      ? 'Разница за месяц'
+                      : view === 'all'
+                        ? 'Акции'
+                        : 'Валюта просмотра',
+                  )}
+                </span>
+                <strong>
+                  {view === 'account'
+                    ? money(income - expense)
+                    : view === 'all'
+                      ? money(stocks)
+                      : currency}
+                </strong>
               </div>
             </div>
           </section>
 
-          <section className="finance-chart-grid" aria-label={t('Финансовые графики')}>
-            <div className="panel finance-chart-card finance-cash-chart">
-              <div className="finance-card-heading">
-                <div>
-                  <span>{t('Динамика')}</span>
-                  <h2>{t('Деньги по месяцам')}</h2>
-                </div>
-                <div className="finance-chart-key">
-                  <span className="income" />
-                  {t('Поступления')}
-                  <span className="expense" />
-                  {t('Расходы')}
-                </div>
-              </div>
-              <div
-                className="finance-bars"
-                role="img"
-                aria-label={monthly
-                  .map(
-                    (month) =>
-                      `${new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(month.date)}: ${t('Поступления')} ${money(month.income)}, ${t('Расходы')} ${money(month.expense)}`,
-                  )
-                  .join('; ')}
-              >
-                {monthly.map((month) => (
-                  <div className="finance-month" key={month.key}>
-                    <div className="finance-month-bars">
-                      <span
-                        className="finance-bar income"
-                        style={{
-                          height: `${Math.max(month.income ? 3 : 0, (month.income / chartMax) * 100)}%`,
-                        }}
-                        title={`${t('Поступления')}: ${money(month.income)}`}
-                      />
-                      <span
-                        className="finance-bar expense"
-                        style={{
-                          height: `${Math.max(month.expense ? 3 : 0, (month.expense / chartMax) * 100)}%`,
-                        }}
-                        title={`${t('Расходы')}: ${money(month.expense)}`}
-                      />
-                    </div>
-                    <span className="finance-month-label">
-                      {new Intl.DateTimeFormat(locale, { month: 'short' }).format(month.date)}
-                    </span>
+          {view === 'account' && (
+            <section className="finance-chart-grid" aria-label={t('Финансовые графики')}>
+              <div className="panel finance-chart-card finance-cash-chart">
+                <div className="finance-card-heading">
+                  <div>
+                    <span>{t('Динамика')}</span>
+                    <h2>{t('Деньги по месяцам')}</h2>
                   </div>
-                ))}
-              </div>
-              {!transactions.length && (
-                <p className="finance-chart-empty">
-                  {t('Добавьте поступление или расход — здесь появится динамика.')}
-                </p>
-              )}
-            </div>
-            <div className="panel finance-chart-card">
-              <div className="finance-card-heading">
-                <div>
-                  <span>{t('Этот месяц')}</span>
-                  <h2>{t('На что уходят деньги')}</h2>
+                  <div className="finance-chart-key">
+                    <span className="income" />
+                    {t('Поступления')}
+                    <span className="expense" />
+                    {t('Расходы')}
+                  </div>
                 </div>
+                <div
+                  className="finance-bars"
+                  role="img"
+                  aria-label={monthly
+                    .map(
+                      (month) =>
+                        `${new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(month.date)}: ${t('Поступления')} ${money(month.income)}, ${t('Расходы')} ${money(month.expense)}`,
+                    )
+                    .join('; ')}
+                >
+                  {monthly.map((month) => (
+                    <div className="finance-month" key={month.key}>
+                      <div className="finance-month-bars">
+                        <span
+                          className="finance-bar income"
+                          style={{
+                            height: `${Math.max(month.income ? 3 : 0, (month.income / chartMax) * 100)}%`,
+                          }}
+                          title={`${t('Поступления')}: ${money(month.income)}`}
+                        />
+                        <span
+                          className="finance-bar expense"
+                          style={{
+                            height: `${Math.max(month.expense ? 3 : 0, (month.expense / chartMax) * 100)}%`,
+                          }}
+                          title={`${t('Расходы')}: ${money(month.expense)}`}
+                        />
+                      </div>
+                      <span className="finance-month-label">
+                        {new Intl.DateTimeFormat(locale, { month: 'short' }).format(month.date)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {!transactions.length && (
+                  <p className="finance-chart-empty">
+                    {t('Добавьте поступление или расход — здесь появится динамика.')}
+                  </p>
+                )}
               </div>
-              <Donut
-                items={expenseSlices}
-                center={money(expense)}
-                caption={t('расходов')}
-                empty={t('Пока нет расходов за этот месяц.')}
-                format={money}
-              />
-            </div>
-          </section>
+              <div className="panel finance-chart-card">
+                <div className="finance-card-heading">
+                  <div>
+                    <span>{t('Этот месяц')}</span>
+                    <h2>{t('На что уходят деньги')}</h2>
+                  </div>
+                </div>
+                <Donut
+                  items={expenseSlices}
+                  center={money(expense)}
+                  caption={t('расходов')}
+                  empty={t('Пока нет расходов за этот месяц.')}
+                  format={money}
+                />
+              </div>
+            </section>
+          )}
 
-          <section className="finance-bottom-grid">
-            <div className="panel finance-chart-card">
-              <div className="finance-card-heading">
-                <div>
-                  <span>{t('Состав активов')}</span>
-                  <h2>{t('Где находятся деньги')}</h2>
+          <section
+            className={`finance-bottom-grid ${view === 'account' ? 'finance-records-only' : ''}`}
+          >
+            {view !== 'account' && (
+              <div className="panel finance-chart-card">
+                <div className="finance-card-heading">
+                  <div>
+                    <span>{t('Состав активов')}</span>
+                    <h2>
+                      {t(
+                        view === 'all'
+                          ? 'Где находятся деньги'
+                          : view === 'deposits'
+                            ? 'Мои депозиты'
+                            : 'Мои акции',
+                      )}
+                    </h2>
+                  </div>
                 </div>
+                <Donut
+                  items={sectionSlices}
+                  center={money(
+                    view === 'all'
+                      ? Math.max(0, accountBalance ?? 0) + assetTotal
+                      : (sectionTotal ?? 0),
+                  )}
+                  caption={t('в активах')}
+                  empty={t(
+                    view === 'all'
+                      ? 'Добавьте счёт, депозит или акции, чтобы увидеть распределение.'
+                      : view === 'deposits'
+                        ? 'Добавьте депозит, чтобы увидеть распределение.'
+                        : 'Добавьте акции, чтобы увидеть распределение.',
+                  )}
+                  format={money}
+                />
+                {view === 'all' && accountBalance !== null && accountBalance < 0 && (
+                  <p className="finance-chart-empty">
+                    {t(
+                      'Отрицательный остаток счёта показан в общем итоге, но не в круговой диаграмме.',
+                    )}
+                  </p>
+                )}
               </div>
-              <Donut
-                items={assetSlices}
-                center={money(assetTotal)}
-                caption={t('в активах')}
-                empty={t('Добавьте депозит или акции, чтобы увидеть распределение.')}
-                format={money}
-              />
-            </div>
+            )}
             <div className="panel finance-records">
               <div className="finance-card-heading">
                 <div>
                   <span>{t('Ваши записи')}</span>
-                  <h2>{t('Операции и активы')}</h2>
+                  <h2>
+                    {t(
+                      view === 'account'
+                        ? 'Операции основного счёта'
+                        : view === 'deposits'
+                          ? 'Мои депозиты'
+                          : view === 'stocks'
+                            ? 'Мои акции'
+                            : 'Операции и активы',
+                    )}
+                  </h2>
                 </div>
                 <button
                   type="button"
@@ -567,21 +769,31 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                   <RefreshCw className={refreshing ? 'spinning' : ''} size={17} />
                 </button>
               </div>
-              {history.length ? (
+              {records.length ? (
                 <ul className="finance-record-list">
-                  {history.map((entry) => {
-                    const isAsset = entry.type === 'deposit' || entry.type === 'stock';
+                  {records.map((entry) => {
+                    const isAsset =
+                      entry.type === 'account' ||
+                      entry.type === 'deposit' ||
+                      entry.type === 'stock';
                     const amount = isAsset ? entry.valueMinor : entry.amountMinor;
-                    const label = isAsset ? entry.name : categoryLabel(entry.category);
+                    const label =
+                      entry.type === 'account'
+                        ? t('Стартовый остаток')
+                        : entry.type === 'deposit' || entry.type === 'stock'
+                          ? entry.name
+                          : categoryLabel(entry.category);
                     const date = isAsset ? entry.asOf : entry.date;
                     const Icon =
                       entry.type === 'income'
                         ? ArrowDownLeft
                         : entry.type === 'expense'
                           ? ArrowUpRight
-                          : entry.type === 'deposit'
-                            ? Landmark
-                            : ChartNoAxesCombined;
+                          : entry.type === 'account'
+                            ? Wallet
+                            : entry.type === 'deposit'
+                              ? Landmark
+                              : ChartNoAxesCombined;
                     return (
                       <li key={entry.id} className="finance-record">
                         <span className={`finance-record-icon ${entry.type}`}>
@@ -595,9 +807,11 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                                 ? 'Поступление'
                                 : entry.type === 'expense'
                                   ? 'Расход'
-                                  : entry.type === 'deposit'
-                                    ? 'Депозит'
-                                    : 'Акции',
+                                  : entry.type === 'account'
+                                    ? 'Основной счёт'
+                                    : entry.type === 'deposit'
+                                      ? 'Депозит'
+                                      : 'Акции',
                             )}{' '}
                             · {dateLabel(date)}
                             {entry.note ? ` · ${entry.note}` : ''}
@@ -651,13 +865,37 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                 <div className="finance-empty">
                   <Coins size={24} />
                   <strong>{t('Пока нет записей в {currency}', { currency })}</strong>
-                  <p>{t('Добавьте первое поступление, расход или актив.')}</p>
+                  <p>
+                    {t(
+                      view === 'account'
+                        ? 'Задайте стартовый остаток или добавьте операцию.'
+                        : view === 'deposits'
+                          ? 'Добавьте первый депозит.'
+                          : view === 'stocks'
+                            ? 'Добавьте первые акции.'
+                            : 'Добавьте первое поступление, расход или актив.',
+                    )}
+                  </p>
                   <button
                     type="button"
                     className="button button-secondary"
-                    onClick={() => openNew()}
+                    onClick={() =>
+                      openNew(
+                        view === 'account' && !account
+                          ? 'account'
+                          : view === 'deposits'
+                            ? 'deposit'
+                            : view === 'stocks'
+                              ? 'stock'
+                              : 'expense',
+                      )
+                    }
                   >
-                    {t('Добавить запись')}
+                    {t(
+                      view === 'account' && !account
+                        ? 'Задать стартовый остаток'
+                        : 'Добавить запись',
+                    )}
                   </button>
                 </div>
               )}
@@ -679,11 +917,18 @@ export function FinancePage({ active = true }: { active?: boolean }) {
           <form onSubmit={(event) => void save(event)} className="finance-form">
             <fieldset className="finance-type-switch" disabled={Boolean(editing) || saving}>
               <legend>{t('Тип записи')}</legend>
-              {(['expense', 'income', 'deposit', 'stock'] as Kind[]).map((kind) => (
+              {(['expense', 'income', 'account', 'deposit', 'stock'] as Kind[]).map((kind) => (
                 <button
                   key={kind}
                   type="button"
                   aria-pressed={form.type === kind}
+                  disabled={
+                    !editing &&
+                    kind === 'account' &&
+                    entries.some(
+                      (entry) => entry.type === 'account' && entry.currency === form.currency,
+                    )
+                  }
                   onClick={() => setForm({ ...form, type: kind, category: '', name: '' })}
                 >
                   {t(
@@ -691,9 +936,11 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                       ? 'Расход'
                       : kind === 'income'
                         ? 'Поступление'
-                        : kind === 'deposit'
-                          ? 'Депозит'
-                          : 'Акции',
+                        : kind === 'account'
+                          ? 'Основной счёт'
+                          : kind === 'deposit'
+                            ? 'Депозит'
+                            : 'Акции',
                   )}
                 </button>
               ))}
@@ -701,9 +948,13 @@ export function FinancePage({ active = true }: { active?: boolean }) {
             <div className="form-grid">
               <label className="field">
                 <span>
-                  {form.type === 'income' || form.type === 'expense'
-                    ? t('Сумма')
-                    : t('Текущая стоимость')}
+                  {t(
+                    form.type === 'account'
+                      ? 'Стартовый остаток'
+                      : form.type === 'income' || form.type === 'expense'
+                        ? 'Сумма'
+                        : 'Текущая стоимость',
+                  )}
                 </span>
                 <input
                   required
@@ -722,7 +973,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                   onChange={(event) =>
                     setForm({ ...form, currency: event.target.value as Currency })
                   }
-                  disabled={saving}
+                  disabled={saving || (Boolean(editing) && form.type === 'account')}
                 >
                   {currencies.map((item) => (
                     <option key={item} value={item}>
@@ -753,6 +1004,12 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                   ))}
                 </datalist>
               </label>
+            ) : form.type === 'account' ? (
+              <p className="finance-account-help">
+                {t(
+                  'Укажите остаток на начало выбранного дня. Все внесённые поступления и расходы с этого дня меняют расчётный баланс.',
+                )}
+              </p>
             ) : (
               <label className="field">
                 <span>{t('Название')}</span>
@@ -772,12 +1029,13 @@ export function FinancePage({ active = true }: { active?: boolean }) {
               <span>
                 {form.type === 'income' || form.type === 'expense'
                   ? t('Дата операции')
-                  : t('Дата оценки')}
+                  : t(form.type === 'account' ? 'Дата начала учёта' : 'Дата оценки')}
               </span>
               <input
                 required
                 type="date"
                 value={form.date}
+                max={form.type === 'account' ? localDate() : undefined}
                 onChange={(event) => setForm({ ...form, date: event.target.value })}
                 disabled={saving}
               />

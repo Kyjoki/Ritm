@@ -46,6 +46,40 @@
   color: var(--accent);
   flex: none;
 }
+.finance-views {
+  display: flex;
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--soft);
+  width: fit-content;
+  max-width: 100%;
+}
+.finance-views button {
+  min-height: 40px;
+  padding: 8px 17px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.finance-views button:hover {
+  color: var(--accent);
+}
+.finance-views button.active {
+  color: var(--accent);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.finance-views button:focus-visible,
+.finance-hero-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .finance-alert,
 .finance-form-error {
   color: var(--danger);
@@ -148,6 +182,22 @@
   font-size: 13px;
   overflow-wrap: anywhere;
 }
+.finance-hero-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid #dfc7f96b;
+  border-radius: 10px;
+  background: #ffffff19;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 650;
+}
+.finance-hero-action:hover {
+  background: #ffffff30;
+}
 .finance-overview-tiles {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -210,6 +260,9 @@
 }
 .finance-bottom-grid {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.28fr);
+}
+.finance-bottom-grid.finance-records-only {
+  grid-template-columns: 1fr;
 }
 .finance-chart-card,
 .finance-records {
@@ -561,6 +614,12 @@
   color: var(--muted);
   font-weight: 400;
 }
+.finance-account-help {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
 .finance-form .dialog-actions {
   margin-top: 3px;
 }
@@ -593,6 +652,17 @@
   }
 }
 @media (max-width: 520px) {
+  .finance-views {
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .finance-views::-webkit-scrollbar {
+    display: none;
+  }
+  .finance-views button {
+    padding-inline: 12px;
+  }
   .finance-heading {
     display: grid;
   }

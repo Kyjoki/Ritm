@@ -8,6 +8,7 @@ import type { AddressInfo } from 'node:net';
 import { Store } from '../server/store.ts';
 import { createApp } from '../server/index.ts';
 import { financeEntryInputSchema } from '../server/validation.ts';
+import { calculateAccountBalance } from '../shared/finance.ts';
 
 const income = {
   type: 'income' as const,
@@ -29,6 +30,74 @@ test('finance validation preserves exact minor units and rejects malformed or un
   assert.equal(financeEntryInputSchema.safeParse({ ...income, currency: 'JPY' }).success, false);
   assert.equal(financeEntryInputSchema.safeParse({ ...income, date: '2026-02-30' }).success, false);
   assert.equal(financeEntryInputSchema.safeParse({ ...income, apiKey: 'leak' }).success, false);
+});
+
+test('main account uses opening balance and only recorded operations from its start date', () => {
+  const account = {
+    type: 'account' as const,
+    valueMinor: 100000,
+    currency: 'KZT' as const,
+    asOf: '2026-10-14',
+    note: '',
+  };
+  assert.equal(financeEntryInputSchema.safeParse(account).success, true);
+  const entry = (fields: object, id: string) => ({
+    id,
+    createdAt: '2026-10-14T00:00:00.000Z',
+    updatedAt: '2026-10-14T00:00:00.000Z',
+    ...fields,
+  });
+  const entries = [
+    entry(account, 'account'),
+    entry({ ...income, date: '2026-10-13' }, 'earlier'),
+    entry({ ...income, amountMinor: 25000 }, 'current-income'),
+    entry(
+      {
+        type: 'expense',
+        amountMinor: 6000,
+        currency: 'KZT',
+        date: '2026-10-14',
+        category: 'Food',
+        note: '',
+      },
+      'current-expense',
+    ),
+    entry({ ...income, date: '2026-10-19' }, 'future'),
+    entry({ ...income, currency: 'USD' }, 'other-currency'),
+  ] as Parameters<typeof calculateAccountBalance>[0];
+  assert.equal(calculateAccountBalance(entries, 'KZT', '2026-10-18'), 119000);
+  assert.equal(calculateAccountBalance(entries, 'KZT', '2026-10-13'), null);
+  assert.equal(calculateAccountBalance(entries, 'USD', '2026-10-18'), null);
+});
+
+test('only one main account per currency can be stored and its currency cannot change', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ritm-finance-account-'));
+  try {
+    const store = new Store(directory, false);
+    const input = {
+      type: 'account' as const,
+      valueMinor: 50000,
+      currency: 'KZT' as const,
+      asOf: '2026-10-14',
+      note: '',
+    };
+    const created = store.createFinanceEntry(input);
+    assert.throws(
+      () => store.createFinanceEntry(input),
+      (error: unknown) =>
+        error instanceof Error && 'code' in error && error.code === 'FINANCE_ACCOUNT_EXISTS',
+    );
+    assert.throws(
+      () => store.updateFinanceEntry(created.id, { ...input, currency: 'USD' }, created.updatedAt),
+      (error: unknown) =>
+        error instanceof Error && 'code' in error && error.code === 'FINANCE_ACCOUNT_CURRENCY',
+    );
+    assert.equal(store.financeEntries().length, 1);
+    store.close();
+  } finally {
+    assert.ok(resolve(directory).startsWith(resolve(tmpdir()) + sep));
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('SQLite finance records survive reopening and remain independent of calendar tasks', () => {

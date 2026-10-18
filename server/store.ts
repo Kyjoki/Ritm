@@ -199,6 +199,15 @@ export class Store {
     const fields = financeEntryInputSchema.parse(input);
     return this.transaction(() => {
       const entries = this.financeEntries();
+      if (
+        fields.type === 'account' &&
+        entries.some((entry) => entry.type === 'account' && entry.currency === fields.currency)
+      )
+        throw new AppError(
+          409,
+          'FINANCE_ACCOUNT_EXISTS',
+          'Основной счёт в этой валюте уже есть. Обновите данные.',
+        );
       if (entries.length >= 2000)
         throw new AppError(
           400,
@@ -229,6 +238,12 @@ export class Store {
         throw conflict('Финансовая запись изменилась. Обновите данные и повторите действие.');
       if (current.type !== fields.type)
         throw new AppError(400, 'FINANCE_TYPE_IMMUTABLE', 'Тип финансовой записи нельзя изменить.');
+      if (fields.type === 'account' && current.currency !== fields.currency)
+        throw new AppError(
+          400,
+          'FINANCE_ACCOUNT_CURRENCY',
+          'Валюту основного счёта нельзя изменить.',
+        );
       const entry: FinanceEntry = {
         ...fields,
         id,

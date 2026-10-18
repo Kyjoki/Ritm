@@ -205,6 +205,27 @@ test('pg-mem: finance records persist separately from tasks and reject invalid c
   assert.equal((await store.financeEntries()).length, 1);
 });
 
+test('pg-mem: main account is unique per currency', async (t) => {
+  const { store } = await fixture(t);
+  const input = {
+    type: 'account' as const,
+    valueMinor: 80000,
+    currency: 'KZT' as const,
+    asOf: '2026-10-14',
+    note: '',
+  };
+  const account = await store.createFinanceEntry(input);
+  await assert.rejects(
+    store.createFinanceEntry(input),
+    (error: unknown) => error instanceof AppError && error.code === 'FINANCE_ACCOUNT_EXISTS',
+  );
+  await assert.rejects(
+    store.updateFinanceEntry(account.id, { ...input, currency: 'USD' }, account.updatedAt),
+    (error: unknown) => error instanceof AppError && error.code === 'FINANCE_ACCOUNT_CURRENCY',
+  );
+  assert.equal((await store.financeEntries()).length, 1);
+});
+
 test('pg-mem: restoring a task cannot bypass the quota and the rejected undo is retryable', async (t) => {
   const { store, db } = await fixture(t);
   const deleted = await store.deleteTask((await store.createTask(base)).id);
