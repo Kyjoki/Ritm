@@ -49,6 +49,7 @@ export type FinanceEntryInput =
       ticker?: string;
       quantity?: number;
       unitPriceMinor?: number;
+      purchasePriceMinor?: number;
     };
 export type FinanceEntry = FinanceEntryInput & {
   id: string;

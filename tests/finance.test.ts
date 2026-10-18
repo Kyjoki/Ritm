@@ -48,6 +48,7 @@ test('stock holdings keep legacy valuations and reject inconsistent share totals
     ticker: 'HSBK',
     quantity: 2,
     unitPriceMinor: 37400,
+    purchasePriceMinor: 35000,
     valueMinor: 74800,
   };
   assert.equal(financeEntryInputSchema.safeParse(holding).success, true);
@@ -55,6 +56,15 @@ test('stock holdings keep legacy valuations and reject inconsistent share totals
   assert.equal(financeEntryInputSchema.safeParse({ ...holding, quantity: 0 }).success, false);
   assert.equal(
     financeEntryInputSchema.safeParse({ ...holding, unitPriceMinor: undefined }).success,
+    false,
+  );
+  assert.equal(
+    financeEntryInputSchema.safeParse({ ...holding, quantity: undefined }).success,
+    false,
+  );
+  assert.equal(
+    financeEntryInputSchema.safeParse({ ...holding, purchasePriceMinor: 1_000_000_000_000 })
+      .success,
     false,
   );
   assert.equal(
@@ -217,4 +227,37 @@ test('finance API requires owner session and supports create, edit and delete', 
     200,
   );
   assert.deepEqual((await (await call('/finance')).json()).entries, []);
+  const holding = {
+    type: 'stock' as const,
+    name: 'Halyk',
+    exchange: 'KASE' as const,
+    ticker: 'HSBK',
+    quantity: 2,
+    unitPriceMinor: 37400,
+    purchasePriceMinor: 35000,
+    valueMinor: 74800,
+    currency: 'KZT' as const,
+    asOf: '2026-10-16',
+    note: '',
+  };
+  const stockCreated = await call('/finance', 'POST', holding);
+  assert.equal(stockCreated.status, 201);
+  const stock = (await stockCreated.json()).entry as { id: string; updatedAt: string };
+  assert.equal(
+    (
+      await call('/finance/' + stock.id, 'PATCH', {
+        entry: { ...holding, unitPriceMinor: 40000, valueMinor: 74800 },
+        expectedUpdatedAt: stock.updatedAt,
+      })
+    ).status,
+    400,
+  );
+  const repriced = await call('/finance/' + stock.id, 'PATCH', {
+    entry: { ...holding, unitPriceMinor: 40000, valueMinor: 80000, asOf: '2026-10-18' },
+    expectedUpdatedAt: stock.updatedAt,
+  });
+  assert.equal(repriced.status, 200);
+  const persisted = (await (await call('/finance')).json()).entries[0];
+  assert.equal(persisted.purchasePriceMinor, 35000);
+  assert.equal(persisted.valueMinor, 80000);
 });

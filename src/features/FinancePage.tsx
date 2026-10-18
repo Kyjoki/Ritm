@@ -36,6 +36,7 @@ type FormState = {
   ticker: string;
   quantity: string;
   unitPrice: string;
+  purchasePrice: string;
 };
 
 const currencies: Currency[] = ['KZT', 'USD', 'EUR', 'RUB'];
@@ -59,6 +60,7 @@ function emptyForm(currency: Currency, type: Kind = 'expense'): FormState {
     ticker: '',
     quantity: '',
     unitPrice: '',
+    purchasePrice: '',
   };
 }
 
@@ -202,6 +204,13 @@ export function FinancePage({ active = true }: { active?: boolean }) {
       minimumFractionDigits: minor % 100 ? 2 : 0,
       maximumFractionDigits: 2,
     }).format(minor / 100);
+  const formMoney = (minor: number) =>
+    new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: form?.currency ?? currency,
+      minimumFractionDigits: minor % 100 ? 2 : 0,
+      maximumFractionDigits: 2,
+    }).format(minor / 100);
   const dateLabel = (value: string) =>
     new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short', year: 'numeric' }).format(
       new Date(`${value}T12:00:00`),
@@ -234,6 +243,18 @@ export function FinancePage({ active = true }: { active?: boolean }) {
   const stocks = assets
     .filter((entry) => entry.type === 'stock')
     .reduce((sum, entry) => sum + entry.valueMinor, 0);
+  const stockEntries = visible.filter(
+    (entry): entry is Extract<FinanceEntry, { type: 'stock' }> => entry.type === 'stock',
+  );
+  const stocksWithBasis = stockEntries.filter(
+    (entry) => entry.quantity && entry.purchasePriceMinor !== undefined,
+  );
+  const stockInvested = stocksWithBasis.reduce(
+    (sum, entry) => sum + entry.quantity! * entry.purchasePriceMinor!,
+    0,
+  );
+  const stockCurrentWithBasis = stocksWithBasis.reduce((sum, entry) => sum + entry.valueMinor, 0);
+  const stockGain = stockCurrentWithBasis - stockInvested;
   const assetTotal = deposits + stocks;
   const combinedTotal = accountBalance === null ? null : accountBalance + assetTotal;
   const sectionTotal =
@@ -360,6 +381,10 @@ export function FinancePage({ active = true }: { active?: boolean }) {
         entry.type === 'stock' && entry.unitPriceMinor !== undefined
           ? String(entry.unitPriceMinor / 100)
           : '',
+      purchasePrice:
+        entry.type === 'stock' && entry.purchasePriceMinor !== undefined
+          ? String(entry.purchasePriceMinor / 100)
+          : '',
     });
     setFormError('');
   }
@@ -370,6 +395,8 @@ export function FinancePage({ active = true }: { active?: boolean }) {
     const isStockWithPrice = form.type === 'stock' && form.quantity.trim() !== '';
     const quantity = isStockWithPrice ? Number(form.quantity) : null;
     const unitPriceMinor = isStockWithPrice ? parseMinor(form.unitPrice) : null;
+    const purchasePriceMinor =
+      form.type === 'stock' && form.purchasePrice.trim() ? parseMinor(form.purchasePrice) : null;
     const minor =
       isStockWithPrice && quantity && unitPriceMinor !== null
         ? quantity * unitPriceMinor
@@ -412,6 +439,15 @@ export function FinancePage({ active = true }: { active?: boolean }) {
         setFormError(t('Для цены одной акции укажите количество.'));
         return;
       }
+      if (
+        (!editing && purchasePriceMinor === null) ||
+        (form.purchasePrice.trim() && purchasePriceMinor === null) ||
+        (purchasePriceMinor !== null &&
+          (!isStockWithPrice || !quantity || quantity * purchasePriceMinor > 1_000_000_000_000))
+      ) {
+        setFormError(t('Введите цену покупки за одну акцию и количество бумаг.'));
+        return;
+      }
     }
     const common = { currency: form.currency, note: form.note.trim() };
     const input: FinanceEntryInput =
@@ -437,6 +473,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                 ...(isStockWithPrice
                   ? { quantity: quantity!, unitPriceMinor: unitPriceMinor! }
                   : {}),
+                ...(purchasePriceMinor !== null ? { purchasePriceMinor } : {}),
                 ...common,
               }
             : {
@@ -757,41 +794,70 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                       ? 'Потрачено за месяц'
                       : view === 'all'
                         ? 'Депозиты'
-                        : 'Сумма оценок',
+                        : view === 'stocks'
+                          ? 'Вложено в акции'
+                          : 'Сумма оценок',
                   )}
                 </span>
                 <strong>
-                  {money(
-                    view === 'account'
-                      ? expense
-                      : view === 'all'
-                        ? deposits
-                        : view === 'deposits'
-                          ? (selectedDeposit?.valueMinor ?? deposits)
-                          : stocks,
-                  )}
+                  {view === 'stocks' && !stocksWithBasis.length
+                    ? '—'
+                    : money(
+                        view === 'account'
+                          ? expense
+                          : view === 'all'
+                            ? deposits
+                            : view === 'deposits'
+                              ? (selectedDeposit?.valueMinor ?? deposits)
+                              : stockInvested,
+                      )}
                 </strong>
+                {view === 'stocks' && stocksWithBasis.length < stockEntries.length && (
+                  <small>
+                    {t('Расчёт для {count} из {total}', {
+                      count: stocksWithBasis.length,
+                      total: stockEntries.length,
+                    })}
+                  </small>
+                )}
               </div>
-              <div className="panel finance-summary-tile finance-net-tile">
+              <div
+                className={`panel finance-summary-tile finance-net-tile ${view === 'stocks' ? 'finance-stock-net-tile' : ''}`}
+              >
                 <span className="finance-tile-icon net">
                   {view === 'all' ? <ChartNoAxesCombined size={18} /> : <Banknote size={18} />}
                 </span>
                 <span className="finance-tile-label">
                   {t(
-                    view === 'account'
-                      ? 'Разница за месяц'
-                      : view === 'all'
-                        ? 'Акции'
-                        : 'Валюта просмотра',
+                    view === 'stocks'
+                      ? 'Прибыль / убыток'
+                      : view === 'account'
+                        ? 'Разница за месяц'
+                        : view === 'all'
+                          ? 'Акции'
+                          : 'Валюта просмотра',
                   )}
                 </span>
                 <strong>
-                  {view === 'account'
-                    ? money(income - expense)
-                    : view === 'all'
-                      ? money(stocks)
-                      : currency}
+                  {view === 'stocks'
+                    ? stocksWithBasis.length
+                      ? `${stockGain > 0 ? '+' : ''}${money(stockGain)}`
+                      : '—'
+                    : view === 'account'
+                      ? money(income - expense)
+                      : view === 'all'
+                        ? money(stocks)
+                        : currency}
                 </strong>
+                {view === 'stocks' && stocksWithBasis.length > 0 && stockInvested > 0 && (
+                  <small className="finance-gain-percent">
+                    {new Intl.NumberFormat(locale, {
+                      maximumFractionDigits: 1,
+                      signDisplay: 'always',
+                    }).format((stockGain / stockInvested) * 100)}
+                    %
+                  </small>
+                )}
               </div>
             </div>
           </section>
@@ -970,6 +1036,16 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                             : entry.type === 'deposit'
                               ? Landmark
                               : ChartNoAxesCombined;
+                    const purchaseValue =
+                      entry.type === 'stock' &&
+                      entry.quantity &&
+                      entry.purchasePriceMinor !== undefined
+                        ? entry.quantity * entry.purchasePriceMinor
+                        : null;
+                    const gain =
+                      entry.type === 'stock' && purchaseValue !== null
+                        ? entry.valueMinor - purchaseValue
+                        : null;
                     return (
                       <li key={entry.id} className="finance-record">
                         <span className={`finance-record-icon ${entry.type}`}>
@@ -1009,6 +1085,15 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                                     <ExternalLink size={12} aria-hidden="true" />
                                   </a>
                                 )}
+                            </span>
+                          )}
+                          {entry.type === 'stock' && (
+                            <span
+                              className={`finance-stock-result ${gain === null ? '' : gain >= 0 ? 'positive' : 'negative'}`}
+                            >
+                              {purchaseValue === null
+                                ? t('Добавьте цену покупки для расчёта прибыли')
+                                : `${t('Куплено за')} ${money(purchaseValue)} · ${t('Плюс / минус')} ${gain! > 0 ? '+' : ''}${money(gain!)}${purchaseValue > 0 ? ` (${new Intl.NumberFormat(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format((gain! / purchaseValue) * 100)}%)` : ''}`}
                             </span>
                           )}
                         </span>
@@ -1283,7 +1368,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                     />
                   </label>
                   <label className="field">
-                    <span>{t('Цена одной акции')}</span>
+                    <span>{t('Цена сейчас за акцию')}</span>
                     <input
                       required={!editing || Boolean(form.quantity)}
                       inputMode="decimal"
@@ -1294,6 +1379,20 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                     />
                   </label>
                 </div>
+                <label className="field">
+                  <span>{t('Цена покупки за акцию')}</span>
+                  <input
+                    required={!editing || Boolean(form.purchasePrice)}
+                    inputMode="decimal"
+                    value={form.purchasePrice}
+                    onChange={(event) => setForm({ ...form, purchasePrice: event.target.value })}
+                    placeholder="0,00"
+                    disabled={saving}
+                  />
+                </label>
+                <p className="finance-account-help">
+                  {t('Прибыль и убыток рассчитаны без комиссий и дивидендов.')}
+                </p>
                 {form.quantity &&
                   form.unitPrice &&
                   parseMinor(form.unitPrice) !== null &&
@@ -1305,6 +1404,23 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                         style: 'currency',
                         currency: form.currency,
                       }).format((Number(form.quantity) * parseMinor(form.unitPrice)!) / 100)}
+                    </p>
+                  )}
+                {form.quantity &&
+                  form.unitPrice &&
+                  form.purchasePrice &&
+                  Number.isSafeInteger(Number(form.quantity)) &&
+                  Number(form.quantity) > 0 &&
+                  parseMinor(form.unitPrice) !== null &&
+                  parseMinor(form.purchasePrice) !== null && (
+                    <p className="finance-stock-total">
+                      {t('Куплено за')}{' '}
+                      {formMoney(Number(form.quantity) * parseMinor(form.purchasePrice)!)} ·{' '}
+                      {t('Плюс / минус')}{' '}
+                      {formMoney(
+                        Number(form.quantity) *
+                          (parseMinor(form.unitPrice)! - parseMinor(form.purchasePrice)!),
+                      )}
                     </p>
                   )}
                 {editing && editing.type === 'stock' && !editing.quantity && !form.quantity && (

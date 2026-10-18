@@ -670,6 +670,33 @@
   overflow: visible;
   white-space: normal;
 }
+.finance-record-main > .finance-stock-result {
+  overflow: visible;
+  white-space: normal;
+  line-height: 1.4;
+}
+.finance-stock-result.positive {
+  color: #348b71;
+}
+.finance-stock-result.negative {
+  color: #b3627e;
+}
+.finance-summary-tile small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.finance-stock-net-tile {
+  display: grid;
+  grid-template-columns: 31px minmax(0, 1fr) auto;
+}
+.finance-stock-net-tile strong {
+  margin-left: 0;
+}
+.finance-stock-net-tile .finance-gain-percent {
+  grid-column: 3;
+  text-align: right;
+}
 .finance-price-action {
   white-space: nowrap;
   color: var(--accent) !important;

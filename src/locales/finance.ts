@@ -97,6 +97,18 @@ export const financeEnglish: Record<string, string> = {
   Тикер: 'Ticker',
   'Количество акций': 'Number of shares',
   'Цена одной акции': 'Price per share',
+  'Цена сейчас за акцию': 'Current price per share',
+  'Цена покупки за акцию': 'Purchase price per share',
+  'Куплено за': 'Purchase cost',
+  'Плюс / минус': 'Gain / loss',
+  'Прибыль / убыток': 'Gain / loss',
+  'Вложено в акции': 'Invested in stocks',
+  'Расчёт для {count} из {total}': 'Calculated for {count} of {total}',
+  'Добавьте цену покупки для расчёта прибыли': 'Add a purchase price to calculate gain or loss',
+  'Введите цену покупки за одну акцию и количество бумаг.':
+    'Enter the purchase price per share and the number of shares.',
+  'Прибыль и убыток рассчитаны без комиссий и дивидендов.':
+    'Gain and loss exclude fees and dividends.',
   'Стоимость позиции': 'Holding value',
   'Прежняя ручная оценка': 'Previous manual valuation',
   'Ручная оценка': 'Manual valuation',
