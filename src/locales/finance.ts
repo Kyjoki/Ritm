@@ -93,6 +93,27 @@ export const financeEnglish: Record<string, string> = {
   'Тип записи': 'Entry type',
   Сумма: 'Amount',
   'Текущая стоимость': 'Current value',
+  Биржа: 'Exchange',
+  Тикер: 'Ticker',
+  'Количество акций': 'Number of shares',
+  'Цена одной акции': 'Price per share',
+  'Стоимость позиции': 'Holding value',
+  'Прежняя ручная оценка': 'Previous manual valuation',
+  'Ручная оценка': 'Manual valuation',
+  'Обновить цену': 'Update price',
+  'Обновить цену акции': 'Update share price',
+  'Посмотреть котировку на сайте биржи': 'View quote on exchange site',
+  'Цену вы вводите вручную после проверки на сайте биржи. Показываем дату вашей оценки.':
+    'Enter the price after checking the exchange site. We show the date of your valuation.',
+  'Выбирайте валюту, в которой биржа показывает цену этой акции.':
+    'Choose the currency in which the exchange quotes this share.',
+  'Укажите биржу, тикер, количество и цену одной акции.':
+    'Enter the exchange, ticker, number of shares, and price per share.',
+  'Введите целое количество акций и цену с точностью до двух знаков.':
+    'Enter a whole number of shares and a price with up to two decimal places.',
+  'Для цены одной акции укажите количество.': 'Enter the number of shares for the share price.',
+  'Введите цену с точностью до двух знаков.': 'Enter a price with up to two decimal places.',
+  'шт.': 'shares',
   Категория: 'Category',
   'Например, зарплата или продукты': 'For example, salary or groceries',
   Название: 'Name',

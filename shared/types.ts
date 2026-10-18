@@ -45,6 +45,10 @@ export type FinanceEntryInput =
       currency: FinanceCurrency;
       asOf: string;
       note: string;
+      exchange?: 'KASE' | 'AIX';
+      ticker?: string;
+      quantity?: number;
+      unitPriceMinor?: number;
     };
 export type FinanceEntry = FinanceEntryInput & {
   id: string;

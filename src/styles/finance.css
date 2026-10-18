@@ -638,6 +638,44 @@
   display: grid;
   gap: 16px;
 }
+.finance-stock-form {
+  display: grid;
+  gap: 14px;
+}
+.finance-stock-total {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+.finance-quote-link,
+.finance-stock-details a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent);
+  font-size: 12px;
+  text-decoration: none;
+}
+.finance-quote-link:hover,
+.finance-stock-details a:hover {
+  text-decoration: underline;
+}
+.finance-stock-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+}
+.finance-record-main > .finance-stock-details {
+  overflow: visible;
+  white-space: normal;
+}
+.finance-price-action {
+  white-space: nowrap;
+  color: var(--accent) !important;
+  font-size: 11px;
+  font-weight: 650;
+}
 .finance-type-switch {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

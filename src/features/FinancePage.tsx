@@ -6,6 +6,7 @@ import {
   ChartNoAxesCombined,
   CirclePlus,
   Coins,
+  ExternalLink,
   Landmark,
   LoaderCircle,
   Pencil,
@@ -31,6 +32,10 @@ type FormState = {
   category: string;
   name: string;
   note: string;
+  exchange: 'KASE' | 'AIX';
+  ticker: string;
+  quantity: string;
+  unitPrice: string;
 };
 
 const currencies: Currency[] = ['KZT', 'USD', 'EUR', 'RUB'];
@@ -50,7 +55,18 @@ function emptyForm(currency: Currency, type: Kind = 'expense'): FormState {
     category: '',
     name: '',
     note: '',
+    exchange: 'KASE',
+    ticker: '',
+    quantity: '',
+    unitPrice: '',
   };
+}
+
+function quoteUrl(exchange: 'KASE' | 'AIX', ticker: string): string | null {
+  if (!/^[A-Z0-9._-]{1,30}$/.test(ticker)) return null;
+  return exchange === 'KASE'
+    ? `https://kase.kz/en/investors/shares/${ticker}/`
+    : `https://data-feed.aix.kz/symbol/${ticker}/trading`;
 }
 
 function parseMinor(value: string): number | null {
@@ -152,6 +168,11 @@ export function FinancePage({ active = true }: { active?: boolean }) {
   const [formError, setFormError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [priceUpdate, setPriceUpdate] = useState<Extract<FinanceEntry, { type: 'stock' }> | null>(
+    null,
+  );
+  const [priceInput, setPriceInput] = useState('');
+  const [priceDate, setPriceDate] = useState(localDate());
 
   async function reload(initial = false) {
     if (initial) setLoading(true);
@@ -332,6 +353,13 @@ export function FinancePage({ active = true }: { active?: boolean }) {
       category: entry.type === 'income' || entry.type === 'expense' ? entry.category : '',
       name: entry.type === 'deposit' || entry.type === 'stock' ? entry.name : '',
       note: entry.note,
+      exchange: entry.type === 'stock' ? (entry.exchange ?? 'KASE') : 'KASE',
+      ticker: entry.type === 'stock' ? (entry.ticker ?? '') : '',
+      quantity: entry.type === 'stock' && entry.quantity ? String(entry.quantity) : '',
+      unitPrice:
+        entry.type === 'stock' && entry.unitPriceMinor !== undefined
+          ? String(entry.unitPriceMinor / 100)
+          : '',
     });
     setFormError('');
   }
@@ -339,8 +367,19 @@ export function FinancePage({ active = true }: { active?: boolean }) {
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!form || saving) return;
-    const minor = parseMinor(form.amount);
-    if (minor === null || ((form.type === 'income' || form.type === 'expense') && minor === 0)) {
+    const isStockWithPrice = form.type === 'stock' && form.quantity.trim() !== '';
+    const quantity = isStockWithPrice ? Number(form.quantity) : null;
+    const unitPriceMinor = isStockWithPrice ? parseMinor(form.unitPrice) : null;
+    const minor =
+      isStockWithPrice && quantity && unitPriceMinor !== null
+        ? quantity * unitPriceMinor
+        : parseMinor(form.amount);
+    if (
+      minor === null ||
+      !Number.isSafeInteger(minor) ||
+      minor > 1_000_000_000_000 ||
+      ((form.type === 'income' || form.type === 'expense') && minor === 0)
+    ) {
       setFormError(
         t(
           form.type === 'income' || form.type === 'expense'
@@ -349,6 +388,30 @@ export function FinancePage({ active = true }: { active?: boolean }) {
         ),
       );
       return;
+    }
+    if (form.type === 'stock') {
+      if (
+        (!editing && !form.ticker.trim()) ||
+        (form.ticker.trim() && !quoteUrl(form.exchange, form.ticker.trim().toUpperCase())) ||
+        (!editing && !isStockWithPrice)
+      ) {
+        setFormError(t('Укажите биржу, тикер, количество и цену одной акции.'));
+        return;
+      }
+      if (
+        isStockWithPrice &&
+        (!Number.isSafeInteger(quantity) ||
+          !quantity ||
+          quantity > 1_000_000_000 ||
+          unitPriceMinor === null)
+      ) {
+        setFormError(t('Введите целое количество акций и цену с точностью до двух знаков.'));
+        return;
+      }
+      if (!isStockWithPrice && form.unitPrice.trim()) {
+        setFormError(t('Для цены одной акции укажите количество.'));
+        return;
+      }
     }
     const common = { currency: form.currency, note: form.note.trim() };
     const input: FinanceEntryInput =
@@ -362,13 +425,27 @@ export function FinancePage({ active = true }: { active?: boolean }) {
           }
         : form.type === 'account'
           ? { type: 'account', valueMinor: minor, asOf: form.date, ...common }
-          : {
-              type: form.type,
-              valueMinor: minor,
-              asOf: form.date,
-              name: form.name.trim(),
-              ...common,
-            };
+          : form.type === 'stock'
+            ? {
+                type: 'stock',
+                valueMinor: minor,
+                asOf: form.date,
+                name: form.name.trim(),
+                ...(form.ticker.trim()
+                  ? { exchange: form.exchange, ticker: form.ticker.trim().toUpperCase() }
+                  : {}),
+                ...(isStockWithPrice
+                  ? { quantity: quantity!, unitPriceMinor: unitPriceMinor! }
+                  : {}),
+                ...common,
+              }
+            : {
+                type: form.type,
+                valueMinor: minor,
+                asOf: form.date,
+                name: form.name.trim(),
+                ...common,
+              };
     setSaving(true);
     setFormError('');
     try {
@@ -387,6 +464,37 @@ export function FinancePage({ active = true }: { active?: boolean }) {
       }
       setForm(null);
       setEditing(null);
+    } catch (failure) {
+      setFormError(failure instanceof Error ? failure.message : t('Не удалось сохранить запись.'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function savePrice(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!priceUpdate || saving || !priceUpdate.quantity) return;
+    const unitPriceMinor = parseMinor(priceInput);
+    const valueMinor = unitPriceMinor === null ? null : unitPriceMinor * priceUpdate.quantity;
+    if (
+      valueMinor === null ||
+      !Number.isSafeInteger(valueMinor) ||
+      valueMinor > 1_000_000_000_000
+    ) {
+      setFormError(t('Введите цену с точностью до двух знаков.'));
+      return;
+    }
+    setSaving(true);
+    setFormError('');
+    try {
+      const { id, createdAt, updatedAt, ...input } = priceUpdate;
+      const result = await api.updateFinanceEntry(
+        id,
+        { ...input, asOf: priceDate, unitPriceMinor: unitPriceMinor!, valueMinor },
+        updatedAt,
+      );
+      setEntries((current) => current.map((entry) => (entry.id === id ? result.entry : entry)));
+      setPriceUpdate(null);
     } catch (failure) {
       setFormError(failure instanceof Error ? failure.message : t('Не удалось сохранить запись.'));
     } finally {
@@ -884,6 +992,25 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                             · {dateLabel(date)}
                             {entry.note ? ` · ${entry.note}` : ''}
                           </span>
+                          {entry.type === 'stock' && (
+                            <span className="finance-stock-details">
+                              {entry.quantity && entry.unitPriceMinor !== undefined
+                                ? `${entry.quantity} × ${money(entry.unitPriceMinor)}`
+                                : t('Ручная оценка')}
+                              {entry.exchange &&
+                                entry.ticker &&
+                                quoteUrl(entry.exchange, entry.ticker) && (
+                                  <a
+                                    href={quoteUrl(entry.exchange, entry.ticker)!}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                  >
+                                    {entry.exchange} · {entry.ticker}{' '}
+                                    <ExternalLink size={12} aria-hidden="true" />
+                                  </a>
+                                )}
+                            </span>
+                          )}
                         </span>
                         <strong className={`finance-record-money ${entry.type}`}>
                           {entry.type === 'income' ? '+' : entry.type === 'expense' ? '−' : ''}
@@ -906,6 +1033,24 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                             </>
                           ) : (
                             <>
+                              {entry.type === 'stock' && entry.quantity && (
+                                <button
+                                  type="button"
+                                  className="finance-price-action"
+                                  onClick={() => {
+                                    setPriceUpdate(entry);
+                                    setPriceInput(
+                                      entry.unitPriceMinor !== undefined
+                                        ? String(entry.unitPriceMinor / 100)
+                                        : '',
+                                    );
+                                    setPriceDate(localDate());
+                                    setFormError('');
+                                  }}
+                                >
+                                  {t('Обновить цену')}
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 aria-label={`${t('Изменить')} ${label}`}
@@ -1014,26 +1159,28 @@ export function FinancePage({ active = true }: { active?: boolean }) {
               ))}
             </fieldset>
             <div className="form-grid">
-              <label className="field">
-                <span>
-                  {t(
-                    form.type === 'account'
-                      ? 'Стартовый остаток'
-                      : form.type === 'income' || form.type === 'expense'
-                        ? 'Сумма'
-                        : 'Текущая стоимость',
-                  )}
-                </span>
-                <input
-                  required
-                  inputMode="decimal"
-                  autoComplete="off"
-                  placeholder="0,00"
-                  value={form.amount}
-                  onChange={(event) => setForm({ ...form, amount: event.target.value })}
-                  disabled={saving}
-                />
-              </label>
+              {form.type !== 'stock' && (
+                <label className="field">
+                  <span>
+                    {t(
+                      form.type === 'account'
+                        ? 'Стартовый остаток'
+                        : form.type === 'income' || form.type === 'expense'
+                          ? 'Сумма'
+                          : 'Текущая стоимость',
+                    )}
+                  </span>
+                  <input
+                    required
+                    inputMode="decimal"
+                    autoComplete="off"
+                    placeholder="0,00"
+                    value={form.amount}
+                    onChange={(event) => setForm({ ...form, amount: event.target.value })}
+                    disabled={saving}
+                  />
+                </label>
+              )}
               <label className="field">
                 <span>{t('Валюта')}</span>
                 <select
@@ -1093,6 +1240,106 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                 />
               </label>
             )}
+            {form.type === 'stock' && (
+              <div className="finance-stock-form">
+                <div className="form-grid">
+                  <label className="field">
+                    <span>{t('Биржа')}</span>
+                    <select
+                      value={form.exchange}
+                      onChange={(event) =>
+                        setForm({ ...form, exchange: event.target.value as 'KASE' | 'AIX' })
+                      }
+                      disabled={saving}
+                    >
+                      <option value="KASE">KASE</option>
+                      <option value="AIX">AIX</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>{t('Тикер')}</span>
+                    <input
+                      required={!editing}
+                      maxLength={30}
+                      value={form.ticker}
+                      onChange={(event) =>
+                        setForm({ ...form, ticker: event.target.value.toUpperCase() })
+                      }
+                      placeholder="HSBK"
+                      disabled={saving}
+                    />
+                  </label>
+                </div>
+                <div className="form-grid">
+                  <label className="field">
+                    <span>{t('Количество акций')}</span>
+                    <input
+                      required={!editing || Boolean(form.unitPrice)}
+                      inputMode="numeric"
+                      value={form.quantity}
+                      onChange={(event) => setForm({ ...form, quantity: event.target.value })}
+                      placeholder="10"
+                      disabled={saving}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>{t('Цена одной акции')}</span>
+                    <input
+                      required={!editing || Boolean(form.quantity)}
+                      inputMode="decimal"
+                      value={form.unitPrice}
+                      onChange={(event) => setForm({ ...form, unitPrice: event.target.value })}
+                      placeholder="0,00"
+                      disabled={saving}
+                    />
+                  </label>
+                </div>
+                {form.quantity &&
+                  form.unitPrice &&
+                  parseMinor(form.unitPrice) !== null &&
+                  Number.isSafeInteger(Number(form.quantity)) &&
+                  Number(form.quantity) > 0 && (
+                    <p className="finance-stock-total">
+                      {t('Стоимость позиции')}:{' '}
+                      {new Intl.NumberFormat(locale, {
+                        style: 'currency',
+                        currency: form.currency,
+                      }).format((Number(form.quantity) * parseMinor(form.unitPrice)!) / 100)}
+                    </p>
+                  )}
+                {editing && editing.type === 'stock' && !editing.quantity && !form.quantity && (
+                  <label className="field">
+                    <span>{t('Прежняя ручная оценка')}</span>
+                    <input
+                      required
+                      inputMode="decimal"
+                      value={form.amount}
+                      onChange={(event) => setForm({ ...form, amount: event.target.value })}
+                      disabled={saving}
+                    />
+                  </label>
+                )}
+                {form.ticker && quoteUrl(form.exchange, form.ticker.trim()) && (
+                  <a
+                    className="finance-quote-link"
+                    href={quoteUrl(form.exchange, form.ticker.trim())!}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {t('Посмотреть котировку на сайте биржи')}{' '}
+                    <ExternalLink size={14} aria-hidden="true" />
+                  </a>
+                )}
+                <p className="finance-account-help">
+                  {t(
+                    'Цену вы вводите вручную после проверки на сайте биржи. Показываем дату вашей оценки.',
+                  )}
+                </p>
+                <p className="finance-account-help">
+                  {t('Выбирайте валюту, в которой биржа показывает цену этой акции.')}
+                </p>
+              </div>
+            )}
             <label className="field">
               <span>
                 {form.type === 'income' || form.type === 'expense'
@@ -1141,6 +1388,77 @@ export function FinancePage({ active = true }: { active?: boolean }) {
               <button type="submit" className="button button-primary" disabled={saving}>
                 {saving && <LoaderCircle size={16} className="spinning" />}
                 {editing ? t('Сохранить изменения') : t('Добавить запись')}
+              </button>
+            </div>
+          </form>
+        </Dialog>
+      )}
+      {priceUpdate && (
+        <Dialog
+          title={t('Обновить цену акции')}
+          onClose={() => setPriceUpdate(null)}
+          busy={saving}
+          className="finance-dialog"
+        >
+          <form onSubmit={(event) => void savePrice(event)} className="finance-form">
+            <strong>
+              {priceUpdate.name} · {priceUpdate.quantity} {t('шт.')}
+            </strong>
+            {priceUpdate.exchange &&
+              priceUpdate.ticker &&
+              quoteUrl(priceUpdate.exchange, priceUpdate.ticker) && (
+                <a
+                  className="finance-quote-link"
+                  href={quoteUrl(priceUpdate.exchange, priceUpdate.ticker)!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {t('Посмотреть котировку на сайте биржи')}{' '}
+                  <ExternalLink size={14} aria-hidden="true" />
+                </a>
+              )}
+            <div className="form-grid">
+              <label className="field">
+                <span>
+                  {t('Цена одной акции')} · {priceUpdate.currency}
+                </span>
+                <input
+                  required
+                  autoFocus
+                  inputMode="decimal"
+                  value={priceInput}
+                  onChange={(event) => setPriceInput(event.target.value)}
+                  disabled={saving}
+                />
+              </label>
+              <label className="field">
+                <span>{t('Дата оценки')}</span>
+                <input
+                  required
+                  type="date"
+                  max={localDate()}
+                  value={priceDate}
+                  onChange={(event) => setPriceDate(event.target.value)}
+                  disabled={saving}
+                />
+              </label>
+            </div>
+            {formError && (
+              <p className="finance-form-error" role="alert">
+                {formError}
+              </p>
+            )}
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => setPriceUpdate(null)}
+                disabled={saving}
+              >
+                {t('Отмена')}
+              </button>
+              <button type="submit" className="button button-primary" disabled={saving}>
+                {t('Сохранить изменения')}
               </button>
             </div>
           </form>

@@ -133,8 +133,25 @@ export const financeEntryInputSchema = z.discriminatedUnion('type', [
       currency: financeCurrencySchema,
       asOf: dateValue,
       note: z.string().trim().max(1000),
+      exchange: z.enum(['KASE', 'AIX']).optional(),
+      ticker: z
+        .string()
+        .trim()
+        .toUpperCase()
+        .regex(/^[A-Z0-9._-]{1,30}$/)
+        .optional(),
+      quantity: z.number().int().positive().safe().max(1_000_000_000).optional(),
+      unitPriceMinor: financeAmountSchema.optional(),
     })
-    .strict(),
+    .strict()
+    .refine((stock) => Boolean(stock.exchange) === Boolean(stock.ticker))
+    .refine((stock) => Boolean(stock.quantity) === (stock.unitPriceMinor !== undefined))
+    .refine(
+      (stock) =>
+        stock.quantity === undefined ||
+        (Number.isSafeInteger(stock.quantity * stock.unitPriceMinor!) &&
+          stock.valueMinor === stock.quantity * stock.unitPriceMinor!),
+    ),
 ]);
 export const taskSchema = taskFields
   .extend({

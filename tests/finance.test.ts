@@ -32,6 +32,37 @@ test('finance validation preserves exact minor units and rejects malformed or un
   assert.equal(financeEntryInputSchema.safeParse({ ...income, apiKey: 'leak' }).success, false);
 });
 
+test('stock holdings keep legacy valuations and reject inconsistent share totals', () => {
+  const legacy = {
+    type: 'stock' as const,
+    name: 'Halyk',
+    valueMinor: 37400,
+    currency: 'KZT' as const,
+    asOf: '2026-10-16',
+    note: '',
+  };
+  assert.equal(financeEntryInputSchema.safeParse(legacy).success, true);
+  const holding = {
+    ...legacy,
+    exchange: 'KASE',
+    ticker: 'HSBK',
+    quantity: 2,
+    unitPriceMinor: 37400,
+    valueMinor: 74800,
+  };
+  assert.equal(financeEntryInputSchema.safeParse(holding).success, true);
+  assert.equal(financeEntryInputSchema.safeParse({ ...holding, valueMinor: 37400 }).success, false);
+  assert.equal(financeEntryInputSchema.safeParse({ ...holding, quantity: 0 }).success, false);
+  assert.equal(
+    financeEntryInputSchema.safeParse({ ...holding, unitPriceMinor: undefined }).success,
+    false,
+  );
+  assert.equal(
+    financeEntryInputSchema.safeParse({ ...holding, ticker: 'javascript:alert(1)' }).success,
+    false,
+  );
+});
+
 test('main account uses opening balance and only recorded operations from its start date', () => {
   const account = {
     type: 'account' as const,
