@@ -9,6 +9,9 @@
   gap: 18px;
   padding-bottom: 24px;
 }
+.finance-page-visible {
+  animation: page-enter 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
 .finance-heading {
   margin-bottom: 0;
   align-items: flex-end;

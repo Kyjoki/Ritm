@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -158,6 +158,7 @@ function Donut({
 export function FinancePage({ active = true }: { active?: boolean }) {
   const { locale, t } = useI18n();
   const [entries, setEntries] = useState<FinanceEntry[]>([]);
+  const hasLoaded = useRef(false);
   const [currency, setCurrency] = useState<Currency>('KZT');
   const [view, setView] = useState<FinanceView>('account');
   const [selectedDepositId, setSelectedDepositId] = useState<string | null>(null);
@@ -183,6 +184,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
     try {
       const result = await api.finance();
       setEntries(result.entries);
+      hasLoaded.current = true;
     } catch (failure) {
       setError(
         failure instanceof Error ? failure.message : t('Не удалось загрузить финансовые данные.'),
@@ -194,7 +196,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
   }
 
   useEffect(() => {
-    if (active) void reload(true);
+    if (active) void reload(!hasLoaded.current);
   }, [active]);
 
   const money = (minor: number) =>
@@ -555,7 +557,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
   }
 
   return (
-    <div className="finance-page">
+    <div className={`finance-page${active ? ' finance-page-visible' : ''}`}>
       <header className="page-heading finance-heading">
         <div>
           <div className="page-eyebrow">{t('RITM · ЛИЧНЫЕ ФИНАНСЫ')}</div>
