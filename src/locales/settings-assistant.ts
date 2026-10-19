@@ -68,8 +68,8 @@ export const settingsAssistantEnglish: Record<string, string> = {
   'Подключи своего бота, затем привяжи личный чат.':
     'Connect your bot, then link your private chat.',
   'Привязан: {name}': 'Linked: {name}',
-  'Пока Telegram только подтверждает связь с аккаунтом. Сообщения не передаются ИИ.':
-    'Telegram only verifies the account link for now. Messages are not sent to AI.',
+  'В личном чате отправь /menu, чтобы открыть кнопки быстрых дел, плана и итога. Сообщения не передаются ИИ.':
+    'Send /menu in your private chat to open the buttons for quick tasks, today’s plan, and the daily summary. Messages are not sent to AI.',
   'Сменить бота': 'Change bot',
   'Привязать чат': 'Link chat',
   'Токен бота от BotFather': 'Bot token from BotFather',

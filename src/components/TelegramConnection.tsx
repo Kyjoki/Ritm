@@ -82,7 +82,9 @@ export function TelegramConnection() {
             </small>
           ) : null}
           <small>
-            {t('Пока Telegram только подтверждает связь с аккаунтом. Сообщения не передаются ИИ.')}
+            {t(
+              'В личном чате отправь /menu, чтобы открыть кнопки быстрых дел, плана и итога. Сообщения не передаются ИИ.',
+            )}
           </small>
         </div>
         <div className="settings-connection-actions">

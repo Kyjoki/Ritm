@@ -139,6 +139,7 @@ export function createApp(options: AppOptions = {}) {
     secrets,
     origin: env.APP_ORIGIN,
     transport: options.telegramTransport,
+    store,
   });
   const google =
     options.googleService ??

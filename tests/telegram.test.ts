@@ -11,15 +11,17 @@ test('Telegram links only a private chat through a short-lived owner-issued star
   const dataDir = mkdtempSync(join(tmpdir(), 'ritm-telegram-'));
   const botToken = '123456789:' + 'a'.repeat(35);
   const methods: string[] = [];
+  const sent: { text: string; reply_markup?: unknown }[] = [];
   const transport: typeof fetch = async (input, init) => {
     const method = new URL(String(input)).pathname.split('/').at(-1)!;
     methods.push(method);
     const result = method === 'getMe' ? { id: 17, is_bot: true, username: 'RitmTestBot' } : true;
+    if (method === 'sendMessage') sent.push(JSON.parse(String(init?.body)));
     assert.equal(init?.method, 'POST');
     if (method === 'setWebhook') {
       const body = JSON.parse(String(init?.body));
       assert.equal(body.url, 'https://ritm.example.com/api/integrations/telegram/webhook');
-      assert.deepEqual(body.allowed_updates, ['message']);
+      assert.deepEqual(body.allowed_updates, ['message', 'callback_query']);
       assert.ok(body.secret_token);
     }
     return new Response(JSON.stringify({ ok: true, result }), { status: 200 });
@@ -94,8 +96,74 @@ test('Telegram links only a private chat through a short-lived owner-issued star
   assert.equal(linked.linked, true);
   assert.equal(linked.pairingUrl, undefined);
   assert.equal(linked.account.firstName, 'Owner');
+  assert.match(sent.at(-1)!.text, /Чат подключён/);
+  assert.ok(sent.at(-1)!.reply_markup);
+  assert.equal(
+    (await call('/webhook', 'POST', update(42, 'private', '➕ Добавить дело'), header)).status,
+    200,
+  );
+  assert.equal(
+    (await call('/webhook', 'POST', update(42, 'private', 'Купить лекарства завтра'), header))
+      .status,
+    200,
+  );
+  const confirmation = sent.at(-1)!;
+  assert.match(confirmation.text, /Купить лекарства/);
+  const expectedTomorrow = new Date(Date.now() + 86_400_000).toLocaleDateString('sv-SE', {
+    timeZone: 'Asia/Qyzylorda',
+  });
+  assert.match(confirmation.text, new RegExp(expectedTomorrow));
+  const save = (confirmation.reply_markup as { inline_keyboard: { callback_data: string }[][] })
+    .inline_keyboard[0][0].callback_data;
+  assert.equal(
+    (
+      await call(
+        '/webhook',
+        'POST',
+        {
+          update_id: 2,
+          callback_query: {
+            id: 'callback-1',
+            from: { id: 42 },
+            data: save,
+            message: { chat: { id: 42, type: 'private' } },
+          },
+        },
+        header,
+      )
+    ).status,
+    200,
+  );
+  assert.match(sent.at(-1)!.text, /Сохранено/);
+  const sentAfterSave = sent.length;
+  assert.equal(
+    (
+      await call(
+        '/webhook',
+        'POST',
+        {
+          update_id: 3,
+          callback_query: {
+            id: 'callback-2',
+            from: { id: 42 },
+            data: save,
+            message: { chat: { id: 42, type: 'private' } },
+          },
+        },
+        header,
+      )
+    ).status,
+    200,
+  );
+  assert.equal(sent.length, sentAfterSave);
+  assert.equal(
+    (await call('/webhook', 'POST', update(42, 'private', '🌙 Итог дня'), header)).status,
+    200,
+  );
+  assert.match(sent.at(-1)!.text, /Итог дня/);
   assert.equal((await call('/pairing', 'POST', {})).status, 409);
   assert.equal((await call('/connection', 'DELETE')).status, 200);
   assert.equal((await call('/status')).body.configured, false);
-  assert.deepEqual(methods, ['getMe', 'setWebhook', 'deleteWebhook']);
+  assert.ok(methods.includes('answerCallbackQuery'));
+  assert.equal(methods.at(-1), 'deleteWebhook');
 });
