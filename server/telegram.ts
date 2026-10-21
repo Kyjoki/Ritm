@@ -8,6 +8,7 @@ import type { WorkspaceRepository } from './repository.ts';
 export const TELEGRAM_WEBHOOK_PATH = '/api/integrations/telegram/webhook';
 const CONFIG_NAME = 'telegram-connection';
 const PAIRING_LIFETIME_MS = 10 * 60_000;
+const WEBHOOK_VERSION = 2;
 const MENU_RU = {
   keyboard: [
     [{ text: '➕ Добавить дело' }, { text: '📋 План на сегодня' }],
@@ -31,6 +32,7 @@ const configurationSchema = z.object({
   botToken: botTokenSchema,
   botUsername: z.string().regex(/^[A-Za-z0-9_]{5,32}$/),
   webhookSecret: z.string().regex(/^[A-Za-z0-9_-]{32,128}$/),
+  webhookVersion: z.number().int().optional(),
   pending: z.object({ token: z.string(), expiresAt: z.number() }).optional(),
   draft: z
     .object({ title: z.string(), date: z.string(), token: z.string(), expiresAt: z.number() })
@@ -201,6 +203,33 @@ export function createTelegramService({
   async function write(value: Configuration) {
     await secrets.saveSecret(CONFIG_NAME, JSON.stringify(value));
   }
+  async function ensureWebhook(config: Configuration | null): Promise<Configuration | null> {
+    if (!config || config.webhookVersion === WEBHOOK_VERSION) return config;
+    if (!origin || !origin.startsWith('https://'))
+      throw new AppError(
+        503,
+        'TELEGRAM_ORIGIN_REQUIRED',
+        'Для Telegram нужен публичный HTTPS-адрес Ritm.',
+      );
+    const lease = await secrets.acquireLease('telegram-pairing', 15_000);
+    if (!lease) return config;
+    try {
+      const latest = await read();
+      if (!latest || latest.webhookVersion === WEBHOOK_VERSION) return latest;
+      await call<boolean>(latest.botToken, 'setWebhook', {
+        url: origin + TELEGRAM_WEBHOOK_PATH,
+        secret_token: latest.webhookSecret,
+        allowed_updates: ['message', 'callback_query'],
+        drop_pending_updates: false,
+        max_connections: 1,
+      });
+      const next = { ...latest, webhookVersion: WEBHOOK_VERSION };
+      await write(next);
+      return next;
+    } finally {
+      await secrets.releaseLease('telegram-pairing', lease);
+    }
+  }
   async function call<T>(token: string, method: string, body: object): Promise<T> {
     try {
       const response = await transport(`https://api.telegram.org/bot${token}/${method}`, {
@@ -239,7 +268,7 @@ export function createTelegramService({
     };
   }
   async function status() {
-    return statusOf(await read());
+    return statusOf(await ensureWebhook(await read()));
   }
   async function configure(botToken: string): Promise<TelegramStatus> {
     const token = botTokenSchema.parse(botToken);
@@ -261,6 +290,7 @@ export function createTelegramService({
       botToken: token,
       botUsername: me.username,
       webhookSecret: randomBytes(32).toString('base64url'),
+      webhookVersion: WEBHOOK_VERSION,
       ...(existing?.botToken === token && existing.account ? { account: existing.account } : {}),
     };
     await call<boolean>(token, 'setWebhook', {
@@ -305,9 +335,13 @@ export function createTelegramService({
     }
   }
   async function webhook(secret: string | undefined, input: unknown) {
-    const config = await read();
+    let config = await read();
     if (!config || !secret || !equals(secret, config.webhookSecret))
       throw new AppError(403, 'TELEGRAM_WEBHOOK_FORBIDDEN', 'Недопустимый запрос Telegram.');
+    if (config.webhookVersion !== WEBHOOK_VERSION) {
+      config = await ensureWebhook(config);
+      if (!config || !equals(secret, config.webhookSecret)) return;
+    }
     const update = updateSchema.parse(input);
     const callback = update.callback_query;
     if (callback) {
@@ -340,10 +374,11 @@ export function createTelegramService({
           return;
         }
         if (callback.data === `cancel:${draft.token}`) {
-          await write({ ...current, draft: undefined });
           await call(current.botToken, 'answerCallbackQuery', { callback_query_id: callback.id });
+          await write({ ...current, draft: undefined });
           await send(current, await phrase('Дело не сохранено.', 'Task was not saved.'));
         } else if (callback.data === `save:${draft.token}` && store) {
+          await call(current.botToken, 'answerCallbackQuery', { callback_query_id: callback.id });
           await write({ ...current, draft: undefined });
           try {
             await store.createTask({
@@ -358,11 +393,17 @@ export function createTelegramService({
               completed: false,
               calendarEntry: false,
             });
-          } catch (error) {
+          } catch {
             await write({ ...current, draft });
-            throw error;
+            await send(
+              current,
+              await phrase(
+                'Не удалось сохранить дело. Проверь Ritm и нажми «Сохранить» ещё раз.',
+                'Could not save the task. Check Ritm and tap Save again.',
+              ),
+            );
+            return;
           }
-          await call(current.botToken, 'answerCallbackQuery', { callback_query_id: callback.id });
           await send(
             current,
             (await english())

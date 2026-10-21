@@ -11,6 +11,7 @@ test('Telegram links only a private chat through a short-lived owner-issued star
   const dataDir = mkdtempSync(join(tmpdir(), 'ritm-telegram-'));
   const botToken = '123456789:' + 'a'.repeat(35);
   const methods: string[] = [];
+  const webhookRegistrations: Record<string, unknown>[] = [];
   const sent: { text: string; reply_markup?: unknown }[] = [];
   const transport: typeof fetch = async (input, init) => {
     const method = new URL(String(input)).pathname.split('/').at(-1)!;
@@ -20,6 +21,7 @@ test('Telegram links only a private chat through a short-lived owner-issued star
     assert.equal(init?.method, 'POST');
     if (method === 'setWebhook') {
       const body = JSON.parse(String(init?.body));
+      webhookRegistrations.push(body);
       assert.equal(body.url, 'https://ritm.example.com/api/integrations/telegram/webhook');
       assert.deepEqual(body.allowed_updates, ['message', 'callback_query']);
       assert.ok(body.secret_token);
@@ -115,6 +117,12 @@ test('Telegram links only a private chat through a short-lived owner-issued star
   assert.match(confirmation.text, new RegExp(expectedTomorrow));
   const save = (confirmation.reply_markup as { inline_keyboard: { callback_data: string }[][] })
     .inline_keyboard[0][0].callback_data;
+  const legacy = JSON.parse((await instance.secrets.getSecret('telegram-connection'))!);
+  delete legacy.webhookVersion;
+  await instance.secrets.saveSecret('telegram-connection', JSON.stringify(legacy));
+  assert.equal((await call('/status')).body.linked, true);
+  assert.equal(webhookRegistrations.length, 2);
+  assert.equal(webhookRegistrations[1].drop_pending_updates, false);
   assert.equal(
     (
       await call(
@@ -156,6 +164,67 @@ test('Telegram links only a private chat through a short-lived owner-issued star
     200,
   );
   assert.equal(sent.length, sentAfterSave);
+  assert.equal(
+    (await call('/webhook', 'POST', update(42, 'private', '➕ Добавить дело'), header)).status,
+    200,
+  );
+  assert.equal(
+    (await call('/webhook', 'POST', update(42, 'private', 'Позвонить врачу'), header)).status,
+    200,
+  );
+  const retrySave = (
+    sent.at(-1)!.reply_markup as { inline_keyboard: { callback_data: string }[][] }
+  ).inline_keyboard[0][0].callback_data;
+  const createTask = instance.store.createTask.bind(instance.store);
+  instance.store.createTask = () => {
+    throw new Error('temporary database failure');
+  };
+  const answersBeforeFailure = methods.filter((method) => method === 'answerCallbackQuery').length;
+  assert.equal(
+    (
+      await call(
+        '/webhook',
+        'POST',
+        {
+          update_id: 4,
+          callback_query: {
+            id: 'callback-3',
+            from: { id: 42 },
+            data: retrySave,
+            message: { chat: { id: 42, type: 'private' } },
+          },
+        },
+        header,
+      )
+    ).status,
+    200,
+  );
+  assert.equal(
+    methods.filter((method) => method === 'answerCallbackQuery').length,
+    answersBeforeFailure + 1,
+  );
+  assert.match(sent.at(-1)!.text, /Не удалось сохранить/);
+  instance.store.createTask = createTask;
+  assert.equal(
+    (
+      await call(
+        '/webhook',
+        'POST',
+        {
+          update_id: 5,
+          callback_query: {
+            id: 'callback-4',
+            from: { id: 42 },
+            data: retrySave,
+            message: { chat: { id: 42, type: 'private' } },
+          },
+        },
+        header,
+      )
+    ).status,
+    200,
+  );
+  assert.match(sent.at(-1)!.text, /Сохранено/);
   assert.equal(
     (await call('/webhook', 'POST', update(42, 'private', '🌙 Итог дня'), header)).status,
     200,
