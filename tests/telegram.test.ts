@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createApp } from '../server/index.ts';
+import type { GoogleEventInput } from '../shared/types.ts';
 
 test('Telegram links only a private chat through a short-lived owner-issued start link', async (t) => {
   const dataDir = mkdtempSync(join(tmpdir(), 'ritm-telegram-'));
@@ -235,4 +236,152 @@ test('Telegram links only a private chat through a short-lived owner-issued star
   assert.equal((await call('/status')).body.configured, false);
   assert.ok(methods.includes('answerCallbackQuery'));
   assert.equal(methods.at(-1), 'deleteWebhook');
+});
+
+test('owner voice messages create a draft and require a single confirmed save', async (t) => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'ritm-telegram-voice-'));
+  const botToken = '123456789:' + 'b'.repeat(35);
+  const sent: Array<{
+    text: string;
+    reply_markup?: { inline_keyboard: Array<Array<{ callback_data: string }>> };
+  }> = [];
+  const createdEvents: Array<{ title: string; requestId: string }> = [];
+  let kind: 'task' | 'event' = 'task';
+  const transport: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname.includes('/file/bot'))
+      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    const method = url.pathname.split('/').at(-1)!;
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    if (method === 'sendMessage') sent.push(body);
+    const result =
+      method === 'getMe'
+        ? { id: 17, is_bot: true, username: 'RitmVoiceBot' }
+        : method === 'getFile'
+          ? { file_path: 'voice/file_12.oga', file_size: 3 }
+          : true;
+    return new Response(JSON.stringify({ ok: true, result }), { status: 200 });
+  };
+  const instance = createApp({
+    dataDir,
+    seed: false,
+    telegramTransport: transport,
+    telegramVoiceInterpreter: async () => ({
+      transcript: kind === 'task' ? 'завтра купить продукты' : 'встреча завтра в 3',
+      kind,
+      title: kind === 'task' ? 'Купить продукты' : 'Встреча',
+      description: '',
+      date: '2026-10-24',
+      time: kind === 'task' ? null : '15:00',
+      duration: 60,
+      allDay: false,
+    }),
+    googleService: {
+      connectionIdentity: async () => 'google-account-1',
+      createEvent: async (input: GoogleEventInput, requestId: string) => {
+        createdEvents.push({ title: input.title, requestId });
+        return { id: requestId } as never;
+      },
+    } as unknown as NonNullable<NonNullable<Parameters<typeof createApp>[0]>['googleService']>,
+    env: {
+      NODE_ENV: 'test',
+      APP_ORIGIN: 'https://ritm.example.com',
+      SECRET_ENCRYPTION_KEY: Buffer.alloc(32, 8).toString('base64'),
+    },
+  });
+  const server = instance.app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/integrations/telegram`;
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise<void>((done) => server.close(() => done()));
+    await instance.close();
+    assert.ok(
+      resolve(dataDir).startsWith(resolve(tmpdir())) && dataDir.includes('ritm-telegram-voice-'),
+    );
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+  const call = async (path: string, body?: unknown, headers: Record<string, string> = {}) =>
+    fetch(base + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(body ?? {}),
+    });
+  assert.equal((await call('/configuration', { botToken })).status, 200);
+  const pairing = await (await call('/pairing')).json();
+  const code = new URL(pairing.pairingUrl).searchParams.get('start')!;
+  const secret = JSON.parse(
+    (await instance.secrets.getSecret('telegram-connection'))!,
+  ).webhookSecret;
+  const headers = { 'x-telegram-bot-api-secret-token': secret };
+  const message = (id: number, from = 42) => ({
+    update_id: id,
+    message: {
+      from: { id: from, first_name: 'Owner' },
+      chat: { id: from, type: 'private' },
+      voice: { file_id: 'voice-id', file_size: 3, duration: 3 },
+    },
+  });
+  assert.equal(
+    (
+      await call(
+        '/webhook',
+        {
+          update_id: 1,
+          message: {
+            text: `/start ${code}`,
+            from: { id: 42, first_name: 'Owner' },
+            chat: { id: 42, type: 'private' },
+          },
+        },
+        headers,
+      )
+    ).status,
+    200,
+  );
+  sent.length = 0;
+  assert.equal((await call('/webhook', message(10, 99), headers)).status, 200);
+  assert.equal(sent.length, 0);
+  assert.equal((await call('/webhook', message(10), headers)).status, 200);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /Купить продукты/);
+  assert.equal((await call('/webhook', message(10), headers)).status, 200);
+  assert.equal(sent.length, 1);
+  const button = sent[0].reply_markup!.inline_keyboard[0][0].callback_data;
+  const callback = (id: string, actor = 42, data = button) => ({
+    update_id: 11,
+    callback_query: {
+      id,
+      data,
+      from: { id: actor },
+      message: { chat: { id: 42, type: 'private' } },
+    },
+  });
+  assert.equal((await call('/webhook', callback('foreign', 99), headers)).status, 200);
+  assert.equal((await instance.store.tasks()).length, 0);
+  assert.equal((await call('/webhook', callback('confirm'), headers)).status, 200);
+  const tasks = await instance.store.tasks();
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].title, 'Купить продукты');
+  assert.equal(tasks[0].calendarEntry, false);
+  assert.equal(tasks[0].date, '2026-10-24');
+  assert.equal((await call('/webhook', callback('duplicate'), headers)).status, 200);
+  assert.equal((await instance.store.tasks()).length, 1);
+
+  kind = 'event';
+  assert.equal((await call('/webhook', message(12), headers)).status, 200);
+  const eventButton = sent.at(-1)!.reply_markup!.inline_keyboard[0][0].callback_data;
+  assert.equal(
+    (await call('/webhook', callback('event-confirm', 42, eventButton), headers)).status,
+    200,
+  );
+  assert.deepEqual(
+    createdEvents.map((event) => event.title),
+    ['Встреча'],
+  );
+  assert.equal(
+    (await call('/webhook', callback('event-duplicate', 42, eventButton), headers)).status,
+    200,
+  );
+  assert.equal(createdEvents.length, 1);
 });

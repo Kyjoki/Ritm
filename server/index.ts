@@ -21,6 +21,7 @@ import type { WorkspaceRepository } from './repository.ts';
 import { SqliteRuntimeState, type RuntimeState } from './runtime-state.ts';
 import { SecretStore } from './secrets.ts';
 import { createTelegramService, TELEGRAM_WEBHOOK_PATH } from './telegram.ts';
+import type { VoiceInterpreter } from './telegram-voice.ts';
 import { Security } from './security.ts';
 import { AppError, conflict } from './errors.ts';
 import {
@@ -89,6 +90,7 @@ export interface AppOptions {
   googleTransport?: GoogleTransport;
   googleService?: AppGoogleService;
   telegramTransport?: typeof fetch;
+  telegramVoiceInterpreter?: VoiceInterpreter;
   securityLogger?: SecurityLogger;
 }
 
@@ -135,12 +137,6 @@ export function createApp(options: AppOptions = {}) {
   const store: WorkspaceRepository =
     options.repository ?? postgres ?? new Store(dataDir, options.seed ?? env.SEED_DEMO !== 'false');
   const secrets = new SecretStore(dataDir, env, state, shared);
-  const telegram = createTelegramService({
-    secrets,
-    origin: env.APP_ORIGIN,
-    transport: options.telegramTransport,
-    store,
-  });
   const google =
     options.googleService ??
     createGoogleCalendarService({
@@ -150,6 +146,14 @@ export function createApp(options: AppOptions = {}) {
       env,
       transport: options.googleTransport,
     });
+  const telegram = createTelegramService({
+    secrets,
+    store,
+    google,
+    origin: env.APP_ORIGIN,
+    transport: options.telegramTransport,
+    interpretVoice: options.telegramVoiceInterpreter,
+  });
   const assistant = options.assistant ?? runAssistant;
   const transferTaskToGoogle = createTaskGoogleTransfer({ store, leases: secrets, google });
   const app = express();

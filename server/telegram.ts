@@ -1,13 +1,22 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { AppError } from './errors.ts';
 import type { TelegramStatus } from '../shared/types.ts';
 import type { SecretStore } from './secrets.ts';
 import type { WorkspaceRepository } from './repository.ts';
+import type { GoogleCalendarService } from './google-calendar.ts';
+import {
+  createVoiceInterpreter,
+  interpretedVoiceSchema,
+  MAX_VOICE_BYTES,
+  MAX_VOICE_SECONDS,
+  type VoiceInterpreter,
+} from './telegram-voice.ts';
 
 export const TELEGRAM_WEBHOOK_PATH = '/api/integrations/telegram/webhook';
 const CONFIG_NAME = 'telegram-connection';
 const PAIRING_LIFETIME_MS = 10 * 60_000;
+const VOICE_DRAFT_LIFETIME_MS = 10 * 60_000;
 const WEBHOOK_VERSION = 2;
 const MENU_RU = {
   keyboard: [
@@ -32,6 +41,16 @@ const configurationSchema = z.object({
   botToken: botTokenSchema,
   botUsername: z.string().regex(/^[A-Za-z0-9_]{5,32}$/),
   webhookSecret: z.string().regex(/^[A-Za-z0-9_-]{32,128}$/),
+  lastVoiceUpdateId: z.number().int().optional(),
+  pendingVoice: z
+    .object({
+      id: z.string().uuid(),
+      draft: interpretedVoiceSchema,
+      expiresAt: z.number(),
+      status: z.enum(['pending', 'processing', 'completed']),
+      googleIdentity: z.string().optional(),
+    })
+    .optional(),
   webhookVersion: z.number().int().optional(),
   pending: z.object({ token: z.string(), expiresAt: z.number() }).optional(),
   draft: z
@@ -52,6 +71,13 @@ const updateSchema = z.object({
   message: z
     .object({
       text: z.string().max(256).optional(),
+      voice: z
+        .object({
+          file_id: z.string().min(1).max(256),
+          file_size: z.number().int().nonnegative().optional(),
+          duration: z.number().int().nonnegative(),
+        })
+        .optional(),
       from: z.object({
         id: z.number().int(),
         is_bot: z.boolean().optional(),
@@ -77,19 +103,26 @@ function equals(left: string, right: string) {
     b = Buffer.from(right);
   return a.length === b.length && timingSafeEqual(a, b);
 }
+function say(language: string, ru: string, en: string) {
+  return language === 'en' ? en : ru;
+}
 
 export function createTelegramService({
   secrets,
+  store,
+  google,
   origin,
   transport = fetch,
+  interpretVoice = createVoiceInterpreter(secrets),
   now = Date.now,
-  store,
 }: {
   secrets: SecretStore;
+  store: WorkspaceRepository;
+  google: Pick<GoogleCalendarService, 'createEvent' | 'connectionIdentity'>;
   origin?: string;
   transport?: typeof fetch;
+  interpretVoice?: VoiceInterpreter;
   now?: () => number;
-  store?: WorkspaceRepository;
 }) {
   async function english() {
     return (await store?.settings())?.language === 'en';
@@ -334,6 +367,285 @@ export function createTelegramService({
       await secrets.releaseLease('telegram-pairing', lease);
     }
   }
+  async function sendMessage(
+    config: Configuration,
+    chatId: number,
+    text: string,
+    replyMarkup?: object,
+  ) {
+    await call(config.botToken, 'sendMessage', {
+      chat_id: chatId,
+      text,
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+    });
+  }
+  async function voiceMessage(
+    config: Configuration,
+    updateId: number,
+    message: NonNullable<z.infer<typeof updateSchema>['message']>,
+  ) {
+    if (
+      !message.voice ||
+      !config.account ||
+      message.from.id !== config.account.userId ||
+      message.chat.id !== config.account.chatId
+    )
+      return;
+    const lease = await secrets.acquireLease('telegram-voice', 90_000);
+    if (!lease) return;
+    try {
+      let current = await read();
+      if (
+        !current ||
+        !current.account ||
+        current.webhookSecret !== config.webhookSecret ||
+        current.account.userId !== message.from.id ||
+        updateId <= (current.lastVoiceUpdateId ?? -1)
+      )
+        return;
+      current = { ...current, lastVoiceUpdateId: updateId };
+      await write(current);
+      if (
+        message.voice.duration > MAX_VOICE_SECONDS ||
+        (message.voice.file_size ?? 0) > MAX_VOICE_BYTES
+      ) {
+        const language = (await store.settings()).language;
+        await sendMessage(
+          current,
+          message.chat.id,
+          say(
+            language,
+            'Отправьте голосовое до 3 минут и 5 МБ.',
+            'Send a voice message up to 3 minutes and 5 MB.',
+          ),
+        );
+        return;
+      }
+      const file = await call<{ file_path?: string; file_size?: number }>(
+        current.botToken,
+        'getFile',
+        {
+          file_id: message.voice.file_id,
+        },
+      );
+      if (
+        !file.file_path ||
+        !/^[A-Za-z0-9_./-]{1,256}$/.test(file.file_path) ||
+        file.file_path.startsWith('/') ||
+        file.file_path.split('/').includes('..') ||
+        (file.file_size ?? 0) > MAX_VOICE_BYTES
+      )
+        throw new AppError(400, 'VOICE_FILE', 'Не удалось прочитать голосовое.');
+      const response = await transport(
+        `https://api.telegram.org/file/bot${current.botToken}/${file.file_path}`,
+        { redirect: 'error', signal: AbortSignal.timeout(15_000) },
+      );
+      if (!response.ok || Number(response.headers.get('content-length')) > MAX_VOICE_BYTES)
+        throw new AppError(502, 'VOICE_DOWNLOAD', 'Не удалось загрузить голосовое.');
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      const reader = response.body?.getReader();
+      if (!reader) throw new AppError(502, 'VOICE_DOWNLOAD', 'Не удалось загрузить голосовое.');
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > MAX_VOICE_BYTES) {
+          await reader.cancel();
+          throw new AppError(400, 'VOICE_SIZE', 'Отправьте голосовое размером до 5 МБ.');
+        }
+        chunks.push(value);
+      }
+      const audio = Buffer.concat(chunks, size);
+      if (!audio.length || audio.length > MAX_VOICE_BYTES)
+        throw new AppError(400, 'VOICE_SIZE', 'Отправьте голосовое размером до 5 МБ.');
+      const settings = await store.settings();
+      const draft = await interpretVoice(audio, {
+        timeZone: settings.timeZone,
+        language: settings.language === 'en' ? 'en' : 'ru',
+        now: new Date(now()),
+      });
+      if (draft.kind === 'unclear') {
+        await sendMessage(
+          current,
+          message.chat.id,
+          say(
+            settings.language,
+            `Я услышал: «${draft.transcript}». Уточните дату и время события или отправьте голосовое ещё раз.`,
+            `I heard: “${draft.transcript}”. Please clarify the event date and time or send another voice message.`,
+          ),
+        );
+        return;
+      }
+      const id = randomUUID();
+      const googleIdentity = draft.kind === 'event' ? await google.connectionIdentity() : undefined;
+      const next = {
+        ...current,
+        pendingVoice: {
+          id,
+          draft,
+          expiresAt: now() + VOICE_DRAFT_LIFETIME_MS,
+          status: 'pending' as const,
+          ...(googleIdentity ? { googleIdentity } : {}),
+        },
+      };
+      await write(next);
+      const summary = say(
+        settings.language,
+        `Я услышал: «${draft.transcript}»\n\n${draft.kind === 'task' ? 'Задача' : 'Событие'}: ${draft.title}\nДата: ${draft.date}` +
+          (draft.kind === 'event'
+            ? `\nВремя: ${draft.allDay ? 'весь день' : `${draft.time} · ${draft.duration} мин`}`
+            : '') +
+          '\n\nСохранить?',
+        `I heard: “${draft.transcript}”\n\n${draft.kind === 'task' ? 'Task' : 'Event'}: ${draft.title}\nDate: ${draft.date}` +
+          (draft.kind === 'event'
+            ? `\nTime: ${draft.allDay ? 'all day' : `${draft.time} · ${draft.duration} min`}`
+            : '') +
+          '\n\nSave?',
+      );
+      await sendMessage(next, message.chat.id, summary, {
+        inline_keyboard: [
+          [
+            { text: say(settings.language, '✅ Сохранить', '✅ Save'), callback_data: `v:c:${id}` },
+            { text: say(settings.language, 'Отмена', 'Cancel'), callback_data: `v:x:${id}` },
+          ],
+        ],
+      });
+    } catch (error) {
+      const current = await read();
+      if (current?.account?.chatId === message.chat.id) {
+        const language = (await store.settings()).language;
+        await sendMessage(
+          current,
+          message.chat.id,
+          error instanceof AppError && language !== 'en'
+            ? error.message
+            : say(
+                language,
+                'Не удалось обработать голосовое. Повторите позже.',
+                'Could not process the voice message. Please try again later.',
+              ),
+        ).catch(() => {});
+      }
+    } finally {
+      await secrets.releaseLease('telegram-voice', lease);
+    }
+  }
+  async function voiceCallback(
+    config: Configuration,
+    query: NonNullable<z.infer<typeof updateSchema>['callback_query']>,
+  ) {
+    if (
+      !query.message ||
+      !config.account ||
+      query.from.is_bot ||
+      query.from.id !== config.account.userId ||
+      query.message.chat.id !== config.account.chatId ||
+      query.message.chat.type !== 'private'
+    )
+      return;
+    const match = query.data?.match(/^v:([cx]):([0-9a-f-]{36})$/);
+    if (!match) return;
+    await call<boolean>(config.botToken, 'answerCallbackQuery', { callback_query_id: query.id });
+    const lease = await secrets.acquireLease('telegram-voice', 90_000);
+    if (!lease) return;
+    try {
+      const current = await read();
+      if (
+        !current ||
+        !current.account ||
+        current.account.userId !== query.from.id ||
+        current.webhookSecret !== config.webhookSecret
+      )
+        return;
+      const pending = current.pendingVoice;
+      const language = (await store.settings()).language;
+      if (
+        !pending ||
+        pending.id !== match[2] ||
+        pending.expiresAt <= now() ||
+        pending.status !== 'pending'
+      ) {
+        await sendMessage(
+          current,
+          current.account.chatId,
+          say(
+            language,
+            'Этот черновик уже обработан или устарел.',
+            'This draft was already handled or has expired.',
+          ),
+        );
+        return;
+      }
+      if (match[1] === 'x') {
+        await write({ ...current, pendingVoice: undefined });
+        await sendMessage(
+          current,
+          current.account.chatId,
+          say(language, 'Отменено.', 'Cancelled.'),
+        );
+        return;
+      }
+      await write({ ...current, pendingVoice: { ...pending, status: 'processing' } });
+      let created = false;
+      const draft = pending.draft;
+      try {
+        if (draft.kind === 'task') {
+          await store.createTask({
+            title: draft.title,
+            description: draft.description,
+            date: draft.date,
+            time: null,
+            duration: 30,
+            priority: 'normal',
+            repeat: 'none',
+            kind: 'task',
+            completed: false,
+            calendarEntry: false,
+          });
+        } else {
+          await google.createEvent(
+            {
+              title: draft.title,
+              description: draft.description,
+              date: draft.date,
+              time: draft.time,
+              duration: draft.duration,
+              allDay: draft.allDay,
+              repeat: 'none',
+            },
+            pending.id,
+            { expectedConnectionIdentity: pending.googleIdentity },
+          );
+        }
+        created = true;
+        await write({ ...current, pendingVoice: { ...pending, status: 'completed' } });
+      } catch {
+        if (draft.kind === 'event' && !created) await write({ ...current, pendingVoice: pending });
+        await sendMessage(
+          current,
+          current.account.chatId,
+          say(
+            language,
+            draft.kind === 'task' || created
+              ? 'Не удалось подтвердить сохранение. Проверьте Ritm перед повторной отправкой.'
+              : 'Не удалось сохранить событие. Проверьте Google и попробуйте подтвердить ещё раз.',
+            draft.kind === 'task' || created
+              ? 'Could not confirm the save. Check Ritm before sending it again.'
+              : 'Could not save the event. Check Google and try confirming again.',
+          ),
+        ).catch(() => {});
+        return;
+      }
+      await sendMessage(
+        current,
+        current.account.chatId,
+        say(language, `Сохранено в Ritm: ${draft.title}`, `Saved in Ritm: ${draft.title}`),
+      ).catch(() => {});
+    } finally {
+      await secrets.releaseLease('telegram-voice', lease);
+    }
+  }
   async function webhook(secret: string | undefined, input: unknown) {
     let config = await read();
     if (!config || !secret || !equals(secret, config.webhookSecret))
@@ -343,6 +655,10 @@ export function createTelegramService({
       if (!config || !equals(secret, config.webhookSecret)) return;
     }
     const update = updateSchema.parse(input);
+    if (update.callback_query?.data?.startsWith('v:')) {
+      await voiceCallback(config, update.callback_query);
+      return;
+    }
     const callback = update.callback_query;
     if (callback) {
       if (
@@ -434,6 +750,10 @@ export function createTelegramService({
       return;
     const match = message.text?.match(/^\/start ([A-Za-z0-9_-]{32,64})$/);
     if (!match) {
+      if (message.voice) {
+        await voiceMessage(config, update.update_id, message);
+        return;
+      }
       if (
         !config.account ||
         message.chat.id !== config.account.chatId ||
