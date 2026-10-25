@@ -41,6 +41,8 @@ export const calendarEnglish: Record<string, string> = {
   'Открыть пересекающиеся записи': 'Open overlapping entries',
   'Весь день / без времени': 'All day / no time',
   'Добавить запись: {p0}, {p1}': 'Add entry: {p0}, {p1}',
+  'Стрелки перемещают по времени и дням, Enter добавляет запись.':
+    'Use arrow keys to move between times and days. Press Enter to add an entry.',
   'Одно расписание · Google Calendar': 'One schedule · Google Calendar',
   'Выбери свободный интервал, чтобы добавить запись': 'Choose a free time slot to add an entry',
   'Загружаем Google Calendar…': 'Loading Google Calendar…',

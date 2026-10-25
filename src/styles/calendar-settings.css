@@ -1781,7 +1781,7 @@
     height: 28px;
   }
   .cal-mobile-week .cal-timezone {
-    font-size: 8px;
+    font-size: 10px;
   }
   .cal-mobile-week .cal-grid-scroll {
     height: clamp(288px, calc(100dvh - 277px - env(safe-area-inset-bottom)), 960px);
@@ -1793,7 +1793,7 @@
     height: clamp(288px, calc(100dvh - 309px - env(safe-area-inset-bottom)), 960px);
   }
   .cal-mobile-week .cal-hour-labels {
-    font-size: 9px;
+    font-size: 10px;
   }
   .cal-mobile-week .cal-grid-event {
     padding: 4px 2px;
@@ -1802,7 +1802,7 @@
   }
   .cal-mobile-week .cal-grid-event strong {
     display: block;
-    font-size: 10px;
+    font-size: 11px;
     line-height: 1.35;
     white-space: nowrap;
     overflow-wrap: normal;
@@ -1814,7 +1814,7 @@
   }
   .cal-mobile-week .cal-event-time {
     display: block;
-    font-size: 8px;
+    font-size: 11px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -1823,14 +1823,14 @@
     overflow-y: auto;
   }
   .cal-mobile-week .cal-all-day-event {
-    font-size: 9px;
+    font-size: 10px;
     padding: 3px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
   .cal-mobile-week .cal-all-day > span {
-    font-size: 8px;
+    font-size: 10px;
   }
   .cal-mobile-week .cal-calendar-foot {
     display: none;
@@ -1927,4 +1927,27 @@
 .cal-picker-entry > svg {
   flex: none;
   color: var(--muted);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .settings-key-dialog::backdrop {
+    backdrop-filter: none;
+    background: #110c24d9;
+  }
+  .cal-now,
+  .cal-overlap-day-button {
+    background: var(--panel);
+  }
+}
+@media (prefers-contrast: more) {
+  .cal-grid-event,
+  .cal-all-day-event,
+  .cal-overlap-day-button {
+    border-color: var(--text);
+  }
+  .cal-event-time,
+  .cal-timezone,
+  .cal-hour-labels,
+  .cal-picker-copy > span {
+    color: var(--text);
+  }
 }

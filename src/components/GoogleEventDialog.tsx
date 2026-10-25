@@ -395,7 +395,7 @@ export function GoogleEventDialog({
                   className="button button-secondary"
                   type="button"
                   disabled={busy}
-                  onClick={onClose}
+                  data-dialog-dismiss
                 >
                   {readOnly ? t('Закрыть') : t('Отмена')}
                 </button>

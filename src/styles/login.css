@@ -708,3 +708,10 @@
     animation: none;
   }
 }
+@media (prefers-reduced-transparency: reduce) {
+  .signin-floating-mark,
+  .signin-focus-card {
+    backdrop-filter: none;
+    background: #2f2241;
+  }
+}

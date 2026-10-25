@@ -18,7 +18,20 @@ export function Dialog({
   const { t: tr } = useI18n();
   const ref = useRef<HTMLDialogElement>(null);
   const closeRef = useRef(onClose);
+  const exitTimer = useRef<number | null>(null);
   closeRef.current = onClose;
+  const requestClose = () => {
+    const dialog = ref.current;
+    if (busy || !dialog || exitTimer.current !== null) return;
+    dialog.classList.add('is-closing');
+    exitTimer.current = window.setTimeout(
+      () => {
+        exitTimer.current = null;
+        closeRef.current();
+      },
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 120 : 180,
+    );
+  };
   useEffect(() => {
     const dialog = ref.current!;
     const previous = document.activeElement as HTMLElement | null;
@@ -29,6 +42,7 @@ export function Dialog({
       )
       ?.focus({ preventScroll: true });
     return () => {
+      if (exitTimer.current !== null) window.clearTimeout(exitTimer.current);
       dialog.close();
       const target =
         previous?.isConnected && previous.getClientRects().length
@@ -43,9 +57,14 @@ export function Dialog({
       className={`dialog ${className}`}
       onCancel={(event) => {
         event.preventDefault();
-        if (!busy) closeRef.current();
+        requestClose();
       }}
       onClick={(event) => {
+        if ((event.target as HTMLElement).closest('[data-dialog-dismiss]')) {
+          event.preventDefault();
+          requestClose();
+          return;
+        }
         if (!busy && event.target === event.currentTarget) {
           const bounds = event.currentTarget.getBoundingClientRect();
           if (
@@ -54,7 +73,7 @@ export function Dialog({
             event.clientY < bounds.top ||
             event.clientY > bounds.bottom
           )
-            onClose();
+            requestClose();
         }
       }}
       aria-labelledby="dialog-title"
@@ -68,7 +87,7 @@ export function Dialog({
           type="button"
           className="icon-button"
           aria-label={tr('Закрыть')}
-          onClick={onClose}
+          onClick={requestClose}
           disabled={busy}
         >
           <X size={20} />

@@ -1,5 +1,5 @@
 import { useI18n, translate, type Language } from '../lib/i18n';
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import {
   CalendarDays,
   Check,
@@ -189,10 +189,12 @@ export function CalendarPage({
 }: CalendarPageProps) {
   const { t, language, locale } = useI18n();
   const [selectedDate, setSelectedDate] = useState(today);
+  const [focusedSlot, setFocusedSlot] = useState({ date: today, minutes: INITIAL_HOUR * 60 });
   const googleConnected = googleStatus?.status === 'connected';
   const sourceAvailable = googleConnected && Boolean(onGoogleCreate);
   const rangeCallback = useRef(onRangeChange);
   const gridScrollRef = useRef<HTMLDivElement>(null);
+  const gridVisualRef = useRef<HTMLDivElement>(null);
   const scrolledPeriodRef = useRef<string | null>(null);
   const weekGesture = useRef<(SwipePoint & { pointerId: number; date: string }) | null>(null);
   const suppressSwipeClick = useRef(0);
@@ -209,6 +211,10 @@ export function CalendarPage({
     () => () => {
       weekGesture.current = null;
       suppressSwipeClick.current = 0;
+      if (gridVisualRef.current) {
+        gridVisualRef.current.style.transform = '';
+        gridVisualRef.current.style.transition = '';
+      }
     },
     [isMobile, view],
   );
@@ -243,6 +249,43 @@ export function CalendarPage({
       ),
     [view, weekStart, selectedDate],
   );
+  const keyboardSlotDate = periodDays.includes(focusedSlot.date) ? focusedSlot.date : selectedDate;
+  function moveSlotFocus(event: KeyboardEvent<HTMLButtonElement>, date: string, minutes: number) {
+    const dayIndex = periodDays.indexOf(date);
+    let nextDay = dayIndex;
+    let nextMinutes = minutes;
+    switch (event.key) {
+      case 'ArrowLeft':
+        nextDay = Math.max(0, dayIndex - 1);
+        break;
+      case 'ArrowRight':
+        nextDay = Math.min(periodDays.length - 1, dayIndex + 1);
+        break;
+      case 'ArrowUp':
+        nextMinutes = Math.max(0, minutes - 30);
+        break;
+      case 'ArrowDown':
+        nextMinutes = Math.min(23 * 60 + 30, minutes + 30);
+        break;
+      case 'Home':
+        nextMinutes = 0;
+        break;
+      case 'End':
+        nextMinutes = 23 * 60 + 30;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    const nextDate = periodDays[nextDay];
+    if (!nextDate) return;
+    setFocusedSlot({ date: nextDate, minutes: nextMinutes });
+    gridScrollRef.current
+      ?.querySelector<HTMLButtonElement>(
+        `[data-calendar-date="${nextDate}"][data-calendar-minutes="${nextMinutes}"]`,
+      )
+      ?.focus();
+  }
   const occurrencesByDay = useMemo(
     () =>
       periodDays.map((date) => ({
@@ -359,7 +402,24 @@ export function CalendarPage({
     if (!start || event.pointerId !== start.pointerId) return;
     const dx = Math.abs(event.clientX - start.x),
       dy = Math.abs(event.clientY - start.y);
-    if (dy > 12 && dy > dx * 1.2) weekGesture.current = null;
+    if (dy > 12 && dy > dx * 1.2) {
+      weekGesture.current = null;
+      resetWeekVisual();
+      return;
+    }
+    if (dx > 8 && dx > dy * 1.2 && gridVisualRef.current) {
+      const limit = event.currentTarget.clientWidth * 0.4;
+      gridVisualRef.current.style.transition = 'none';
+      gridVisualRef.current.style.transform = `translate3d(${Math.max(-limit, Math.min(limit, event.clientX - start.x))}px, 0, 0)`;
+    }
+  }
+  function resetWeekVisual() {
+    const grid = gridVisualRef.current;
+    if (!grid) return;
+    grid.style.transition = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      ? 'none'
+      : 'transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1)';
+    grid.style.transform = '';
   }
   function finishWeekGesture(event: PointerEvent<HTMLDivElement>) {
     const start = weekGesture.current;
@@ -370,8 +430,10 @@ export function CalendarPage({
       start.date !== selectedDate ||
       !isMobile ||
       view !== 'week'
-    )
+    ) {
+      resetWeekVisual();
       return;
+    }
     const direction = calendarWeekSwipe(
       start,
       { x: event.clientX, y: event.clientY, time: event.timeStamp },
@@ -381,6 +443,7 @@ export function CalendarPage({
       suppressSwipeClick.current = performance.now() + 450;
       navigate(direction);
     }
+    resetWeekVisual();
   }
   const pickerEntries = eventPicker
     ? calendarOccurrences(tasks, googleEvents, eventPicker.date, timeZone, language).filter(
@@ -723,6 +786,7 @@ export function CalendarPage({
             onPointerUp={finishWeekGesture}
             onPointerCancel={() => {
               weekGesture.current = null;
+              resetWeekVisual();
             }}
             onClickCapture={(event) => {
               if (event.detail > 0 && performance.now() < suppressSwipeClick.current) {
@@ -733,6 +797,7 @@ export function CalendarPage({
             }}
           >
             <div
+              ref={gridVisualRef}
               className="cal-grid"
               style={{
                 gridTemplateColumns: `${isMobile ? 40 : GRID_TIME_COLUMN}px repeat(${periodDays.length}, minmax(0, 1fr))`,
@@ -757,6 +822,13 @@ export function CalendarPage({
                         type="button"
                         className="cal-free-slot"
                         key={`${hour}:${minute}`}
+                        data-calendar-date={date}
+                        data-calendar-minutes={hour * 60 + minute}
+                        tabIndex={
+                          date === keyboardSlotDate && hour * 60 + minute === focusedSlot.minutes
+                            ? 0
+                            : -1
+                        }
                         style={{
                           top: ((hour * 60 + minute) / 60) * HOUR_HEIGHT,
                           height: HOUR_HEIGHT / 2,
@@ -765,6 +837,13 @@ export function CalendarPage({
                           p0: formatDate(date, { day: 'numeric', month: 'long' }, language),
                           p1: formatTime(hour * 60 + minute),
                         })}
+                        aria-description={
+                          date === keyboardSlotDate && hour * 60 + minute === focusedSlot.minutes
+                            ? t('Стрелки перемещают по времени и дням, Enter добавляет запись.')
+                            : undefined
+                        }
+                        onFocus={() => setFocusedSlot({ date, minutes: hour * 60 + minute })}
+                        onKeyDown={(event) => moveSlotFocus(event, date, hour * 60 + minute)}
                         onClick={() => addEntry(date, minuteTime(hour * 60 + minute))}
                       >
                         <Plus size={15} aria-hidden="true" />

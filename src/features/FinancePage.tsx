@@ -1495,10 +1495,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
               <button
                 type="button"
                 className="button button-secondary"
-                onClick={() => {
-                  setForm(null);
-                  setEditing(null);
-                }}
+                data-dialog-dismiss
                 disabled={saving}
               >
                 {t('Отмена')}
@@ -1570,7 +1567,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
               <button
                 type="button"
                 className="button button-secondary"
-                onClick={() => setPriceUpdate(null)}
+                data-dialog-dismiss
                 disabled={saving}
               >
                 {t('Отмена')}

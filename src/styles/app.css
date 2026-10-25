@@ -707,7 +707,7 @@ textarea::placeholder {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 18px;
+  margin-top: 0;
 }
 .dashboard-quick-add .visually-hidden {
   position: absolute;
@@ -738,6 +738,9 @@ textarea::placeholder {
 }
 .dashboard-quick-hint {
   margin-top: 8px;
+}
+.today-list {
+  margin-top: 16px;
 }
 .dashboard-task-permission {
   border-top: 1px solid var(--line);
@@ -945,6 +948,13 @@ textarea::placeholder {
 .dialog::backdrop {
   background: #110c244d;
   backdrop-filter: blur(5px);
+}
+.dialog.is-closing {
+  animation: dialog-exit 0.18s ease-in both;
+  pointer-events: none;
+}
+.dialog.is-closing::backdrop {
+  animation: dialog-backdrop-exit 0.18s ease-in both;
 }
 .dialog-head {
   position: sticky;
@@ -1230,6 +1240,17 @@ textarea::placeholder {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+@keyframes dialog-exit {
+  to {
+    opacity: 0;
+    transform: translateY(9px) scale(0.99);
+  }
+}
+@keyframes dialog-backdrop-exit {
+  to {
+    opacity: 0;
   }
 }
 @keyframes toast-enter {
@@ -1596,7 +1617,7 @@ textarea::placeholder {
     padding: 5px 2px;
     min-height: 48px;
     border-radius: 12px;
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 500;
   }
   .mobile-nav button.is-active {
@@ -1696,7 +1717,7 @@ textarea::placeholder {
     grid-template-columns: 1fr;
   }
   .mobile-nav button {
-    font-size: 8px;
+    font-size: 11px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1711,6 +1732,70 @@ textarea::placeholder {
   .ritm-orb:before {
     animation: none !important;
   }
+  .dialog:not(.is-closing) {
+    animation: dialog-fade-enter 0.12s ease-out both !important;
+  }
+  .dialog.is-closing {
+    animation: dialog-fade-exit 0.12s ease-out both !important;
+  }
+  .dialog.is-closing::backdrop {
+    animation: dialog-backdrop-exit 0.12s ease-out both !important;
+  }
+}
+@keyframes dialog-fade-exit {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes dialog-fade-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .dialog::backdrop {
+    backdrop-filter: none;
+    background: #110c24d9;
+  }
+  .mobile-nav,
+  .dialog,
+  .dialog-head,
+  .dialog-actions {
+    backdrop-filter: none;
+    background: var(--panel);
+  }
+}
+@media (prefers-contrast: more) {
+  .dialog,
+  .mobile-nav,
+  .panel {
+    border-color: var(--text);
+  }
+  .mobile-nav button,
+  .cal-hour-labels {
+    color: var(--text);
+  }
+  :focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+.task-color-section {
+  display: grid;
+  gap: 10px;
+}
+.task-color-section .disclosure {
+  justify-content: flex-start;
+}
+.task-color-preview {
+  width: 18px;
+  height: 18px;
+  margin-left: auto;
+  border: 1px solid var(--line);
+  border-radius: 50%;
 }
 fieldset.task-form {
   border: 0;

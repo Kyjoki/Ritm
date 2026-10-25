@@ -17,3 +17,7 @@ test('short gestures on wider screens and long-held gestures are ignored', () =>
   assert.equal(calendarWeekSwipe(start, { x: 70, y: 250, time: 1_400 }, 390), 0);
   assert.equal(calendarWeekSwipe(start, { x: 70, y: 250, time: 99 }, 390), 0);
 });
+test('a quick, deliberate flick can move a week without a long drag', () => {
+  assert.equal(calendarWeekSwipe(start, { x: 140, y: 252, time: 160 }, 390), 1);
+  assert.equal(calendarWeekSwipe(start, { x: 140, y: 252, time: 400 }, 390), 0);
+});

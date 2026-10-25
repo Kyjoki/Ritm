@@ -360,6 +360,49 @@ export function DashboardPage({
               {tr('Завтра')}
             </button>
           </div>
+          <form
+            className="dashboard-quick-add"
+            onSubmit={quickAdd}
+            aria-label={tr('Быстрое добавление задачи')}
+          >
+            <label className="visually-hidden" htmlFor="dashboard-quick-title">
+              {tr(taskDay === 'today' ? 'Новая задача на сегодня' : 'Новая задача на завтра')}{' '}
+            </label>
+            <input
+              id="dashboard-quick-title"
+              value={quickTitle}
+              onChange={(event) => setQuickTitle(event.target.value)}
+              placeholder={tr(
+                taskDay === 'today' ? 'Что нужно сделать сегодня?' : 'Что нужно сделать завтра?',
+              )}
+              maxLength={160}
+              autoComplete="off"
+              disabled={quickBusy}
+            />
+            <button
+              className="button button-secondary"
+              type="submit"
+              disabled={quickBusy || !quickTitle.trim()}
+              aria-label={tr(
+                taskDay === 'today' ? 'Добавить задачу на сегодня' : 'Добавить задачу на завтра',
+              )}
+            >
+              {quickBusy ? (
+                <LoaderCircle size={18} className="spinning" />
+              ) : (
+                <CirclePlus size={18} />
+              )}
+              <span>{tr('Добавить')}</span>
+            </button>
+          </form>
+          <p className="field-hint dashboard-quick-hint">
+            {tr('Только в списке задач — без записи в календаре.')}{' '}
+          </p>
+          {quickError ? (
+            <p className="error-note" role="alert">
+              {quickError}
+            </p>
+          ) : null}
           {todoCount ? (
             <div className="today-list">
               {googleTodos.map((entry) => {
@@ -505,49 +548,6 @@ export function DashboardPage({
           {googleTaskError ? (
             <p className="error-note" role="alert">
               {googleTaskError}
-            </p>
-          ) : null}
-          <form
-            className="dashboard-quick-add"
-            onSubmit={quickAdd}
-            aria-label={tr('Быстрое добавление задачи')}
-          >
-            <label className="visually-hidden" htmlFor="dashboard-quick-title">
-              {tr(taskDay === 'today' ? 'Новая задача на сегодня' : 'Новая задача на завтра')}{' '}
-            </label>
-            <input
-              id="dashboard-quick-title"
-              value={quickTitle}
-              onChange={(event) => setQuickTitle(event.target.value)}
-              placeholder={tr(
-                taskDay === 'today' ? 'Что нужно сделать сегодня?' : 'Что нужно сделать завтра?',
-              )}
-              maxLength={160}
-              autoComplete="off"
-              disabled={quickBusy}
-            />
-            <button
-              className="button button-secondary"
-              type="submit"
-              disabled={quickBusy || !quickTitle.trim()}
-              aria-label={tr(
-                taskDay === 'today' ? 'Добавить задачу на сегодня' : 'Добавить задачу на завтра',
-              )}
-            >
-              {quickBusy ? (
-                <LoaderCircle size={18} className="spinning" />
-              ) : (
-                <CirclePlus size={18} />
-              )}
-              <span>{tr('Добавить')}</span>
-            </button>
-          </form>
-          <p className="field-hint dashboard-quick-hint">
-            {tr('Только в списке задач — без записи в календаре.')}{' '}
-          </p>
-          {quickError ? (
-            <p className="error-note" role="alert">
-              {quickError}
             </p>
           ) : null}
         </div>

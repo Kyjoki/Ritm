@@ -4,6 +4,7 @@ import { ChevronDown, LoaderCircle, Trash2 } from 'lucide-react';
 import type { Task, TaskInput } from '../../shared/types';
 import { Dialog } from './Dialog';
 import { CalendarColorPicker } from './CalendarColorPicker';
+import { CALENDAR_PALETTE } from '../../shared/calendar-colors';
 
 interface Props {
   task?: Task;
@@ -36,6 +37,11 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
       Boolean(task?.description || (task?.repeat !== 'none' && task)),
     );
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showColors, setShowColors] = useState(false);
+  const selectedColor = CALENDAR_PALETTE.find((color) => color.id === value.colorId)?.hex;
+  const colorPreview =
+    selectedColor ??
+    (/^#[0-9a-f]{6}$/i.test(value.colorId ?? '') ? value.colorId! : 'var(--accent)');
   const keepButton = useRef<HTMLButtonElement>(null),
     deleteButton = useRef<HTMLButtonElement>(null),
     wasConfirming = useRef(false);
@@ -190,7 +196,28 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
               </select>
             </label>
           </div>
-          <CalendarColorPicker value={value.colorId} onChange={(id) => set('colorId', id)} />
+          <div className="task-color-section">
+            <button
+              className="disclosure"
+              type="button"
+              onClick={() => setShowColors((open) => !open)}
+              aria-expanded={showColors}
+              aria-controls="task-color-options"
+            >
+              <ChevronDown size={16} className={showColors ? 'rotated' : ''} />
+              {t('Цвет записи')}
+              <span
+                className="task-color-preview"
+                aria-hidden="true"
+                style={{ background: colorPreview }}
+              />
+            </button>
+            {showColors ? (
+              <div id="task-color-options">
+                <CalendarColorPicker value={value.colorId} onChange={(id) => set('colorId', id)} />
+              </div>
+            ) : null}
+          </div>
           <button
             className="disclosure"
             type="button"
@@ -310,7 +337,7 @@ export function TaskDialog({ task, draft, onClose, onSave, onDelete }: Props) {
                   className="button button-secondary"
                   type="button"
                   disabled={busy}
-                  onClick={onClose}
+                  data-dialog-dismiss
                 >
                   {t('Отмена')}
                 </button>

@@ -221,7 +221,7 @@ export function EventPreviewDialog({
         <button
           type="button"
           className="button button-secondary"
-          onClick={onClose}
+          data-dialog-dismiss
           disabled={taskBusy || connecting}
         >
           {t('Закрыть')}

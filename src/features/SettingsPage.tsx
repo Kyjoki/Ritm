@@ -778,7 +778,7 @@ export function SettingsPage({
               type="button"
               className="button button-secondary"
               disabled={googleBusy}
-              onClick={() => setConfirmGoogleDisconnect(false)}
+              data-dialog-dismiss
             >
               {t('Отмена')}
             </button>
