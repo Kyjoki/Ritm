@@ -41,7 +41,14 @@ import {
   googleTransferKey,
   type GoogleTransferReceipt,
 } from './repository.ts';
-import { assertHabitDay, assertHabitVersion } from './habits.ts';
+import {
+  assertHabitDay,
+  assertHabitProgress,
+  assertHabitVersion,
+  habitProgress,
+  updateHabitDefinition,
+  updateHabitProgress,
+} from './habits.ts';
 import { localDate } from './store.ts';
 
 const { Pool } = pg;
@@ -238,9 +245,16 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
       const now = this.stamp();
       const habit: Habit = {
         ...fields,
+        icon: fields.icon ?? 'sparkles',
+        weekdays: fields.weekdays ?? [0, 1, 2, 3, 4, 5, 6],
+        target: fields.target ?? null,
+        unit: fields.unit ?? '',
+        archived: fields.archived ?? false,
         id: randomUUID(),
         startDate: localDate(new Date(this.clock()), (await this.readSettings(client)).timeZone),
         completedDates: [],
+        progressByDate: {},
+        achievements: [],
         createdAt: now,
         updatedAt: now,
       };
@@ -255,7 +269,14 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
       const current = habits.find((habit) => habit.id === id);
       if (!current) throw new AppError(404, 'NOT_FOUND', 'Привычка не найдена. Обновите страницу.');
       assertHabitVersion(current, expectedUpdatedAt);
-      const habit = { ...current, ...fields, updatedAt: this.stamp(current.updatedAt) };
+      const habit = {
+        ...updateHabitDefinition(
+          current,
+          fields,
+          localDate(new Date(this.clock()), (await this.readSettings(client)).timeZone),
+        ),
+        updatedAt: this.stamp(current.updatedAt),
+      };
       await this.writeHabits(
         client,
         habits.map((item) => (item.id === id ? habit : item)),
@@ -280,12 +301,38 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
         localDate(new Date(this.clock()), (await this.readSettings(client)).timeZone),
       );
       if (current.completedDates.includes(date) === completed) return current;
-      const dates = new Set(current.completedDates);
-      if (completed) dates.add(date);
-      else dates.delete(date);
+      const updated = updateHabitProgress(current, date, completed ? (current.target ?? 1) : 0);
       const habit = {
-        ...current,
-        completedDates: [...dates].sort(),
+        ...updated,
+        updatedAt: this.stamp(current.updatedAt),
+      };
+      await this.writeHabits(
+        client,
+        habits.map((item) => (item.id === id ? habit : item)),
+      );
+      return habit;
+    });
+  }
+  async setHabitProgress(
+    id: string,
+    date: string,
+    count: number,
+    expectedUpdatedAt: string,
+  ): Promise<Habit> {
+    return this.transaction(async (client) => {
+      const habits = await this.listHabits(client);
+      const current = habits.find((habit) => habit.id === id);
+      if (!current) throw new AppError(404, 'NOT_FOUND', 'Привычка не найдена. Обновите страницу.');
+      assertHabitVersion(current, expectedUpdatedAt);
+      assertHabitDay(
+        current,
+        date,
+        localDate(new Date(this.clock()), (await this.readSettings(client)).timeZone),
+      );
+      assertHabitProgress(current, count);
+      if (habitProgress(current, date) === count) return current;
+      const habit = {
+        ...updateHabitProgress(current, date, count),
         updatedAt: this.stamp(current.updatedAt),
       };
       await this.writeHabits(

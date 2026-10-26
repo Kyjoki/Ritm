@@ -37,7 +37,14 @@ import {
   googleTransferKey,
   type GoogleTransferReceipt,
 } from './repository.ts';
-import { assertHabitDay, assertHabitVersion } from './habits.ts';
+import {
+  assertHabitDay,
+  assertHabitProgress,
+  assertHabitVersion,
+  habitProgress,
+  updateHabitDefinition,
+  updateHabitProgress,
+} from './habits.ts';
 
 export const defaultSettings: Settings = {
   displayName: 'Максим',
@@ -206,9 +213,16 @@ export class Store {
       const now = this.stamp();
       const habit: Habit = {
         ...fields,
+        icon: fields.icon ?? 'sparkles',
+        weekdays: fields.weekdays ?? [0, 1, 2, 3, 4, 5, 6],
+        target: fields.target ?? null,
+        unit: fields.unit ?? '',
+        archived: fields.archived ?? false,
         id: randomUUID(),
         startDate: localDate(new Date(), this.settings().timeZone),
         completedDates: [],
+        progressByDate: {},
+        achievements: [],
         createdAt: now,
         updatedAt: now,
       };
@@ -223,7 +237,10 @@ export class Store {
       const current = habits.find((habit) => habit.id === id);
       if (!current) throw new AppError(404, 'NOT_FOUND', 'Привычка не найдена. Обновите страницу.');
       assertHabitVersion(current, expectedUpdatedAt);
-      const habit = { ...current, ...fields, updatedAt: this.stamp(current.updatedAt) };
+      const habit = {
+        ...updateHabitDefinition(current, fields, localDate(new Date(), this.settings().timeZone)),
+        updatedAt: this.stamp(current.updatedAt),
+      };
       this.writeHabits(habits.map((item) => (item.id === id ? habit : item)));
       return habit;
     });
@@ -236,12 +253,26 @@ export class Store {
       assertHabitVersion(current, expectedUpdatedAt);
       assertHabitDay(current, date, localDate(new Date(), this.settings().timeZone));
       if (current.completedDates.includes(date) === completed) return current;
-      const dates = new Set(current.completedDates);
-      if (completed) dates.add(date);
-      else dates.delete(date);
+      const updated = updateHabitProgress(current, date, completed ? (current.target ?? 1) : 0);
       const habit = {
-        ...current,
-        completedDates: [...dates].sort(),
+        ...updated,
+        updatedAt: this.stamp(current.updatedAt),
+      };
+      this.writeHabits(habits.map((item) => (item.id === id ? habit : item)));
+      return habit;
+    });
+  }
+  setHabitProgress(id: string, date: string, count: number, expectedUpdatedAt: string): Habit {
+    return this.transaction(() => {
+      const habits = this.habits();
+      const current = habits.find((habit) => habit.id === id);
+      if (!current) throw new AppError(404, 'NOT_FOUND', 'Привычка не найдена. Обновите страницу.');
+      assertHabitVersion(current, expectedUpdatedAt);
+      assertHabitDay(current, date, localDate(new Date(), this.settings().timeZone));
+      assertHabitProgress(current, count);
+      if (habitProgress(current, date) === count) return current;
+      const habit = {
+        ...updateHabitProgress(current, date, count),
         updatedAt: this.stamp(current.updatedAt),
       };
       this.writeHabits(habits.map((item) => (item.id === id ? habit : item)));

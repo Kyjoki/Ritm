@@ -454,6 +454,16 @@ export function createApp(options: AppOptions = {}) {
     await security.limit(req, 'habit-write', 60, 60_000);
     res.json({ habit: await store.setHabitDay(id, date, completed, expectedUpdatedAt) });
   });
+  app.patch('/api/habits/:id/days/:date/progress', async (req, res) => {
+    const id = idSchema.parse(req.params.id);
+    const date = dateValue.parse(req.params.date);
+    const { count, expectedUpdatedAt } = z
+      .object({ count: z.number().int().min(0).max(10_000), expectedUpdatedAt: z.iso.datetime() })
+      .strict()
+      .parse(req.body);
+    await security.limit(req, 'habit-write', 60, 60_000);
+    res.json({ habit: await store.setHabitProgress(id, date, count, expectedUpdatedAt) });
+  });
   app.delete('/api/habits/:id', async (req, res) => {
     const id = idSchema.parse(req.params.id);
     const { expectedUpdatedAt } = z

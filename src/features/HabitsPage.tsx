@@ -1,22 +1,349 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
+  Activity,
+  Archive,
+  BookOpen,
   Check,
   ChevronLeft,
   ChevronRight,
+  Droplets,
   Flame,
   LoaderCircle,
+  Minus,
+  Moon,
   Pencil,
   Plus,
+  RotateCcw,
+  Sparkles,
+  Target,
   Trash2,
 } from 'lucide-react';
-import type { Habit } from '../../shared/types';
+import type { Habit, HabitInput } from '../../shared/types';
 import { Dialog } from '../components/Dialog';
 import { api } from '../lib/api';
 import { dateInZone, formatDate } from '../lib/date';
 import { useI18n } from '../lib/i18n';
 import { addDays } from './calendar-utils';
-import { habitStreak, habitWeek } from './habit-utils';
+import {
+  HABIT_MILESTONES,
+  habitBestStreak,
+  habitCompleteOn,
+  habitCompletionRate,
+  habitProgress,
+  habitScheduledOn,
+  habitStreak,
+  habitTarget,
+  habitWeek,
+  habitWeekday,
+} from './habit-utils';
 import '../styles/habits.css';
+
+const iconChoices = {
+  sparkles: Sparkles,
+  book: BookOpen,
+  activity: Activity,
+  droplet: Droplets,
+  moon: Moon,
+  target: Target,
+} as const;
+type HabitIcon = keyof typeof iconChoices;
+const iconLabels: Record<HabitIcon, string> = {
+  sparkles: 'Искры',
+  book: 'Книга',
+  activity: 'Движение',
+  droplet: 'Вода',
+  moon: 'Сон',
+  target: 'Цель',
+};
+const weekdays = [0, 1, 2, 3, 4, 5, 6];
+const defaultDraft: HabitInput = {
+  title: '',
+  icon: 'sparkles',
+  weekdays,
+  target: null,
+  unit: '',
+  archived: false,
+};
+
+function emitHabitsChanged() {
+  window.dispatchEvent(
+    new CustomEvent('ritm:habits-changed', { detail: { source: 'habits-page' } }),
+  );
+}
+
+function periodDates(today: string, period: 'week' | 'month', offset: number) {
+  if (period === 'week') return habitWeek(addDays(today, offset * 7));
+  const [year, month] = today.split('-').map(Number);
+  const first = new Date(Date.UTC(year, month - 1 + offset, 1));
+  const last = new Date(Date.UTC(year, month + offset, 0));
+  const start = first.toISOString().slice(0, 10);
+  const end = last.toISOString().slice(0, 10);
+  const result: string[] = [];
+  for (let day = start; day <= end; day = addDays(day, 1)) result.push(day);
+  return result;
+}
+
+function useCountUp(value: number, enabled: boolean) {
+  const [shown, setShown] = useState(value);
+  const presented = useRef(value);
+  useEffect(() => {
+    if (!enabled || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setShown(value);
+      presented.current = value;
+      return;
+    }
+    const from = presented.current;
+    const started = performance.now();
+    let frame = 0;
+    const step = (now: number) => {
+      const amount = Math.min(1, (now - started) / 560);
+      const eased = 1 - Math.pow(1 - amount, 3);
+      presented.current = Math.round(from + (value - from) * eased);
+      setShown(presented.current);
+      if (amount < 1) frame = requestAnimationFrame(step);
+      else presented.current = value;
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [enabled, value]);
+  return shown;
+}
+
+function HabitIconView({ icon, size = 20 }: { icon?: HabitIcon; size?: number }) {
+  const Icon = iconChoices[icon ?? 'sparkles'] ?? Sparkles;
+  return <Icon size={size} aria-hidden="true" />;
+}
+
+function HabitForm({
+  initial,
+  busy,
+  onSubmit,
+  onCancel,
+}: {
+  initial: HabitInput;
+  busy: boolean;
+  onSubmit: (input: HabitInput) => void;
+  onCancel: () => void;
+}) {
+  const { t, language } = useI18n();
+  const [draft, setDraft] = useState<HabitInput>({
+    title: initial.title,
+    icon: initial.icon ?? 'sparkles',
+    weekdays: initial.weekdays ?? weekdays,
+    target: initial.target ?? null,
+    unit: initial.unit ?? '',
+    archived: initial.archived ?? false,
+  });
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!draft.title.trim() || !draft.weekdays?.length) return;
+    onSubmit({
+      ...draft,
+      title: draft.title.trim(),
+      unit: draft.target ? (draft.unit?.trim() ?? '') : '',
+      target: draft.target || null,
+    });
+  }
+  return (
+    <form className="habit-form" onSubmit={submit}>
+      <label className="field" htmlFor="habit-form-title">
+        {t('Название привычки')}
+        <input
+          id="habit-form-title"
+          value={draft.title}
+          onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+          maxLength={80}
+          placeholder={t('Например, читать 20 минут')}
+          required
+          autoFocus
+        />
+      </label>
+      <fieldset className="habit-form-fieldset">
+        <legend>{t('Иконка')}</legend>
+        <div className="habit-form-icons">
+          {(Object.keys(iconChoices) as HabitIcon[]).map((icon) => (
+            <button
+              className={
+                draft.icon === icon ? 'habit-icon-choice is-selected' : 'habit-icon-choice'
+              }
+              type="button"
+              key={icon}
+              aria-label={t('Иконка: {icon}', { icon: t(iconLabels[icon]) })}
+              aria-pressed={draft.icon === icon}
+              onClick={() => setDraft({ ...draft, icon })}
+            >
+              <HabitIconView icon={icon} />
+            </button>
+          ))}
+        </div>
+      </fieldset>
+      <fieldset className="habit-form-fieldset">
+        <legend>{t('Дни недели')}</legend>
+        <div className="habit-form-weekdays">
+          {weekdays.map((day) => {
+            const label = new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'ru-RU', {
+              weekday: 'short',
+              timeZone: 'UTC',
+            }).format(new Date(Date.UTC(2026, 9, 25 + day)));
+            const selected = draft.weekdays?.includes(day) ?? true;
+            return (
+              <button
+                key={day}
+                type="button"
+                className={selected ? 'habit-weekday-choice is-selected' : 'habit-weekday-choice'}
+                aria-pressed={selected}
+                aria-label={t('{day}: {state}', {
+                  day: label,
+                  state: selected ? t('Запланировано') : t('Не запланировано'),
+                })}
+                onClick={() => {
+                  const next = selected
+                    ? (draft.weekdays ?? weekdays).filter((value) => value !== day)
+                    : [...(draft.weekdays ?? weekdays), day].sort();
+                  setDraft({ ...draft, weekdays: next });
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        {!draft.weekdays?.length && (
+          <p className="habit-form-hint">{t('Выберите хотя бы один день.')}</p>
+        )}
+      </fieldset>
+      <div className="habit-form-goal">
+        <label className="field" htmlFor="habit-form-target">
+          {t('Цель за день')}
+          <input
+            id="habit-form-target"
+            type="number"
+            min={1}
+            max={10000}
+            step={1}
+            value={draft.target ?? ''}
+            onChange={(event) =>
+              setDraft({ ...draft, target: event.target.value ? Number(event.target.value) : null })
+            }
+            placeholder={t('Просто выполнить')}
+          />
+        </label>
+        <label className="field" htmlFor="habit-form-unit">
+          {t('Единица')}
+          <input
+            id="habit-form-unit"
+            value={draft.unit ?? ''}
+            onChange={(event) => setDraft({ ...draft, unit: event.target.value })}
+            maxLength={24}
+            disabled={!draft.target}
+            placeholder={t('Например, страниц')}
+          />
+        </label>
+      </div>
+      <div className="button-row habits-dialog-actions">
+        <button type="button" className="button button-secondary" onClick={onCancel}>
+          {t('Отмена')}
+        </button>
+        <button
+          type="submit"
+          className="button button-primary"
+          disabled={busy || !draft.title.trim() || !draft.weekdays?.length}
+        >
+          {busy ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />}
+          {t('Сохранить')}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function HabitProgressEditor({
+  habit,
+  today,
+  busy,
+  onSave,
+}: {
+  habit: Habit;
+  today: string;
+  busy: boolean;
+  onSave: (count: number) => void;
+}) {
+  const { t } = useI18n();
+  const progress = habitProgress(habit, today);
+  const target = habitTarget(habit);
+  const [draft, setDraft] = useState(String(progress));
+  useEffect(() => setDraft(String(progress)), [progress]);
+  const value = draft.trim() === '' ? Number.NaN : Number(draft);
+  const valid = Number.isInteger(value) && value >= 0 && value <= target;
+  return (
+    <form
+      className="habit-progress-controls"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (valid && value !== progress) onSave(value);
+      }}
+    >
+      <div
+        className="habit-stepper"
+        role="group"
+        aria-label={t('Прогресс {title}', { title: habit.title })}
+      >
+        <button
+          type="button"
+          aria-label={t('Уменьшить прогресс {title}', { title: habit.title })}
+          disabled={busy || !valid || value <= 0}
+          onClick={() => onSave(value - 1)}
+        >
+          <Minus size={17} />
+        </button>
+        <input
+          type="number"
+          min={0}
+          max={target}
+          step={1}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          aria-label={t('Введите прогресс {title}', { title: habit.title })}
+        />
+        <button
+          type="button"
+          aria-label={t('Увеличить прогресс {title}', { title: habit.title })}
+          disabled={busy || !valid || value >= target}
+          onClick={() => onSave(value + 1)}
+        >
+          <Plus size={17} />
+        </button>
+      </div>
+      {valid && value !== progress && (
+        <button className="button button-primary" type="submit" disabled={busy}>
+          {t('Сохранить')}
+        </button>
+      )}
+      <button
+        className={
+          'button ' + (habitCompleteOn(habit, today) ? 'button-secondary' : 'button-primary')
+        }
+        type="button"
+        disabled={busy}
+        onClick={() => onSave(habitCompleteOn(habit, today) ? 0 : target)}
+      >
+        <Check size={15} />
+        {t(habitCompleteOn(habit, today) ? 'Отменить' : 'Выполнить цель')}
+      </button>
+      {progress > 0 && (
+        <button
+          className="icon-button"
+          type="button"
+          disabled={busy}
+          aria-label={t('Сбросить прогресс {title}', { title: habit.title })}
+          onClick={() => onSave(0)}
+        >
+          <RotateCcw size={16} />
+        </button>
+      )}
+    </form>
+  );
+}
 
 export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: string }) {
   const { t, language } = useI18n();
@@ -24,87 +351,113 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
   const [habits, setHabits] = useState<Habit[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [name, setName] = useState('');
-  const [editing, setEditing] = useState<Habit | null>(null);
-  const [deleting, setDeleting] = useState<Habit | null>(null);
-  const [draft, setDraft] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [weekOffset, setWeekOffset] = useState(0);
-  const endDate = addDays(today, weekOffset * 7);
-  const days = useMemo(() => habitWeek(endDate), [endDate]);
-  const todayDone = habits.filter((habit) => habit.completedDates.includes(today)).length;
+  const [editing, setEditing] = useState<Habit | 'create' | null>(null);
+  const [deleting, setDeleting] = useState<Habit | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [period, setPeriod] = useState<'week' | 'month'>('week');
+  const [offset, setOffset] = useState(0);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [intro, setIntro] = useState(false);
+  const [introduced, setIntroduced] = useState(false);
+  const [celebration, setCelebration] = useState<{ title: string; milestone: number } | null>(null);
+  const activeHabits = habits.filter((habit) => !habit.archived);
+  const archivedHabits = habits.filter((habit) => habit.archived);
+  const visibleHabits = showArchived ? archivedHabits : activeHabits;
+  const dates = useMemo(() => periodDates(today, period, offset), [today, period, offset]);
+  const availableDates = dates.filter((date) => date <= today);
+  const previousDates = periodDates(addDays(dates[0], -1), period, 0);
+  const weekDays = habitWeek(addDays(today, offset * 7));
+  const selected = selectedDay && dates.includes(selectedDay) ? selectedDay : null;
 
-  const refresh = useCallback(async () => {
-    try {
-      const result = await api.habits();
-      setHabits(result.habits);
-      setError('');
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : t('Не удалось загрузить привычки.'));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
+  const refresh = useCallback(
+    async (preserveError = false) => {
+      try {
+        const result = await api.habits();
+        setHabits(result.habits);
+        if (!preserveError) setError('');
+      } catch (failure) {
+        setError(failure instanceof Error ? failure.message : t('Не удалось загрузить привычки.'));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [t],
+  );
   useEffect(() => {
     if (!active) return;
     void refresh();
     const onFocus = () => void refresh();
+    const onChange = (event: Event) => {
+      if ((event as CustomEvent<{ source?: string }>).detail?.source !== 'habits-page')
+        void refresh();
+    };
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    window.addEventListener('ritm:habits-changed', onChange);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('ritm:habits-changed', onChange);
+    };
   }, [active, refresh]);
-
+  useEffect(() => {
+    if (!active || loading || introduced) return;
+    setIntro(true);
+    setIntroduced(true);
+    const timer = window.setTimeout(() => setIntro(false), 1000);
+    return () => window.clearTimeout(timer);
+  }, [active, loading, introduced]);
+  useEffect(() => {
+    if (!celebration) return;
+    const timer = window.setTimeout(() => setCelebration(null), 2600);
+    return () => window.clearTimeout(timer);
+  }, [celebration]);
   function replaceHabit(habit: Habit) {
     setHabits((current) => current.map((item) => (item.id === habit.id ? habit : item)));
   }
-  async function create(event: FormEvent) {
-    event.preventDefault();
-    if (!name.trim() || busyId) return;
-    setBusyId('create');
+  async function save(input: HabitInput) {
+    const old = editing === 'create' ? null : editing;
+    if (!editing || busyId) return;
+    setBusyId(old?.id ?? 'create');
     setError('');
     try {
-      const result = await api.createHabit({ title: name.trim() });
-      setHabits((current) => [...current, result.habit]);
-      setName('');
+      if (old) replaceHabit((await api.updateHabit(old.id, input, old.updatedAt)).habit);
+      else {
+        const created = (await api.createHabit(input)).habit;
+        setHabits((current) => [...current, created]);
+      }
+      setEditing(null);
+      emitHabitsChanged();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : t('Не удалось сохранить привычку.'));
+      void refresh(true);
     } finally {
       setBusyId(null);
     }
   }
-  async function toggle(habit: Habit, date: string) {
+  async function updateArchive(habit: Habit, archived: boolean) {
     if (busyId) return;
-    const completed = !habit.completedDates.includes(date);
     setBusyId(habit.id);
-    setError('');
-    replaceHabit({
-      ...habit,
-      completedDates: completed
-        ? [...habit.completedDates, date].sort()
-        : habit.completedDates.filter((day) => day !== date),
-    });
-    try {
-      replaceHabit((await api.setHabitDay(habit.id, date, completed, habit.updatedAt)).habit);
-    } catch (failure) {
-      replaceHabit(habit);
-      setError(failure instanceof Error ? failure.message : t('Не удалось изменить отметку.'));
-      void refresh();
-    } finally {
-      setBusyId(null);
-    }
-  }
-  async function saveEdit(event: FormEvent) {
-    event.preventDefault();
-    if (!editing || !draft.trim() || busyId) return;
-    setBusyId(editing.id);
     try {
       replaceHabit(
-        (await api.updateHabit(editing.id, { title: draft.trim() }, editing.updatedAt)).habit,
+        (
+          await api.updateHabit(
+            habit.id,
+            {
+              title: habit.title,
+              icon: habit.icon ?? 'sparkles',
+              weekdays: habit.weekdays ?? weekdays,
+              target: habit.target ?? null,
+              unit: habit.unit ?? '',
+              archived,
+            },
+            habit.updatedAt,
+          )
+        ).habit,
       );
-      setEditing(null);
-      setError('');
+      emitHabitsChanged();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : t('Не удалось сохранить привычку.'));
-      void refresh();
+      void refresh(true);
     } finally {
       setBusyId(null);
     }
@@ -114,64 +467,176 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
     setBusyId(deleting.id);
     try {
       await api.deleteHabit(deleting.id, deleting.updatedAt);
-      setHabits((current) => current.filter((habit) => habit.id !== deleting.id));
+      setHabits((current) => current.filter((item) => item.id !== deleting.id));
       setDeleting(null);
-      setError('');
+      emitHabitsChanged();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : t('Не удалось удалить привычку.'));
-      void refresh();
+      void refresh(true);
+    } finally {
+      setBusyId(null);
+    }
+  }
+  async function setProgress(habit: Habit, day: string, count: number) {
+    if (busyId || day > today || !habitScheduledOn(habit, day)) return;
+    const target = habitTarget(habit);
+    const nextCount = Math.max(0, Math.min(target, count));
+    const wasComplete = habitCompleteOn(habit, day);
+    const nextDates = habit.completedDates.filter((value) => value !== day);
+    if (nextCount >= target) nextDates.push(day);
+    const optimistic = {
+      ...habit,
+      completedDates: nextDates.sort(),
+      progressByDate: { ...habit.progressByDate, [day]: nextCount },
+    };
+    setBusyId(habit.id);
+    setError('');
+    replaceHabit(optimistic);
+    try {
+      const result = habit.target
+        ? await api.setHabitProgress(habit.id, day, nextCount, habit.updatedAt)
+        : await api.setHabitDay(habit.id, day, nextCount > 0, habit.updatedAt);
+      replaceHabit(result.habit);
+      if (!wasComplete && nextCount >= target) {
+        const newMilestone = HABIT_MILESTONES.find(
+          (milestone) =>
+            (result.habit.achievements ?? []).includes(milestone) &&
+            !(habit.achievements ?? []).includes(milestone),
+        );
+        if (newMilestone) setCelebration({ title: habit.title, milestone: newMilestone });
+      }
+      emitHabitsChanged();
+    } catch (failure) {
+      replaceHabit(habit);
+      setError(failure instanceof Error ? failure.message : t('Не удалось изменить отметку.'));
+      void refresh(true);
     } finally {
       setBusyId(null);
     }
   }
 
+  const totals = availableDates.reduce(
+    (value, day) => {
+      habits.forEach((habit) => {
+        if (!habitScheduledOn(habit, day)) return;
+        value.scheduled++;
+        if (habitCompleteOn(habit, day)) value.completed++;
+      });
+      return value;
+    },
+    { completed: 0, scheduled: 0 },
+  );
+  const rate = totals.scheduled ? Math.round((totals.completed / totals.scheduled) * 100) : 0;
+  const comparisonLength = Math.min(availableDates.length, previousDates.length);
+  const comparisonCurrent = availableDates.slice(0, comparisonLength).reduce(
+    (value, day) => {
+      habits.forEach((habit) => {
+        if (!habitScheduledOn(habit, day)) return;
+        value.scheduled++;
+        if (habitCompleteOn(habit, day)) value.completed++;
+      });
+      return value;
+    },
+    { completed: 0, scheduled: 0 },
+  );
+  const previous = previousDates.slice(0, comparisonLength).reduce(
+    (value, day) => {
+      habits.forEach((habit) => {
+        if (!habitScheduledOn(habit, day)) return;
+        value.scheduled++;
+        if (habitCompleteOn(habit, day)) value.completed++;
+      });
+      return value;
+    },
+    { completed: 0, scheduled: 0 },
+  );
+  const previousRate =
+    previous.scheduled && comparisonCurrent.scheduled
+      ? Math.round((previous.completed / previous.scheduled) * 100)
+      : null;
+  const comparisonCurrentRate = comparisonCurrent.scheduled
+    ? Math.round((comparisonCurrent.completed / comparisonCurrent.scheduled) * 100)
+    : 0;
+  const todayScheduled = activeHabits.filter((habit) => habitScheduledOn(habit, today));
+  const todayDone = todayScheduled.filter((habit) => habitCompleteOn(habit, today)).length;
+  const currentStreak = Math.max(0, ...activeHabits.map((habit) => habitStreak(habit, today)));
+  const bestStreak = Math.max(0, ...activeHabits.map((habit) => habitBestStreak(habit, today)));
+  const animatedRate = useCountUp(rate, !loading);
+  const animatedDone = useCountUp(todayDone, !loading);
+  const animatedCurrent = useCountUp(currentStreak, !loading);
+  const animatedBest = useCountUp(bestStreak, !loading);
+  const daily = dates.map((day) => {
+    const eligible = habits.filter((habit) => habitScheduledOn(habit, day));
+    const completed = eligible.filter((habit) => habitCompleteOn(habit, day)).length;
+    return { day, scheduled: day > today ? 0 : eligible.length, completed };
+  });
+  const describeDay = (entry: (typeof daily)[number], label: string) =>
+    entry.day > today
+      ? label + '. ' + t('Будущий день')
+      : entry.scheduled
+        ? t('{date}: {done} из {total}', {
+            date: label,
+            done: entry.completed,
+            total: entry.scheduled,
+          })
+        : label + '. ' + t('Не запланировано');
+  const stable = habits
+    .map((habit) => ({
+      habit,
+      ...habitCompletionRate(
+        habit,
+        availableDates.filter((date) => date < today),
+      ),
+    }))
+    .filter((value) => value.scheduled >= 3)
+    .sort(
+      (a, b) => b.completed / b.scheduled - a.completed / a.scheduled || b.completed - a.completed,
+    )[0];
+  const missed = weekdays
+    .map((weekday) => {
+      const entries = daily.filter(
+        (entry) => entry.day < today && habitWeekday(entry.day) === weekday,
+      );
+      const scheduled = entries.reduce((sum, entry) => sum + entry.scheduled, 0);
+      const completed = entries.reduce((sum, entry) => sum + entry.completed, 0);
+      return { weekday, scheduled, completed };
+    })
+    .filter((entry) => entry.scheduled >= 2)
+    .sort((a, b) => a.completed / a.scheduled - b.completed / b.scheduled)[0];
+  const selectedEntry = daily.find((entry) => entry.day === selected);
+  const periodLabel =
+    period === 'week'
+      ? formatDate(dates[0], { day: 'numeric', month: 'short' }, language) +
+        ' – ' +
+        formatDate(dates[6], { day: 'numeric', month: 'short' }, language)
+      : formatDate(dates[0], { month: 'long', year: 'numeric' }, language);
+
   return (
-    <section className="habits-page" aria-labelledby="habits-title">
-      <header className="page-heading">
+    <section
+      className={'habits-page' + (intro ? ' is-entering' : '')}
+      aria-labelledby="habits-title"
+    >
+      <header className="page-heading habits-page-heading">
         <div>
           <p className="page-eyebrow">RITM · {t('Ежедневные привычки')}</p>
           <h1 id="habits-title" className="gradient-title">
             {t('Привычки')}
           </h1>
           <p className="page-description">
-            {t('Отмечайте день одним нажатием. История сохраняется на всех ваших устройствах.')}
+            {t('Маленькие действия складываются в устойчивый ритм.')}
           </p>
         </div>
+        <button
+          className="button button-primary"
+          type="button"
+          onClick={() => {
+            setError('');
+            setEditing('create');
+          }}
+        >
+          <Plus size={17} /> {t('Новая привычка')}
+        </button>
       </header>
-      <div className="habits-summary panel">
-        <div>
-          <span className="card-eyebrow">{t('Сегодня выполнено')}</span>
-          <strong>
-            {todayDone} <span>/ {habits.length}</span>
-          </strong>
-        </div>
-        <span className="habits-summary-date">
-          {formatDate(today, { weekday: 'long', day: 'numeric', month: 'long' }, language)}
-        </span>
-      </div>
-      <form className="habits-add panel" onSubmit={(event) => void create(event)}>
-        <label className="field" htmlFor="habit-title">
-          {t('Новая привычка')}
-        </label>
-        <div className="habits-add-row">
-          <input
-            id="habit-title"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            maxLength={80}
-            placeholder={t('Например, читать 20 минут')}
-            required
-          />
-          <button
-            className="button button-primary"
-            type="submit"
-            disabled={Boolean(busyId) || !name.trim()}
-          >
-            {busyId === 'create' ? <LoaderCircle className="spin" size={17} /> : <Plus size={17} />}
-            <span>{t('Добавить привычку')}</span>
-          </button>
-        </div>
-      </form>
       {error && (
         <div className="habits-error" role="alert">
           {error}{' '}
@@ -180,150 +645,550 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
           </button>
         </div>
       )}
-      <div className="habits-week-heading">
-        <div>
-          <h2>
-            {formatDate(days[0], { day: 'numeric', month: 'short' }, language)} –{' '}
-            {formatDate(days[6], { day: 'numeric', month: 'short' }, language)}
-          </h2>
-          <span>
-            {t('Серия')} · {t('Сегодня')}
-          </span>
+      {celebration && (
+        <div className="habits-celebration" role="status">
+          <Sparkles size={18} />
+          {t('{title}: достижение {count} дней', {
+            title: celebration.title,
+            count: celebration.milestone,
+          })}
         </div>
-        <div className="button-row">
-          <button
-            className="icon-button"
-            type="button"
-            onClick={() => setWeekOffset((value) => value - 1)}
-            aria-label={t('Предыдущие 7 дней')}
-          >
-            <ChevronLeft size={18} />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={() => setWeekOffset((value) => Math.min(0, value + 1))}
-            disabled={weekOffset === 0}
-            aria-label={t('Следующие 7 дней')}
-          >
-            <ChevronRight size={18} />
-          </button>
-        </div>
-      </div>
+      )}
       {loading ? (
         <div className="habits-empty panel" role="status">
           <LoaderCircle className="spin" size={22} /> {t('Загружаем…')}
         </div>
-      ) : habits.length === 0 ? (
-        <div className="habits-empty panel">
-          <h2>{t('Пока нет привычек')}</h2>
-          <p>{t('Добавьте первую привычку, которую хотите повторять каждый день.')}</p>
-        </div>
       ) : (
-        <div className="habits-list">
-          {habits.map((habit) => {
-            const dates = new Set(habit.completedDates);
-            const streak = habitStreak(habit, today);
-            return (
-              <article className="habit-card panel" key={habit.id}>
-                <div className="habit-card-head">
-                  <div>
-                    <h2>{habit.title}</h2>
-                    <span className="habit-streak">
-                      <Flame size={15} /> {t('Серия')}: {t('{count} дн.', { count: streak })}
-                    </span>
-                  </div>
-                  <div className="button-row">
+        <>
+          <section className="habits-analytics panel" aria-labelledby="habits-analytics-title">
+            <div className="habits-section-heading">
+              <div>
+                <p className="card-eyebrow">{t('История привычек')}</p>
+                <h2 id="habits-analytics-title">{t('Прогресс привычек')}</h2>
+              </div>
+              <div className="habits-period-controls">
+                <div className="habits-segmented" role="group" aria-label={t('Период аналитики')}>
+                  {(['week', 'month'] as const).map((value) => (
                     <button
-                      className="icon-button"
+                      key={value}
                       type="button"
-                      aria-label={t('Редактировать привычку {title}', { title: habit.title })}
+                      className={period === value ? 'is-active' : ''}
+                      aria-pressed={period === value}
                       onClick={() => {
-                        setEditing(habit);
-                        setDraft(habit.title);
+                        setPeriod(value);
+                        setOffset(0);
+                        setSelectedDay(null);
                       }}
                     >
-                      <Pencil size={16} />
+                      {t(value === 'week' ? 'Неделя' : 'Месяц')}
                     </button>
-                    <button
-                      className="icon-button"
-                      type="button"
-                      aria-label={t('Удалить привычку {title}', { title: habit.title })}
-                      onClick={() => setDeleting(habit)}
+                  ))}
+                </div>
+                <button
+                  className="icon-button"
+                  type="button"
+                  aria-label={t('Предыдущий период')}
+                  onClick={() => {
+                    setOffset(offset - 1);
+                    setSelectedDay(null);
+                  }}
+                >
+                  <ChevronLeft size={17} />
+                </button>
+                <button
+                  className="icon-button"
+                  type="button"
+                  aria-label={t('Следующий период')}
+                  disabled={offset === 0}
+                  onClick={() => {
+                    setOffset(offset + 1);
+                    setSelectedDay(null);
+                  }}
+                >
+                  <ChevronRight size={17} />
+                </button>
+              </div>
+            </div>
+            <p className="habits-period-label">{periodLabel}</p>
+            <div className="habits-analytics-top">
+              <div
+                className="habits-gauge"
+                aria-label={t('Выполнено {count} процентов', { count: rate })}
+              >
+                <svg viewBox="0 0 180 104" aria-hidden="true">
+                  <path
+                    d="M 12 92 A 78 78 0 0 1 168 92"
+                    pathLength="100"
+                    className="habits-gauge-track"
+                  />
+                  <path
+                    d="M 12 92 A 78 78 0 0 1 168 92"
+                    pathLength="100"
+                    className="habits-gauge-fill"
+                    strokeDasharray={animatedRate + ' 100'}
+                  />
+                </svg>
+                <div className="habits-gauge-value" aria-hidden="true">
+                  <strong>{animatedRate}%</strong>
+                  <span>{t('выполнено')}</span>
+                </div>
+              </div>
+              <div className="habits-kpis">
+                <div>
+                  <span>{t('Сегодня выполнено')}</span>
+                  <strong aria-label={todayDone + ' / ' + todayScheduled.length}>
+                    {animatedDone}
+                    <small> / {todayScheduled.length}</small>
+                  </strong>
+                </div>
+                <div>
+                  <span>{t('Текущая серия')}</span>
+                  <strong aria-label={currentStreak + ' ' + t('дней')}>
+                    {animatedCurrent}
+                    <small> {t('дн.')}</small>
+                  </strong>
+                </div>
+                <div>
+                  <span>{t('Лучшая серия')}</span>
+                  <strong aria-label={bestStreak + ' ' + t('дней')}>
+                    {animatedBest}
+                    <small> {t('дн.')}</small>
+                  </strong>
+                </div>
+              </div>
+            </div>
+            {totals.scheduled ? (
+              <>
+                <div className="habits-analytics-graphs">
+                  <div className="habits-chart-block">
+                    <h3>{t('Выполнение по дням')}</h3>
+                    <div className={'habits-bars' + (period === 'month' ? ' is-month' : '')}>
+                      {daily.map((entry, index) => {
+                        const percentage = entry.scheduled
+                          ? Math.round((entry.completed / entry.scheduled) * 100)
+                          : 0;
+                        const label = formatDate(
+                          entry.day,
+                          { weekday: 'short', day: 'numeric', month: 'short' },
+                          language,
+                        );
+                        const description = describeDay(entry, label);
+                        return (
+                          <button
+                            type="button"
+                            className={
+                              'habits-bar-button' + (entry.day === selected ? ' is-selected' : '')
+                            }
+                            key={entry.day}
+                            onClick={() => setSelectedDay(entry.day)}
+                            aria-label={description}
+                            title={description}
+                          >
+                            <span className="habits-bar-track">
+                              <span
+                                className="habits-bar-fill"
+                                style={{
+                                  height: percentage + '%',
+                                  animationDelay: Math.min(index * 28, 450) + 'ms',
+                                }}
+                              />
+                            </span>
+                            <span className="habits-bar-label">
+                              {formatDate(entry.day, { day: 'numeric' }, language)}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="habits-heatmap-block">
+                    <h3>{t('Регулярность')}</h3>
+                    <div
+                      className="habits-heatmap"
+                      role="group"
+                      aria-label={t('Календарь выполнения')}
                     >
-                      <Trash2 size={16} />
-                    </button>
+                      {Array.from({ length: habitWeekday(dates[0]) }, (_, index) => (
+                        <span key={'pad-' + index} />
+                      ))}
+                      {daily.map((entry) => {
+                        const ratio = entry.scheduled ? entry.completed / entry.scheduled : 0;
+                        const level =
+                          entry.day > today
+                            ? 'future'
+                            : !entry.scheduled
+                              ? 'none'
+                              : ratio === 1
+                                ? 'full'
+                                : ratio > 0
+                                  ? 'some'
+                                  : 'empty';
+                        const label = formatDate(
+                          entry.day,
+                          { weekday: 'short', day: 'numeric', month: 'short' },
+                          language,
+                        );
+                        const description = describeDay(entry, label);
+                        return (
+                          <button
+                            type="button"
+                            key={entry.day}
+                            className={
+                              'habits-heat-day is-' +
+                              level +
+                              (selected === entry.day ? ' is-selected' : '')
+                            }
+                            onClick={() => setSelectedDay(entry.day)}
+                            aria-label={description}
+                            title={description}
+                          >
+                            <span>{Number(entry.day.slice(-2))}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="habits-heat-legend">
+                      <span>{t('Меньше')}</span>
+                      <i />
+                      <i />
+                      <i />
+                      <span>{t('Больше')}</span>
+                    </div>
                   </div>
                 </div>
-                <div className="habit-days" role="group" aria-label={habit.title}>
-                  {days.map((day) => {
-                    const done = dates.has(day);
-                    const available = day >= habit.startDate && day <= today;
-                    const label = formatDate(day, { weekday: 'short' }, language);
-                    return (
-                      <button
-                        key={day}
-                        type="button"
-                        className={`habit-day ${done ? 'is-done' : ''} ${day === today ? 'is-today' : ''}`}
-                        disabled={!available || Boolean(busyId)}
-                        aria-pressed={done}
-                        aria-label={t(
-                          done ? 'Снять отметку {title} за {date}' : 'Отметить {title} за {date}',
-                          {
-                            title: habit.title,
-                            date: formatDate(day, { day: 'numeric', month: 'long' }, language),
-                          },
-                        )}
-                        onClick={() => void toggle(habit, day)}
-                      >
-                        <span>{label}</span>
-                        <strong>{Number(day.slice(-2))}</strong>
-                        <span className="habit-day-mark">
-                          {done ? <Check size={15} strokeWidth={3} /> : null}
-                        </span>
-                      </button>
-                    );
-                  })}
+                {selectedEntry && (
+                  <p className="habits-date-detail" role="status">
+                    {describeDay(
+                      selectedEntry,
+                      formatDate(
+                        selectedEntry.day,
+                        { weekday: 'long', day: 'numeric', month: 'long' },
+                        language,
+                      ),
+                    )}
+                  </p>
+                )}
+                <div className="habits-insights">
+                  {stable && (
+                    <p>
+                      <Sparkles size={15} />{' '}
+                      {t('Самая стабильная: {title} ({percent}%)', {
+                        title: stable.habit.title,
+                        percent: Math.round((stable.completed / stable.scheduled) * 100),
+                      })}
+                    </p>
+                  )}
+                  {missed && missed.completed < missed.scheduled && (
+                    <p>
+                      <Target size={15} />{' '}
+                      {t('Чаще пропускается: {day}', {
+                        day: formatDate(
+                          daily.find((entry) => habitWeekday(entry.day) === missed.weekday)?.day ??
+                            today,
+                          { weekday: 'long' },
+                          language,
+                        ),
+                      })}
+                    </p>
+                  )}
+                  {previousRate !== null && (
+                    <p>
+                      <Activity size={15} />{' '}
+                      {t('К прошлому периоду: {sign}{count} п. п.', {
+                        sign: comparisonCurrentRate - previousRate > 0 ? '+' : '',
+                        count: comparisonCurrentRate - previousRate,
+                      })}
+                    </p>
+                  )}
+                  {!stable && !missed && previousRate === null && (
+                    <p>{t('Истории пока мало для выводов. Продолжайте отмечать привычки.')}</p>
+                  )}
                 </div>
-              </article>
-            );
-          })}
-        </div>
+              </>
+            ) : (
+              <div className="habits-analytics-empty">
+                <Sparkles size={24} />
+                <p>
+                  {t(
+                    'За выбранный период пока нет запланированных дней. Начните с новой привычки.',
+                  )}
+                </p>
+              </div>
+            )}
+          </section>
+          <div className="habits-list-heading">
+            <div>
+              <p className="card-eyebrow">{t('Ваши действия')}</p>
+              <h2>{t(showArchived ? 'Архив' : 'Мои привычки')}</h2>
+            </div>
+            <button
+              className="button button-secondary"
+              type="button"
+              onClick={() => setShowArchived(!showArchived)}
+            >
+              {showArchived ? <RotateCcw size={16} /> : <Archive size={16} />}
+              {t(showArchived ? 'К активным' : 'Архив')}
+              {showArchived && archivedHabits.length ? ' (' + archivedHabits.length + ')' : ''}
+            </button>
+          </div>
+          {visibleHabits.length === 0 ? (
+            <div className="habits-empty panel">
+              <h3>{t(showArchived ? 'Архив пуст' : 'Пока нет привычек')}</h3>
+              <p>
+                {t(
+                  showArchived
+                    ? 'Здесь появятся сохранённые привычки.'
+                    : 'Добавьте первую привычку, которую хотите повторять каждый день.',
+                )}
+              </p>
+            </div>
+          ) : (
+            <div className="habits-list">
+              {visibleHabits.map((habit) => {
+                const streak = habitStreak(habit, today);
+                const best = habitBestStreak(habit, today);
+                const awards =
+                  habit.achievements ?? HABIT_MILESTONES.filter((milestone) => best >= milestone);
+                const nextMilestone = HABIT_MILESTONES.find(
+                  (milestone) => !awards.includes(milestone),
+                );
+                const isScheduled = habitScheduledOn(habit, today);
+                const progress = habitProgress(habit, today);
+                return (
+                  <article className="habit-card panel" key={habit.id}>
+                    <div className="habit-card-head">
+                      <div className="habit-card-identity">
+                        <span className="habit-card-icon">
+                          <HabitIconView icon={habit.icon} />
+                        </span>
+                        <div>
+                          <h3>{habit.title}</h3>
+                          <span className="habit-card-schedule">
+                            {habit.weekdays?.length === 7 || !habit.weekdays
+                              ? t('Каждый день')
+                              : habit.weekdays
+                                  .map((day) =>
+                                    formatDate(
+                                      addDays('2026-10-25', day),
+                                      { weekday: 'short' },
+                                      language,
+                                    ),
+                                  )
+                                  .join(' · ')}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="habit-card-actions">
+                        <button
+                          className="icon-button"
+                          type="button"
+                          aria-label={t('Редактировать привычку {title}', { title: habit.title })}
+                          onClick={() => {
+                            setError('');
+                            setEditing(habit);
+                          }}
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <button
+                          className="icon-button"
+                          type="button"
+                          aria-label={t(
+                            habit.archived
+                              ? 'Восстановить привычку {title}'
+                              : 'Архивировать привычку {title}',
+                            { title: habit.title },
+                          )}
+                          disabled={Boolean(busyId)}
+                          onClick={() => void updateArchive(habit, !habit.archived)}
+                        >
+                          {habit.archived ? <RotateCcw size={16} /> : <Archive size={16} />}
+                        </button>
+                        {habit.archived && (
+                          <button
+                            className="icon-button"
+                            type="button"
+                            aria-label={t('Удалить привычку {title}', { title: habit.title })}
+                            onClick={() => setDeleting(habit)}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="habit-card-meta">
+                      <span>
+                        <Flame size={15} /> {t('Серия')}: <strong>{streak}</strong>
+                      </span>
+                      <span>
+                        {t('Рекорд')}: <strong>{best}</strong>
+                      </span>
+                      {nextMilestone && (
+                        <span>
+                          {t('Следующая цель')}: <strong>{nextMilestone}</strong>
+                        </span>
+                      )}
+                    </div>
+                    {!habit.archived && (
+                      <>
+                        <div className="habit-days-scroll">
+                          <div className="habit-days" role="group" aria-label={habit.title}>
+                            {weekDays.map((day) => {
+                              const complete = habitCompleteOn(habit, day);
+                              const scheduled = habitScheduledOn(habit, day);
+                              const status =
+                                day < habit.startDate
+                                  ? 'before'
+                                  : day > today
+                                    ? 'future'
+                                    : scheduled
+                                      ? complete
+                                        ? 'done'
+                                        : 'pending'
+                                      : 'rest';
+                              const label = formatDate(
+                                day,
+                                { weekday: 'short', day: 'numeric', month: 'long' },
+                                language,
+                              );
+                              return (
+                                <button
+                                  key={day}
+                                  type="button"
+                                  className={
+                                    'habit-day is-' + status + (day === today ? ' is-today' : '')
+                                  }
+                                  disabled={
+                                    status === 'future' ||
+                                    status === 'before' ||
+                                    status === 'rest' ||
+                                    Boolean(busyId)
+                                  }
+                                  aria-pressed={complete}
+                                  aria-label={
+                                    t(
+                                      complete
+                                        ? 'Снять отметку {title} за {date}'
+                                        : 'Отметить {title} за {date}',
+                                      { title: habit.title, date: label },
+                                    ) +
+                                    '. ' +
+                                    t(
+                                      status === 'future'
+                                        ? 'Будущий день'
+                                        : status === 'rest'
+                                          ? 'Не запланировано'
+                                          : status === 'before'
+                                            ? 'До начала'
+                                            : complete
+                                              ? 'Выполнено'
+                                              : 'Запланировано',
+                                    )
+                                  }
+                                  onClick={() =>
+                                    void setProgress(habit, day, complete ? 0 : habitTarget(habit))
+                                  }
+                                >
+                                  <span>{formatDate(day, { weekday: 'short' }, language)}</span>
+                                  <strong>{Number(day.slice(-2))}</strong>
+                                  <i>
+                                    {complete ? (
+                                      <Check size={15} strokeWidth={3} />
+                                    ) : status === 'rest' ? (
+                                      '–'
+                                    ) : null}
+                                  </i>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        <div className="habit-card-bottom">
+                          <div className="habit-today-copy">
+                            <span>{t(isScheduled ? 'Прогресс сегодня' : 'Сегодня выходной')}</span>
+                            {isScheduled && (
+                              <strong>
+                                {habit.target
+                                  ? progress +
+                                    ' / ' +
+                                    habit.target +
+                                    (habit.unit ? ' ' + habit.unit : '')
+                                  : t(
+                                      habitCompleteOn(habit, today)
+                                        ? 'Выполнено'
+                                        : 'Ещё не выполнено',
+                                    )}
+                              </strong>
+                            )}
+                          </div>
+                          {isScheduled && habit.target ? (
+                            <HabitProgressEditor
+                              habit={habit}
+                              today={today}
+                              busy={Boolean(busyId)}
+                              onSave={(count) => void setProgress(habit, today, count)}
+                            />
+                          ) : isScheduled ? (
+                            <button
+                              type="button"
+                              className={
+                                'button ' +
+                                (habitCompleteOn(habit, today)
+                                  ? 'button-secondary'
+                                  : 'button-primary')
+                              }
+                              disabled={Boolean(busyId)}
+                              onClick={() =>
+                                void setProgress(
+                                  habit,
+                                  today,
+                                  habitCompleteOn(habit, today) ? 0 : 1,
+                                )
+                              }
+                            >
+                              <Check size={16} />{' '}
+                              {t(habitCompleteOn(habit, today) ? 'Отменить' : 'Выполнить')}
+                            </button>
+                          ) : null}
+                        </div>
+                      </>
+                    )}
+                    <div className="habit-awards" aria-label={t('Достижения')}>
+                      {HABIT_MILESTONES.map((milestone) => (
+                        <span
+                          key={milestone}
+                          className={awards.includes(milestone) ? 'is-earned' : ''}
+                          title={t('{count} дней подряд', { count: milestone })}
+                        >
+                          <Flame size={13} /> {milestone}
+                        </span>
+                      ))}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
       {editing && (
         <Dialog
-          title={t('Изменить привычку')}
+          title={t(editing === 'create' ? 'Новая привычка' : 'Изменить привычку')}
           onClose={() => setEditing(null)}
           busy={Boolean(busyId)}
         >
-          <form onSubmit={(event) => void saveEdit(event)}>
-            <label className="field" htmlFor="habit-edit-title">
-              {t('Название привычки')}
-              <input
-                id="habit-edit-title"
-                value={draft}
-                maxLength={80}
-                required
-                onChange={(event) => setDraft(event.target.value)}
-              />
-            </label>
-            <div className="button-row habits-dialog-actions">
-              <button
-                type="button"
-                className="button button-secondary"
-                onClick={() => setEditing(null)}
-              >
-                {t('Отмена')}
-              </button>
-              <button
-                type="submit"
-                className="button button-primary"
-                disabled={!draft.trim() || Boolean(busyId)}
-              >
-                {t('Сохранить')}
-              </button>
-            </div>
-          </form>
+          {error && (
+            <p className="habits-error" role="alert">
+              {error}
+            </p>
+          )}
+          <HabitForm
+            key={editing === 'create' ? 'create' : editing.id}
+            initial={editing === 'create' ? defaultDraft : editing}
+            busy={Boolean(busyId)}
+            onSubmit={(input) => void save(input)}
+            onCancel={() => setEditing(null)}
+          />
         </Dialog>
       )}
       {deleting && (
@@ -335,17 +1200,17 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
           <p className="page-description">{t('История отметок этой привычки будет удалена.')}</p>
           <div className="button-row habits-dialog-actions">
             <button
-              type="button"
               className="button button-secondary"
+              type="button"
               onClick={() => setDeleting(null)}
             >
               {t('Отмена')}
             </button>
             <button
-              type="button"
               className="button button-danger"
-              onClick={() => void remove()}
+              type="button"
               disabled={Boolean(busyId)}
+              onClick={() => void remove()}
             >
               {t('Удалить привычку')}
             </button>

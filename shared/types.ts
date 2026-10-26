@@ -4,13 +4,28 @@ export type Priority = 'low' | 'normal' | 'high';
 export type Repeat = 'none' | 'daily' | 'weekly' | 'monthly';
 export type TaskKind = 'task' | 'event';
 
+export type HabitIcon = 'sparkles' | 'book' | 'activity' | 'droplet' | 'moon' | 'target';
+
 export interface HabitInput {
   title: string;
+  icon?: HabitIcon;
+  /** Days of the week, Sunday = 0. Omitted means every day for older habits. */
+  weekdays?: number[];
+  /** Null or omitted means one tap completes the day. */
+  target?: number | null;
+  unit?: string;
+  archived?: boolean;
 }
 export interface Habit extends HabitInput {
   id: string;
   startDate: string;
   completedDates: string[];
+  /** Progress is stored by local calendar date; legacy completedDates remain valid. */
+  progressByDate?: Record<string, number>;
+  /** Effective weekday/archive history. The latest period from or before a day applies. */
+  periods?: { from: string; weekdays: number[]; archived: boolean }[];
+  /** Milestone thresholds earned at least once. */
+  achievements?: number[];
   createdAt: string;
   updatedAt: string;
 }

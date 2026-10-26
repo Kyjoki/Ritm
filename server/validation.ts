@@ -83,7 +83,20 @@ export const taskPatchSchema = taskFields
     'Нет изменений или не указано выполнение.',
   );
 export const idSchema = z.string().uuid();
-export const habitInputSchema = z.object({ title: z.string().trim().min(1).max(80) }).strict();
+export const habitInputSchema = z
+  .object({
+    title: z.string().trim().min(1).max(80),
+    icon: z.enum(['sparkles', 'book', 'activity', 'droplet', 'moon', 'target']).optional(),
+    weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7).optional(),
+    target: z.number().int().min(1).max(10_000).nullable().optional(),
+    unit: z.string().trim().max(24).optional(),
+    archived: z.boolean().optional(),
+  })
+  .strict()
+  .refine((value) => !value.weekdays || new Set(value.weekdays).size === value.weekdays.length, {
+    message: 'Дни недели не должны повторяться.',
+    path: ['weekdays'],
+  });
 const financeCurrencySchema = z.enum(['KZT', 'USD', 'EUR', 'RUB']);
 const financeAmountSchema = z.number().int().safe().min(0).max(1_000_000_000_000);
 export const financeEntryInputSchema = z.discriminatedUnion('type', [

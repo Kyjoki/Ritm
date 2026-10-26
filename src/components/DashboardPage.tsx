@@ -17,6 +17,7 @@ import { calendarOccurrences, type CalendarOccurrence } from '../features/google
 import { durationText, formatDate, formatTime, greeting } from '../lib/date';
 import { calendarEntryStyle } from '../lib/calendar-colors';
 import { Orb } from './Orb';
+import { DashboardHabits } from './DashboardHabits';
 import { useI18n } from '../lib/i18n';
 
 interface Props {
@@ -39,6 +40,7 @@ interface Props {
   onToggle: (task: Task, occurrenceDate: string, completed: boolean) => void;
   onAI: (prompt?: string) => void;
   onCalendar: () => void;
+  onHabits: () => void;
 }
 export function DashboardPage({
   tasks,
@@ -60,6 +62,7 @@ export function DashboardPage({
   onToggle,
   onAI,
   onCalendar,
+  onHabits,
 }: Props) {
   const { language, locale, t: tr } = useI18n();
   const taskPlural = new Intl.PluralRules(locale);
@@ -615,6 +618,7 @@ export function DashboardPage({
           </div>
         </div>
       </div>
+      <DashboardHabits today={today} onOpen={onHabits} />
       <div className="dashboard-bottom">
         <span>
           <ListTodo size={14} />{' '}

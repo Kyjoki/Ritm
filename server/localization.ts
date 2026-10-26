@@ -26,6 +26,9 @@ const messages: Record<string, string> = {
     'This habit changed. Refresh your data and try again.',
   'Можно отметить только прошедший день с даты создания привычки.':
     'You can only mark days from the habit start date through today.',
+  'Архивную привычку нельзя отмечать.': 'Archived habits cannot be marked.',
+  'В этот день привычка не запланирована.': 'This habit is not scheduled on that day.',
+  'Прогресс превышает цель привычки.': 'Progress exceeds the habit target.',
   'Достигнут предел в 100 привычек.': 'The 100 habit limit has been reached.',
   'Хранилище привычек заполнено.': 'Habit storage is full.',
   'Проверьте сумму, валюту, дату и описание финансовой записи.':

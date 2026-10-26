@@ -106,6 +106,12 @@ export const api = {
       'PATCH',
       { completed, expectedUpdatedAt },
     ),
+  setHabitProgress: (id: string, date: string, count: number, expectedUpdatedAt: string) =>
+    request<{ habit: Habit }>(
+      `/habits/${encodeURIComponent(id)}/days/${encodeURIComponent(date)}/progress`,
+      'PATCH',
+      { count, expectedUpdatedAt },
+    ),
   deleteHabit: (id: string, expectedUpdatedAt: string) =>
     request<{ deleted: true }>(`/habits/${encodeURIComponent(id)}`, 'DELETE', {
       expectedUpdatedAt,

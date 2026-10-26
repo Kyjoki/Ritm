@@ -735,6 +735,7 @@ export default function App() {
               onToggle={(task, date, completed) => void toggleTask(task, date, completed)}
               onAI={ai}
               onCalendar={() => go('calendar')}
+              onHabits={() => go('habits')}
             />
           ) : null}
           <Activity mode={page === 'calendar' ? 'visible' : 'hidden'}>

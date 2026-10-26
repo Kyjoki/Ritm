@@ -136,6 +136,12 @@ export interface WorkspaceRepository {
     completed: boolean,
     expectedUpdatedAt: string,
   ): Awaitable<Habit>;
+  setHabitProgress(
+    id: string,
+    date: string,
+    count: number,
+    expectedUpdatedAt: string,
+  ): Awaitable<Habit>;
   deleteHabit(id: string, expectedUpdatedAt: string): Awaitable<void>;
   financeEntries(): Awaitable<FinanceEntry[]>;
   createFinanceEntry(input: FinanceEntryInput): Awaitable<FinanceEntry>;
