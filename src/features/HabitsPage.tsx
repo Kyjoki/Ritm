@@ -27,6 +27,7 @@ import { addDays } from './calendar-utils';
 import {
   HABIT_MILESTONES,
   habitBestStreak,
+  habitCanMarkOn,
   habitCompleteOn,
   habitCompletionRate,
   habitProgress,
@@ -478,7 +479,7 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
     }
   }
   async function setProgress(habit: Habit, day: string, count: number) {
-    if (busyId || day > today || !habitScheduledOn(habit, day)) return;
+    if (busyId || !habitCanMarkOn(habit, day, today)) return;
     const target = habitTarget(habit);
     const nextCount = Math.max(0, Math.min(target, count));
     const wasComplete = habitCompleteOn(habit, day);
@@ -491,7 +492,7 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
     };
     setBusyId(habit.id);
     setError('');
-    replaceHabit(optimistic);
+    if (day >= habit.startDate) replaceHabit(optimistic);
     try {
       const result = habit.target
         ? await api.setHabitProgress(habit.id, day, nextCount, habit.updatedAt)
@@ -1036,12 +1037,13 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
                             {weekDays.map((day) => {
                               const complete = habitCompleteOn(habit, day);
                               const scheduled = habitScheduledOn(habit, day);
+                              const canMark = habitCanMarkOn(habit, day, today);
                               const status =
-                                day < habit.startDate
+                                day < habit.startDate && !canMark
                                   ? 'before'
                                   : day > today
                                     ? 'future'
-                                    : scheduled
+                                    : scheduled || canMark
                                       ? complete
                                         ? 'done'
                                         : 'pending'
@@ -1058,12 +1060,7 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
                                   className={
                                     'habit-day is-' + status + (day === today ? ' is-today' : '')
                                   }
-                                  disabled={
-                                    status === 'future' ||
-                                    status === 'before' ||
-                                    status === 'rest' ||
-                                    Boolean(busyId)
-                                  }
+                                  disabled={!canMark || Boolean(busyId)}
                                   aria-pressed={complete}
                                   aria-label={
                                     t(

@@ -17,12 +17,14 @@ import {
 } from '../server/habits.ts';
 import {
   habitBestStreak,
+  habitCanMarkOn,
   habitCompleteOn,
   habitProgress,
   habitScheduledOn,
   habitStreak,
   habitWeek,
 } from '../src/features/habit-utils.ts';
+import { addDays } from '../src/features/calendar-utils.ts';
 import type { Habit } from '../shared/types.ts';
 
 test('habit names are bounded and the streak tolerates an unfinished today', () => {
@@ -157,6 +159,44 @@ test('schedule and archive edits preserve earlier eligible days and replace same
   });
 });
 
+test('a past mark extends the first schedule without changing later schedule edits', () => {
+  const habit = {
+    id: 'backfill-test',
+    title: 'Gym',
+    startDate: '2026-10-27',
+    weekdays: [2, 4],
+    archived: false,
+    completedDates: [],
+    periods: [
+      { from: '2026-10-27', weekdays: [1, 2, 6], archived: false },
+      { from: '2026-10-28', weekdays: [2, 4], archived: false },
+    ],
+    createdAt: '',
+    updatedAt: '',
+  } satisfies Habit;
+  assert.equal(habitCanMarkOn(habit, '2026-10-26', '2026-10-27'), true);
+  assert.equal(habitCanMarkOn(habit, '2026-10-25', '2026-10-27'), false);
+  assert.throws(
+    () => assertHabitDay(habit, '2026-10-26', '2026-10-27'),
+    (e: unknown) => e instanceof Error && 'code' in e && e.code === 'HABIT_DATE_INVALID',
+  );
+  const expanded = assertHabitDay(habit, '2026-10-26', '2026-10-27', true);
+  assert.equal(expanded.startDate, '2026-10-26');
+  assert.deepEqual(
+    expanded.periods?.map((period) => period.from),
+    ['2026-10-26', '2026-10-28'],
+  );
+  assert.equal(habitCompleteOn(updateHabitProgress(expanded, '2026-10-26', 1), '2026-10-26'), true);
+  assert.throws(
+    () => assertHabitDay(habit, '2026-10-25', '2026-10-27', true),
+    (e: unknown) => e instanceof Error && 'code' in e && e.code === 'HABIT_DAY_UNSCHEDULED',
+  );
+  assert.throws(
+    () => assertHabitDay(habit, '2026-10-28', '2026-10-27', true),
+    (e: unknown) => e instanceof Error && 'code' in e && e.code === 'HABIT_DATE_INVALID',
+  );
+});
+
 test('quantity progress, archive and history persist in SQLite', () => {
   const directory = mkdtempSync(join(tmpdir(), 'ritm-habits-progress-'));
   try {
@@ -216,8 +256,12 @@ test('habits persist in SQLite and reject stale revisions and future days', () =
   try {
     const first = new Store(directory, false);
     const created = first.createHabit({ title: 'Читать' });
-    const marked = first.setHabitDay(created.id, created.startDate, true, created.updatedAt);
-    assert.deepEqual(marked.completedDates, [created.startDate]);
+    const yesterday = addDays(created.startDate, -1);
+    const backfilled = first.setHabitDay(created.id, yesterday, true, created.updatedAt);
+    assert.equal(backfilled.startDate, yesterday);
+    assert.deepEqual(backfilled.completedDates, [yesterday]);
+    const marked = first.setHabitDay(created.id, created.startDate, true, backfilled.updatedAt);
+    assert.deepEqual(marked.completedDates, [yesterday, created.startDate]);
     assert.throws(
       () => first.setHabitDay(created.id, created.startDate, false, created.updatedAt),
       (e: unknown) => e instanceof Error && 'status' in e && e.status === 409,
@@ -228,8 +272,11 @@ test('habits persist in SQLite and reject stale revisions and future days', () =
     );
     first.close();
     const second = new Store(directory, false);
-    assert.deepEqual(second.habits()[0].completedDates, [created.startDate]);
-    const renamed = second.updateHabit(created.id, { title: 'Читать 20 минут' }, marked.updatedAt);
+    assert.deepEqual(second.habits()[0].completedDates, [yesterday, created.startDate]);
+    const undone = second.setHabitDay(created.id, yesterday, false, marked.updatedAt);
+    assert.equal(undone.startDate, yesterday);
+    assert.deepEqual(undone.completedDates, [created.startDate]);
+    const renamed = second.updateHabit(created.id, { title: 'Читать 20 минут' }, undone.updatedAt);
     second.deleteHabit(created.id, renamed.updatedAt);
     assert.deepEqual(second.habits(), []);
     second.close();
@@ -325,5 +372,20 @@ test('habit API needs the owner session and keeps day marks', async (t) => {
     expectedUpdatedAt: reading.updatedAt,
   });
   assert.equal(progress.status, 200);
-  assert.deepEqual(((await progress.json()).habit as Habit).completedDates, [reading.startDate]);
+  const current = (await progress.json()).habit as Habit;
+  assert.deepEqual(current.completedDates, [reading.startDate]);
+  const priorDate = addDays(reading.startDate, -1);
+  const backfill = await call(`/habits/${reading.id}/days/${priorDate}/progress`, 'PATCH', {
+    count: 8,
+    expectedUpdatedAt: current.updatedAt,
+  });
+  assert.equal(backfill.status, 200);
+  const backfilled = (await backfill.json()).habit as Habit;
+  assert.equal(backfilled.startDate, priorDate);
+  assert.deepEqual(backfilled.completedDates, [priorDate, reading.startDate]);
+  assert.equal(
+    (await (await call('/habits')).json()).habits.find((item: Habit) => item.id === reading.id)
+      .startDate,
+    priorDate,
+  );
 });

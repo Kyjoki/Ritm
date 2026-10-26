@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import type { Habit } from '../../shared/types';
 import {
+  habitCanMarkOn,
   habitCompleteOn,
   habitProgress,
   habitScheduledOn,
@@ -78,19 +79,20 @@ export function DashboardHabits({ today, onOpen }: { today: string; onOpen: () =
     inFlight.current.add(habit.id);
     setBusyId(habit.id);
     setError('');
-    setHabits((current) =>
-      current.map((item) =>
-        item.id === habit.id
-          ? {
-              ...item,
-              progressByDate: { ...item.progressByDate, [date]: count },
-              completedDates: count
-                ? [...new Set([...item.completedDates, date])].sort()
-                : item.completedDates.filter((value) => value !== date),
-            }
-          : item,
-      ),
-    );
+    if (date >= habit.startDate)
+      setHabits((current) =>
+        current.map((item) =>
+          item.id === habit.id
+            ? {
+                ...item,
+                progressByDate: { ...item.progressByDate, [date]: count },
+                completedDates: count
+                  ? [...new Set([...item.completedDates, date])].sort()
+                  : item.completedDates.filter((value) => value !== date),
+              }
+            : item,
+        ),
+      );
     try {
       const response = await api.setHabitProgress(habit.id, date, count, habit.updatedAt);
       setHabits((current) => current.map((item) => (item.id === habit.id ? response.habit : item)));
@@ -199,15 +201,15 @@ export function DashboardHabits({ today, onOpen }: { today: string; onOpen: () =
                     const scheduled = habitScheduledOn(habit, date);
                     const done = habitCompleteOn(habit, date);
                     const future = date > today;
-                    const available = scheduled && !future && !habit.archived;
+                    const available = habitCanMarkOn(habit, date, today);
                     const labelDate = formatDate(date, { day: 'numeric', month: 'long' }, language);
                     const state = done
                       ? t('Выполнено')
                       : future
                         ? t('Будущий день')
-                        : date < habit.startDate
+                        : date < habit.startDate && !available
                           ? t('До начала привычки')
-                          : scheduled
+                          : available
                             ? t('Запланировано')
                             : t('Не запланировано');
                     const actionLabel = t(
@@ -220,7 +222,7 @@ export function DashboardHabits({ today, onOpen }: { today: string; onOpen: () =
                       <button
                         key={date}
                         type="button"
-                        className={`dashboard-habits-cell${date === today ? ' is-today' : ''}${done ? ' is-done' : ''}${!scheduled ? ' is-off' : ''}${future ? ' is-future' : ''}`}
+                        className={`dashboard-habits-cell${date === today ? ' is-today' : ''}${done ? ' is-done' : ''}${!scheduled && !available ? ' is-off' : ''}${future ? ' is-future' : ''}`}
                         aria-label={
                           available
                             ? `${actionLabel}. ${state}`

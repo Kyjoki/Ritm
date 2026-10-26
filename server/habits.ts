@@ -110,17 +110,28 @@ export function assertHabitVersion(habit: Habit, expectedUpdatedAt: string) {
     throw conflict('Привычка изменилась. Обновите данные и повторите действие.');
 }
 
-export function assertHabitDay(habit: Habit, date: string, today: string) {
-  if (date < habit.startDate || date > today)
+export function assertHabitDay(habit: Habit, date: string, today: string, backfill = false): Habit {
+  if (date > today || (date < habit.startDate && !backfill))
     throw new AppError(
       400,
       'HABIT_DATE_INVALID',
-      'Можно отметить только прошедший день с даты создания привычки.',
+      'Можно отметить только сегодняшний или прошедший день.',
     );
   if (habit.archived)
     throw new AppError(400, 'HABIT_ARCHIVED', 'Архивную привычку нельзя отмечать.');
-  if (!isHabitScheduled(habit, date))
+  const expanded =
+    date < habit.startDate
+      ? {
+          ...habit,
+          startDate: date,
+          periods: habit.periods?.length
+            ? [{ ...habit.periods[0], from: date }, ...habit.periods.slice(1)]
+            : habit.periods,
+        }
+      : habit;
+  if (!isHabitScheduled(expanded, date))
     throw new AppError(400, 'HABIT_DAY_UNSCHEDULED', 'В этот день привычка не запланирована.');
+  return expanded;
 }
 
 export function assertHabitProgress(habit: Habit, count: number) {

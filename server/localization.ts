@@ -24,8 +24,8 @@ const messages: Record<string, string> = {
   'Привычка не найдена. Обновите страницу.': 'Habit not found. Refresh the page.',
   'Привычка изменилась. Обновите данные и повторите действие.':
     'This habit changed. Refresh your data and try again.',
-  'Можно отметить только прошедший день с даты создания привычки.':
-    'You can only mark days from the habit start date through today.',
+  'Можно отметить только сегодняшний или прошедший день.':
+    'You can only mark today or a past day.',
   'Архивную привычку нельзя отмечать.': 'Archived habits cannot be marked.',
   'В этот день привычка не запланирована.': 'This habit is not scheduled on that day.',
   'Прогресс превышает цель привычки.': 'Progress exceeds the habit target.',

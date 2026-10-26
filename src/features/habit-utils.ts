@@ -21,6 +21,16 @@ export function habitScheduledOn(habit: Habit, date: string): boolean {
   );
 }
 
+export function habitCanMarkOn(habit: Habit, date: string, today: string): boolean {
+  if (habit.archived || date > today) return false;
+  if (date >= habit.startDate) return habitScheduledOn(habit, date);
+  const firstPeriod = habit.periods?.[0];
+  return (
+    !(firstPeriod?.archived ?? false) &&
+    (firstPeriod?.weekdays ?? habit.weekdays ?? [0, 1, 2, 3, 4, 5, 6]).includes(habitWeekday(date))
+  );
+}
+
 function habitArchivedOn(habit: Habit, date: string): boolean {
   const period = habit.periods?.findLast((item) => item.from <= date);
   return period?.archived ?? habit.archived ?? false;

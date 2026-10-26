@@ -295,13 +295,14 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
       const current = habits.find((habit) => habit.id === id);
       if (!current) throw new AppError(404, 'NOT_FOUND', 'Привычка не найдена. Обновите страницу.');
       assertHabitVersion(current, expectedUpdatedAt);
-      assertHabitDay(
+      const eligible = assertHabitDay(
         current,
         date,
         localDate(new Date(this.clock()), (await this.readSettings(client)).timeZone),
+        completed,
       );
       if (current.completedDates.includes(date) === completed) return current;
-      const updated = updateHabitProgress(current, date, completed ? (current.target ?? 1) : 0);
+      const updated = updateHabitProgress(eligible, date, completed ? (current.target ?? 1) : 0);
       const habit = {
         ...updated,
         updatedAt: this.stamp(current.updatedAt),
@@ -324,15 +325,16 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
       const current = habits.find((habit) => habit.id === id);
       if (!current) throw new AppError(404, 'NOT_FOUND', 'Привычка не найдена. Обновите страницу.');
       assertHabitVersion(current, expectedUpdatedAt);
-      assertHabitDay(
+      const eligible = assertHabitDay(
         current,
         date,
         localDate(new Date(this.clock()), (await this.readSettings(client)).timeZone),
+        count > 0,
       );
       assertHabitProgress(current, count);
       if (habitProgress(current, date) === count) return current;
       const habit = {
-        ...updateHabitProgress(current, date, count),
+        ...updateHabitProgress(eligible, date, count),
         updatedAt: this.stamp(current.updatedAt),
       };
       await this.writeHabits(
