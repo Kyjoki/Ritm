@@ -1,4 +1,16 @@
 export const calendarEnglish: Record<string, string> = {
+  'Удерживайте и перетащите запись на другое время или день.':
+    'Press and drag this entry to another time or day.',
+  'Удерживайте и перетащите запись на другой день.': 'Press and drag this entry to another day.',
+  'Предыдущая неделя': 'Previous week',
+  'Следующая неделя': 'Next week',
+  'Предыдущий день': 'Previous day',
+  'Следующий день': 'Next day',
+  'Новая позиция: {p0}, {p1}': 'New position: {p0}, {p1}',
+  'Сохраняем перенос…': 'Saving move…',
+  'Запись перенесена в календаре': 'Entry moved in the calendar',
+  'Эту запись нельзя перетащить. Открой её для просмотра.':
+    'This entry cannot be dragged. Open it to view details.',
   'Весь день': 'All day',
   'Без времени': 'No time',
   ', выполнено': ', completed',

@@ -17,7 +17,9 @@ import {
 import { Dialog } from '../components/Dialog';
 import { mobileCalendarGroups } from './mobile-calendar-groups';
 import { calendarWeekSwipe, type SwipePoint } from './calendar-swipe';
+import { calendarDragTarget, calendarDragWeekEdge } from './calendar-drag';
 import { EventPreviewDialog } from './EventPreviewDialog';
+import { canEditGoogleEvent, googleEventDraft } from './google-occurrences';
 import type {
   GoogleCalendarEvent,
   GoogleCalendarStatus,
@@ -60,6 +62,7 @@ interface CalendarPageProps {
   googlePartial?: boolean;
   googleFetchedAt?: string | null;
   onGoogleEdit?: (event: GoogleCalendarEvent) => void;
+  onGoogleMove?: (event: GoogleCalendarEvent, date: string, time: string | null) => Promise<void>;
   onGoogleTaskToggle?: (event: GoogleCalendarEvent) => Promise<void>;
   busyGoogleTaskIds?: ReadonlySet<string>;
   onEnableGoogleTasks?: () => Promise<void>;
@@ -77,6 +80,19 @@ const GRID_TIME_COLUMN = 62;
 const HOUR_HEIGHT = 48;
 const INITIAL_HOUR = 9;
 const EMPTY_GOOGLE_EVENTS: GoogleCalendarEvent[] = [];
+
+interface DragPreview {
+  key: string;
+  title: string;
+  date: string;
+  minutes: number | null;
+  duration: number;
+  x: number;
+  y: number;
+  width: number;
+  edge: -1 | 0 | 1;
+  saving: boolean;
+}
 
 function freeIntervals(entries: CalendarOccurrence[]): { start: number; end: number }[] {
   if (entries.some((entry) => entry.allDay && entry.busy)) return [];
@@ -179,6 +195,7 @@ export function CalendarPage({
   googlePartial = false,
   googleFetchedAt = null,
   onGoogleEdit,
+  onGoogleMove,
   onGoogleTaskToggle,
   busyGoogleTaskIds,
   onEnableGoogleTasks,
@@ -195,12 +212,17 @@ export function CalendarPage({
   const rangeCallback = useRef(onRangeChange);
   const gridScrollRef = useRef<HTMLDivElement>(null);
   const gridVisualRef = useRef<HTMLDivElement>(null);
+  const allDayRef = useRef<HTMLDivElement>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  const moveSavingRef = useRef(false);
+  const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
   const scrolledPeriodRef = useRef<string | null>(null);
   const weekGesture = useRef<(SwipePoint & { pointerId: number; date: string }) | null>(null);
   const suppressSwipeClick = useRef(0);
   useEffect(() => {
     rangeCallback.current = onRangeChange;
   }, [onRangeChange]);
+  useEffect(() => () => dragCleanupRef.current?.(), []);
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches,
   );
@@ -444,6 +466,202 @@ export function CalendarPage({
       navigate(direction);
     }
     resetWeekVisual();
+  }
+  function canDragEntry(
+    entry: CalendarOccurrence,
+  ): entry is CalendarOccurrence & { source: 'google' } {
+    return Boolean(
+      onGoogleMove &&
+      entry.source === 'google' &&
+      !entry.continued &&
+      !entry.event.taskLink &&
+      !entry.event.googleTask &&
+      canEditGoogleEvent(entry.event, timeZone),
+    );
+  }
+  function startEventDrag(event: PointerEvent<HTMLButtonElement>, entry: CalendarOccurrence) {
+    if (
+      event.button !== 0 ||
+      !event.isPrimary ||
+      !canDragEntry(entry) ||
+      dragCleanupRef.current ||
+      moveSavingRef.current
+    )
+      return;
+    const moveGoogle = onGoogleMove;
+    if (!moveGoogle) return;
+    event.stopPropagation();
+    const element = event.currentTarget;
+    const card = element.getBoundingClientRect();
+    const draft = googleEventDraft(entry.event, timeZone);
+    const allDay = entry.event.allDay;
+    const session = {
+      pointerId: event.pointerId,
+      pointerType: event.pointerType,
+      sourceDate: draft.date,
+      sourceMinutes: allDay ? null : timeMinutes(draft.time!),
+      duration: draft.duration,
+      targetDate: draft.date,
+      targetMinutes: allDay ? null : timeMinutes(draft.time!),
+      point: { x: event.clientX, y: event.clientY },
+      start: { x: event.clientX, y: event.clientY },
+      grabX: event.clientX - card.left,
+      grabY: event.clientY - card.top,
+      width: Math.max(card.width, isMobile ? 130 : 170),
+      active: false,
+      periodStart: view === 'week' ? weekStart : selectedDate,
+      currentDate: selectedDate,
+      edge: 0 as -1 | 0 | 1,
+      edgeSince: 0,
+    };
+    let holdTimer: number | null = null;
+    let edgeTimer: number | null = null;
+    const dragSurface = () => (allDay ? allDayRef.current : gridVisualRef.current);
+    const updatePreview = () => {
+      const surface = dragSurface();
+      if (!surface) return;
+      const rect = surface.getBoundingClientRect();
+      const target = calendarDragTarget(
+        session.point.x,
+        session.point.y,
+        {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          timeColumn: isMobile ? 40 : GRID_TIME_COLUMN,
+          days: view === 'week' ? 7 : 1,
+          hourHeight: HOUR_HEIGHT,
+        },
+        session.grabY,
+        session.duration,
+      );
+      session.targetDate = addDays(session.periodStart, target.dayIndex);
+      session.targetMinutes = allDay ? null : target.minutes;
+      const nextEdge = calendarDragWeekEdge(session.point.x, rect.left, rect.right);
+      if (session.edge !== nextEdge) {
+        session.edge = nextEdge;
+        session.edgeSince = performance.now();
+      }
+      const nextPreview: DragPreview = {
+        key: entry.key,
+        title: entry.title,
+        date: session.targetDate,
+        minutes: session.targetMinutes,
+        duration: session.duration,
+        x: session.point.x - session.grabX,
+        y: session.point.y - session.grabY,
+        width: session.width,
+        edge: session.edge,
+        saving: false,
+      };
+      setDragPreview((current) =>
+        current &&
+        current.key === nextPreview.key &&
+        current.date === nextPreview.date &&
+        current.minutes === nextPreview.minutes &&
+        current.x === nextPreview.x &&
+        current.y === nextPreview.y &&
+        current.edge === nextPreview.edge
+          ? current
+          : nextPreview,
+      );
+    };
+    const activate = () => {
+      if (session.active || dragCleanupRef.current === null) return;
+      session.active = true;
+      updatePreview();
+      edgeTimer = window.setInterval(() => {
+        const scroll = gridScrollRef.current;
+        if (!allDay && scroll) {
+          const bounds = scroll.getBoundingClientRect();
+          if (session.point.y < bounds.top + 18) scroll.scrollTop -= 8;
+          else if (session.point.y > bounds.bottom - 18) scroll.scrollTop += 8;
+        }
+        if (session.edge && performance.now() - session.edgeSince >= 650) {
+          session.currentDate = addDays(
+            session.currentDate,
+            session.edge * (view === 'week' ? 7 : 1),
+          );
+          session.periodStart =
+            view === 'week' ? startOfWeek(session.currentDate) : session.currentDate;
+          scrolledPeriodRef.current = `${view}:${session.currentDate}`;
+          setSelectedDate(session.currentDate);
+          session.edgeSince = performance.now();
+        }
+        updatePreview();
+      }, 50);
+    };
+    const cleanup = () => {
+      if (holdTimer !== null) window.clearTimeout(holdTimer);
+      if (edgeTimer !== null) window.clearInterval(edgeTimer);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('keydown', keydown);
+      window.removeEventListener('blur', cancel);
+      dragCleanupRef.current = null;
+    };
+    const move = (pointer: globalThis.PointerEvent) => {
+      if (pointer.pointerId !== session.pointerId) return;
+      session.point = { x: pointer.clientX, y: pointer.clientY };
+      if (
+        !session.active &&
+        Math.hypot(pointer.clientX - session.start.x, pointer.clientY - session.start.y) >= 8
+      ) {
+        if (session.pointerType === 'touch') {
+          suppressSwipeClick.current = performance.now() + 500;
+          cleanup();
+          return;
+        }
+        activate();
+      }
+      if (session.active) {
+        pointer.preventDefault();
+        updatePreview();
+      }
+    };
+    const finish = (pointer: globalThis.PointerEvent) => {
+      if (pointer.pointerId !== session.pointerId) return;
+      session.point = { x: pointer.clientX, y: pointer.clientY };
+      if (session.active) updatePreview();
+      cleanup();
+      if (!session.active) return;
+      suppressSwipeClick.current = performance.now() + 500;
+      if (
+        session.targetDate === session.sourceDate &&
+        session.targetMinutes === session.sourceMinutes
+      ) {
+        setDragPreview(null);
+        return;
+      }
+      moveSavingRef.current = true;
+      setDragPreview((current) => (current ? { ...current, saving: true, edge: 0 } : current));
+      void moveGoogle(
+        entry.event,
+        session.targetDate,
+        session.targetMinutes === null ? null : minuteTime(session.targetMinutes),
+      )
+        .catch(() => {})
+        .finally(() => {
+          moveSavingRef.current = false;
+          setDragPreview(null);
+        });
+    };
+    const cancel = () => {
+      if (session.active) suppressSwipeClick.current = performance.now() + 500;
+      cleanup();
+      setDragPreview(null);
+    };
+    const keydown = (key: globalThis.KeyboardEvent) => {
+      if (key.key === 'Escape') cancel();
+    };
+    dragCleanupRef.current = cleanup;
+    holdTimer = window.setTimeout(activate, event.pointerType === 'touch' ? 280 : 160);
+    window.addEventListener('pointermove', move, { passive: false });
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('keydown', keydown);
+    window.addEventListener('blur', cancel);
   }
   const pickerEntries = eventPicker
     ? calendarOccurrences(tasks, googleEvents, eventPicker.date, timeZone, language).filter(
@@ -750,8 +968,10 @@ export function CalendarPage({
               )}
             </div>
           ) : null}
-          {occurrencesByDay.some((day) => day.entries.some((entry) => entry.start === null)) ? (
+          {occurrencesByDay.some((day) => day.entries.some((entry) => entry.start === null)) ||
+          (dragPreview && dragPreview.minutes === null) ? (
             <div
+              ref={allDayRef}
               className="cal-all-day"
               style={{
                 gridTemplateColumns: `${isMobile ? 40 : GRID_TIME_COLUMN}px repeat(${periodDays.length}, minmax(0, 1fr))`,
@@ -759,16 +979,31 @@ export function CalendarPage({
             >
               <span>{t('Весь день / без времени')}</span>
               {occurrencesByDay.map(({ date, entries }) => (
-                <div key={date}>
+                <div
+                  key={date}
+                  className={
+                    dragPreview?.minutes === null && dragPreview.date === date
+                      ? 'cal-drag-all-day-target'
+                      : undefined
+                  }
+                >
                   {entries
                     .filter((entry) => entry.start === null)
                     .map((entry) => (
                       <button
                         type="button"
                         key={entry.key}
-                        className={`cal-all-day-event ${entry.source === 'google' ? 'cal-google-entry' : ''}`}
-                        onClick={() => editEntry(entry)}
+                        className={`cal-all-day-event ${entry.source === 'google' ? 'cal-google-entry' : ''} ${canDragEntry(entry) ? 'cal-draggable-event' : ''} ${dragPreview?.key === entry.key ? 'cal-drag-source' : ''}`}
+                        onPointerDown={(event) => startEventDrag(event, entry)}
+                        onClick={() => {
+                          if (performance.now() >= suppressSwipeClick.current) editEntry(entry);
+                        }}
                         aria-label={occurrenceLabel(entry, language)}
+                        aria-description={
+                          canDragEntry(entry)
+                            ? t('Удерживайте и перетащите запись на другой день.')
+                            : undefined
+                        }
                         style={calendarEntryStyle(entry)}
                       >
                         {entry.title}
@@ -816,6 +1051,21 @@ export function CalendarPage({
                   className={`cal-day-column ${date === today ? 'cal-today-column' : ''}`}
                   key={date}
                 >
+                  {dragPreview &&
+                  dragPreview.minutes !== null &&
+                  dragPreview.date === date &&
+                  !dragPreview.saving ? (
+                    <div
+                      className="cal-drag-target"
+                      style={{
+                        top: (dragPreview.minutes / 60) * HOUR_HEIGHT,
+                        height: Math.max(22, (dragPreview.duration / 60) * HOUR_HEIGHT),
+                      }}
+                      aria-hidden="true"
+                    >
+                      {formatTime(dragPreview.minutes)}
+                    </div>
+                  ) : null}
                   {HOURS.flatMap((hour) =>
                     [0, 30].map((minute) => (
                       <button
@@ -856,7 +1106,7 @@ export function CalendarPage({
                       <button
                         key={entry.key}
                         type="button"
-                        className={`cal-grid-event ${entry.source === 'google' || entry.task.kind === 'event' ? 'cal-event-kind' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''} ${entry.completed ? 'cal-completed' : ''} ${duration < 75 ? 'cal-compact-event' : ''}`}
+                        className={`cal-grid-event ${entry.source === 'google' || entry.task.kind === 'event' ? 'cal-event-kind' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''} ${entry.completed ? 'cal-completed' : ''} ${duration < 75 ? 'cal-compact-event' : ''} ${canDragEntry(entry) ? 'cal-draggable-event' : ''} ${dragPreview?.key === entry.key ? 'cal-drag-source' : ''}`}
                         style={{
                           ...calendarEntryStyle(entry),
                           top: ((entry.start ?? 0) / 60) * HOUR_HEIGHT + 2,
@@ -864,9 +1114,17 @@ export function CalendarPage({
                           width: `calc(${100 / entry.lanes}% - ${isMobile ? 2 : 7}px)`,
                           left: `calc(${(entry.lane * 100) / entry.lanes}% + ${isMobile ? 1 : 4}px)`,
                         }}
-                        onClick={() => editEntry(entry)}
+                        onPointerDown={(event) => startEventDrag(event, entry)}
+                        onClick={() => {
+                          if (performance.now() >= suppressSwipeClick.current) editEntry(entry);
+                        }}
                         title={occurrenceLabel(entry, language)}
                         aria-label={occurrenceLabel(entry, language)}
+                        aria-description={
+                          canDragEntry(entry)
+                            ? t('Удерживайте и перетащите запись на другое время или день.')
+                            : undefined
+                        }
                       >
                         <strong>
                           {entry.source === 'google' && entry.event.googleTask
@@ -1092,6 +1350,51 @@ export function CalendarPage({
             </button>
           </div>
         </Dialog>
+      ) : null}
+      {dragPreview ? (
+        <>
+          <div
+            className={`cal-drag-ghost ${dragPreview.saving ? 'cal-drag-saving' : ''}`}
+            style={{
+              width: dragPreview.width,
+              transform: `translate3d(${dragPreview.x}px, ${dragPreview.y}px, 0)`,
+            }}
+            aria-hidden="true"
+          >
+            <strong>{dragPreview.title}</strong>
+            <span>
+              {dragPreview.saving
+                ? t('Сохраняем перенос…')
+                : `${formatDate(dragPreview.date, { day: 'numeric', month: 'short' }, language)}${dragPreview.minutes === null ? ` · ${t('Весь день')}` : ` · ${formatTime(dragPreview.minutes)}`}`}
+            </span>
+          </div>
+          {dragPreview.edge && !dragPreview.saving ? (
+            <div
+              className={`cal-drag-edge cal-drag-edge-${dragPreview.edge < 0 ? 'left' : 'right'}`}
+              aria-hidden="true"
+            >
+              {dragPreview.edge < 0 ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
+              {t(
+                view === 'week'
+                  ? dragPreview.edge < 0
+                    ? 'Предыдущая неделя'
+                    : 'Следующая неделя'
+                  : dragPreview.edge < 0
+                    ? 'Предыдущий день'
+                    : 'Следующий день',
+              )}
+            </div>
+          ) : null}
+          <span className="visually-hidden" role="status">
+            {dragPreview.saving
+              ? t('Сохраняем перенос…')
+              : t('Новая позиция: {p0}, {p1}', {
+                  p0: formatDate(dragPreview.date, { day: 'numeric', month: 'long' }, language),
+                  p1:
+                    dragPreview.minutes === null ? t('Весь день') : formatTime(dragPreview.minutes),
+                })}
+          </span>
+        </>
       ) : null}
       {preview ? (
         <EventPreviewDialog

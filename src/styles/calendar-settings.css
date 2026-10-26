@@ -220,6 +220,90 @@
     box-shadow 0.16s,
     filter 0.16s;
 }
+.cal-draggable-event {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.cal-draggable-event:active {
+  cursor: grabbing;
+  filter: brightness(0.94);
+}
+.cal-drag-source {
+  opacity: 0.35;
+}
+.cal-drag-target {
+  position: absolute;
+  z-index: 6;
+  left: 2px;
+  right: 2px;
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px;
+  pointer-events: none;
+}
+.cal-drag-all-day-target {
+  min-height: 38px;
+  border-radius: 8px;
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+  background: var(--soft);
+}
+.cal-drag-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 12px 30px rgb(36 20 58 / 0.25);
+  pointer-events: none;
+  will-change: transform;
+}
+.cal-drag-ghost strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.cal-drag-ghost span {
+  font-size: 11px;
+  color: var(--muted);
+}
+.cal-drag-saving {
+  opacity: 0.8;
+}
+.cal-drag-edge {
+  position: fixed;
+  z-index: 999;
+  top: 50%;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 8px;
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--accent);
+  box-shadow: 0 5px 20px rgb(36 20 58 / 0.2);
+  font-size: 11px;
+  font-weight: 700;
+  pointer-events: none;
+}
+.cal-drag-edge-left {
+  left: 6px;
+}
+.cal-drag-edge-right {
+  right: 6px;
+}
 .cal-grid-event:hover {
   filter: brightness(0.96);
   box-shadow: 0 4px 14px rgb(59 30 92 / 0.12);

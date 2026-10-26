@@ -39,7 +39,11 @@ import { LoginPage } from './features/LoginPage';
 import { GoogleEventDialog } from './components/GoogleEventDialog';
 import { useGoogleCalendar } from './lib/google-calendar';
 import { EventPreviewDialog } from './features/EventPreviewDialog';
-import { calendarOccurrences } from './features/google-occurrences';
+import {
+  calendarOccurrences,
+  canEditGoogleEvent,
+  googleEventDraft,
+} from './features/google-occurrences';
 
 type Page = 'day' | 'calendar' | 'assistant' | 'finance' | 'settings' | 'login-preview';
 const navigation = [
@@ -747,6 +751,25 @@ export default function App() {
               googlePartial={google.result?.partial ?? false}
               googleFetchedAt={google.result?.fetchedAt ?? null}
               onGoogleEdit={(event) => setGoogleDialog({ event })}
+              onGoogleMove={async (event, date, time) => {
+                try {
+                  if (
+                    !canEditGoogleEvent(event, data.settings.timeZone) ||
+                    event.taskLink ||
+                    event.googleTask ||
+                    event.allDay !== (time === null)
+                  )
+                    throw new Error(tr('Эту запись нельзя перетащить. Открой её для просмотра.'));
+                  const input = { ...googleEventDraft(event, data.settings.timeZone), date, time };
+                  const saved = await api.updateGoogleEvent(event.id, input, event.etag);
+                  google.upsertEvent(saved);
+                  google.refresh();
+                  notify(tr('Запись перенесена в календаре'));
+                } catch (error) {
+                  handleError(error);
+                  google.refresh();
+                }
+              }}
               onGoogleTaskToggle={toggleGoogleTask}
               busyGoogleTaskIds={busyGoogleTaskIds}
               onEnableGoogleTasks={google.status.tasksEnabled ? undefined : google.connectTasks}
