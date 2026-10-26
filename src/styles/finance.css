@@ -706,7 +706,7 @@
   line-height: 1.6;
 }
 .finance-dialog {
-  width: min(560px, calc(100% - 24px));
+  --dialog-max-width: 560px;
 }
 .finance-form {
   display: grid;

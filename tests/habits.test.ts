@@ -19,10 +19,12 @@ import {
   habitBestStreak,
   habitCanMarkOn,
   habitCompleteOn,
+  habitDaySummary,
   habitProgress,
   habitScheduledOn,
   habitStreak,
   habitWeek,
+  habitWeekday,
 } from '../src/features/habit-utils.ts';
 import { addDays } from '../src/features/calendar-utils.ts';
 import type { Habit } from '../shared/types.ts';
@@ -280,6 +282,49 @@ test('habits persist in SQLite and reject stale revisions and future days', () =
     second.deleteHabit(created.id, renamed.updatedAt);
     assert.deepEqual(second.habits(), []);
     second.close();
+  } finally {
+    assert.ok(resolve(directory).startsWith(resolve(tmpdir()) + sep));
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('scheduled-only daily totals survive storage reload and undo', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ritm-habit-analytics-'));
+  try {
+    const first = new Store(directory, false);
+    const gym = first.createHabit({ title: 'Gym' });
+    const today = gym.startDate;
+    const weekday = habitWeekday(today);
+    const scheduled = first.updateHabit(
+      gym.id,
+      { title: 'Gym', weekdays: [weekday] },
+      gym.updatedAt,
+    );
+    first.createHabit({ title: 'IELTS', weekdays: [(weekday + 1) % 7] });
+    const marked = first.setHabitDay(gym.id, today, true, scheduled.updatedAt);
+    assert.deepEqual(habitDaySummary(first.habits(), today), {
+      planned: 1,
+      completed: 1,
+      progress: 100,
+    });
+    first.close();
+
+    const second = new Store(directory, false);
+    assert.deepEqual(habitDaySummary(second.habits(), today), {
+      planned: 1,
+      completed: 1,
+      progress: 100,
+    });
+    second.setHabitDay(gym.id, today, false, marked.updatedAt);
+    second.close();
+
+    const third = new Store(directory, false);
+    assert.deepEqual(habitDaySummary(third.habits(), today), {
+      planned: 1,
+      completed: 0,
+      progress: 0,
+    });
+    third.close();
   } finally {
     assert.ok(resolve(directory).startsWith(resolve(tmpdir()) + sep));
     rmSync(directory, { recursive: true, force: true });

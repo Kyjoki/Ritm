@@ -5,10 +5,15 @@ import {
   habitBestStreak,
   habitCompleteOn,
   habitCompletionRate,
+  habitDaySummary,
+  habitPeriodSummary,
   habitScheduledOn,
   habitStreak,
+  habitWeek,
+  habitWeekday,
 } from '../src/features/habit-utils.ts';
 import { addDays } from '../src/features/calendar-utils.ts';
+import { dateInZone } from '../src/lib/date.ts';
 
 test('habit analytics uses the schedule and archive state effective on each date', () => {
   const habit = {
@@ -43,4 +48,121 @@ test('habit analytics uses the schedule and archive state effective on each date
   const dates: string[] = [];
   for (let day = habit.startDate; day <= '2026-11-02'; day = addDays(day, 1)) dates.push(day);
   assert.deepEqual(habitCompletionRate(habit, dates), { completed: 7, scheduled: 7 });
+});
+
+test('daily and period analytics count only scheduled, completed opportunities', () => {
+  const gym = {
+    id: 'gym',
+    title: 'Gym',
+    startDate: '2026-10-26',
+    weekdays: [1, 2, 6],
+    archived: false,
+    completedDates: ['2026-10-26'],
+    createdAt: '2026-10-26T00:00:00.000Z',
+    updatedAt: '2026-10-26T00:00:00.000Z',
+  } as Habit;
+  const ielts = {
+    id: 'ielts',
+    title: 'IELTS',
+    startDate: '2026-10-26',
+    weekdays: [0, 2, 5, 6],
+    archived: false,
+    completedDates: [],
+    createdAt: '2026-10-26T00:00:00.000Z',
+    updatedAt: '2026-10-26T00:00:00.000Z',
+  } as Habit;
+  const habits = [gym, ielts];
+  assert.equal(habitWeekday('2026-10-25'), 0);
+  assert.equal(habitWeekday('2026-10-26'), 1);
+  assert.deepEqual(habitWeek('2026-10-27'), [
+    '2026-10-25',
+    '2026-10-26',
+    '2026-10-27',
+    '2026-10-28',
+    '2026-10-29',
+    '2026-10-30',
+    '2026-10-31',
+  ]);
+  assert.deepEqual(habitDaySummary(habits, '2026-10-26'), {
+    planned: 1,
+    completed: 1,
+    progress: 100,
+  });
+  assert.deepEqual(habitDaySummary(habits, '2026-10-27'), {
+    planned: 2,
+    completed: 0,
+    progress: 0,
+  });
+  const gymTuesday = { ...gym, completedDates: [...gym.completedDates, '2026-10-27'] };
+  assert.deepEqual(habitDaySummary([gymTuesday, ielts], '2026-10-27'), {
+    planned: 2,
+    completed: 1,
+    progress: 50,
+  });
+  const ieltsTuesday = { ...ielts, completedDates: ['2026-10-27'] };
+  assert.deepEqual(habitDaySummary([gymTuesday, ieltsTuesday], '2026-10-27'), {
+    planned: 2,
+    completed: 2,
+    progress: 100,
+  });
+  assert.deepEqual(habitDaySummary([gym, ieltsTuesday], '2026-10-27'), {
+    planned: 2,
+    completed: 1,
+    progress: 50,
+  });
+  assert.deepEqual(habitDaySummary(habits, '2026-10-28'), {
+    planned: 0,
+    completed: 0,
+    progress: null,
+  });
+  assert.deepEqual(habitPeriodSummary([gymTuesday, ielts], ['2026-10-26', '2026-10-27']), {
+    planned: 3,
+    completed: 2,
+    progress: 67,
+  });
+  assert.deepEqual(habitPeriodSummary(habits, habitWeek('2026-10-26'), '2026-10-26'), {
+    planned: 1,
+    completed: 1,
+    progress: 100,
+  });
+  assert.deepEqual(habitDaySummary(habits, '2026-11-01'), {
+    planned: 1,
+    completed: 0,
+    progress: 0,
+  });
+  assert.deepEqual(habitPeriodSummary(habits, ['2026-10-28']), {
+    planned: 0,
+    completed: 0,
+    progress: null,
+  });
+});
+
+test('client and server honor historical periods, archive state, and owner dates', () => {
+  const habit = {
+    startDate: '2026-10-26',
+    weekdays: [1, 2],
+    archived: false,
+    completedDates: ['2026-10-26', '2026-10-27'],
+    periods: [
+      { from: '2026-10-27', weekdays: [2], archived: false },
+      { from: '2026-10-28', weekdays: [2], archived: true },
+    ],
+  } as Habit;
+  assert.deepEqual(habitDaySummary([habit], '2026-10-26'), {
+    planned: 0,
+    completed: 0,
+    progress: null,
+  });
+  assert.deepEqual(habitDaySummary([habit], '2026-10-27'), {
+    planned: 1,
+    completed: 1,
+    progress: 100,
+  });
+  assert.deepEqual(habitDaySummary([habit], '2026-11-03'), {
+    planned: 0,
+    completed: 0,
+    progress: null,
+  });
+  assert.equal(dateInZone('Asia/Qyzylorda', new Date('2026-10-26T20:30:00Z')), '2026-10-27');
+  assert.equal(dateInZone('America/New_York', new Date('2026-10-26T02:30:00Z')), '2026-10-25');
 });

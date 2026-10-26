@@ -1,24 +1,17 @@
 import type { Habit } from '../../shared/types';
+import { habitPeriod, habitWeekday, isHabitScheduled } from '../../shared/habit-schedule';
 import { addDays } from './calendar-utils';
 
 export const HABIT_MILESTONES = [3, 7, 14, 30] as const;
+export { habitWeekday } from '../../shared/habit-schedule';
 
 export function habitWeek(endDate: string): string[] {
   const sunday = addDays(endDate, -habitWeekday(endDate));
   return Array.from({ length: 7 }, (_, index) => addDays(sunday, index));
 }
 
-export function habitWeekday(date: string): number {
-  return new Date(`${date}T12:00:00Z`).getUTCDay();
-}
-
 export function habitScheduledOn(habit: Habit, date: string): boolean {
-  if (date < habit.startDate) return false;
-  const period = habit.periods?.findLast((item) => item.from <= date);
-  return (
-    !(period?.archived ?? habit.archived ?? false) &&
-    (period?.weekdays ?? habit.weekdays ?? [0, 1, 2, 3, 4, 5, 6]).includes(habitWeekday(date))
-  );
+  return isHabitScheduled(habit, date);
 }
 
 export function habitCanMarkOn(habit: Habit, date: string, today: string): boolean {
@@ -32,8 +25,7 @@ export function habitCanMarkOn(habit: Habit, date: string, today: string): boole
 }
 
 function habitArchivedOn(habit: Habit, date: string): boolean {
-  const period = habit.periods?.findLast((item) => item.from <= date);
-  return period?.archived ?? habit.archived ?? false;
+  return habitPeriod(habit, date)?.archived ?? true;
 }
 
 export function habitTarget(habit: Habit): number {
@@ -95,9 +87,47 @@ export function habitCompletionRate(
   habit: Habit,
   dates: string[],
 ): { completed: number; scheduled: number } {
-  const eligible = dates.filter((day) => habitScheduledOn(habit, day));
+  const summary = habitPeriodSummary([habit], dates);
   return {
-    completed: eligible.filter((day) => habitCompleteOn(habit, day)).length,
-    scheduled: eligible.length,
+    completed: summary.completed,
+    scheduled: summary.planned,
   };
+}
+
+export interface HabitSummary {
+  planned: number;
+  completed: number;
+  /** Null means there were no scheduled opportunities, not a failed day. */
+  progress: number | null;
+}
+
+export function habitDaySummary(
+  habits: readonly Habit[],
+  date: string,
+  today?: string,
+): HabitSummary {
+  if (today && date > today) return { planned: 0, completed: 0, progress: null };
+  let planned = 0;
+  let completed = 0;
+  for (const habit of habits) {
+    if (!habitScheduledOn(habit, date)) continue;
+    planned++;
+    if (habitCompleteOn(habit, date)) completed++;
+  }
+  return { planned, completed, progress: planned ? Math.round((completed / planned) * 100) : null };
+}
+
+export function habitPeriodSummary(
+  habits: readonly Habit[],
+  dates: readonly string[],
+  today?: string,
+): HabitSummary {
+  let planned = 0;
+  let completed = 0;
+  for (const date of dates) {
+    const day = habitDaySummary(habits, date, today);
+    planned += day.planned;
+    completed += day.completed;
+  }
+  return { planned, completed, progress: planned ? Math.round((completed / planned) * 100) : null };
 }

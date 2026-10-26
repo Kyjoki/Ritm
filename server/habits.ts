@@ -1,24 +1,10 @@
 import type { Habit, HabitInput } from '../shared/types.ts';
+import { isHabitScheduled } from '../shared/habit-schedule.ts';
 import { AppError, conflict } from './errors.ts';
 
 export const habitMilestones = [3, 7, 14, 30] as const;
 const allWeekdays = [0, 1, 2, 3, 4, 5, 6];
-
-export function habitPeriod(habit: Habit, date: string) {
-  if (!habit.periods?.length)
-    return { weekdays: habit.weekdays ?? allWeekdays, archived: habit.archived ?? false };
-  for (let index = habit.periods.length - 1; index >= 0; index--) {
-    if (habit.periods[index].from <= date) return habit.periods[index];
-  }
-  return null;
-}
-
-export function isHabitScheduled(habit: Habit, date: string): boolean {
-  if (date < habit.startDate) return false;
-  const period = habitPeriod(habit, date);
-  const weekday = new Date(`${date}T12:00:00Z`).getUTCDay();
-  return Boolean(period && !period.archived && period.weekdays.includes(weekday));
-}
+export { habitPeriod, isHabitScheduled } from '../shared/habit-schedule.ts';
 
 export function habitProgress(habit: Habit, date: string): number {
   return (

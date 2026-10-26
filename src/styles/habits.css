@@ -167,6 +167,14 @@
   letter-spacing: -0.055em;
   white-space: nowrap;
 }
+.habits-kpis .habits-kpi-empty {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.4;
+  white-space: normal;
+}
 .habits-kpis small {
   font-size: 13px;
   color: var(--muted);

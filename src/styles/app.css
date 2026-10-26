@@ -1013,14 +1013,30 @@ textarea::placeholder {
 .dialog {
   --dialog-padding-x: 25px;
   --dialog-padding-y: 25px;
+  position: fixed;
+  inset: auto;
+  top: var(--dialog-vv-center-y, 50%);
+  left: var(--dialog-vv-center-x, 50%);
+  margin: 0;
+  transform: translate(-50%, -50%);
   padding: 25px;
   border: 1px solid var(--line);
   border-radius: 22px;
   background: var(--panel);
   color: var(--text);
-  width: min(490px, calc(100% - 32px));
-  max-height: calc(100dvh - 40px);
+  width: min(
+    var(--dialog-max-width, 490px),
+    calc(
+      var(--dialog-vv-width, 100vw) - max(16px, env(safe-area-inset-left)) -
+        max(16px, env(safe-area-inset-right))
+    )
+  );
+  max-height: calc(
+    var(--dialog-vv-height, 100dvh) - max(16px, env(safe-area-inset-top)) -
+      max(16px, env(safe-area-inset-bottom))
+  );
   overflow: auto;
+  overscroll-behavior: contain;
   scroll-padding-block: 95px;
   box-shadow: 0 30px 100px #110e254a;
   animation: dialog-enter var(--motion-fast) var(--motion-ease) both;
@@ -1357,17 +1373,17 @@ textarea::placeholder {
 @keyframes dialog-enter {
   from {
     opacity: 0;
-    transform: translateY(9px) scale(0.99);
+    transform: translate(-50%, -50%) scale(0.97);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translate(-50%, -50%) scale(1);
   }
 }
 @keyframes dialog-exit {
   to {
     opacity: 0;
-    transform: translateY(9px) scale(0.99);
+    transform: translate(-50%, -50%) scale(0.97);
   }
 }
 @keyframes dialog-backdrop-exit {
@@ -1757,14 +1773,7 @@ textarea::placeholder {
   .dialog {
     --dialog-padding-x: 20px;
     --dialog-padding-y: 23px;
-    position: fixed;
-    inset: auto 0 0;
-    width: 100%;
-    max-height: calc(100dvh - 25px);
-    margin: 0;
-    border-radius: 22px 22px 0 0;
-    padding: 23px 20px max(22px, env(safe-area-inset-bottom));
-    border-bottom: 0;
+    padding: 23px 20px;
   }
   .dialog-actions .button {
     min-height: 44px;

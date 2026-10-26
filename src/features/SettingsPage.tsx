@@ -27,6 +27,7 @@ import type {
 import { Dialog } from '../components/Dialog';
 import { GoogleSetupDialog } from '../components/GoogleSetupDialog';
 import { TelegramConnection } from '../components/TelegramConnection';
+import { activateDialogViewport } from '../lib/dialog-viewport';
 import '../styles/calendar-settings.css';
 import '../styles/settings-motion.css';
 
@@ -105,9 +106,11 @@ export function SettingsPage({
   const [googleStatusUnknown, setGoogleStatusUnknown] = useState(false);
   const [confirmGoogleDisconnect, setConfirmGoogleDisconnect] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const releaseDialogViewport = useRef<(() => void) | null>(null);
   const secretInputRef = useRef<HTMLInputElement>(null);
   const titleId = useId();
   const previousSettings = useRef(settings);
+  useEffect(() => () => releaseDialogViewport.current?.(), []);
   useEffect(() => {
     if (active) hasBeenActive.current = true;
     else if (hasBeenActive.current) setMotionEntry('return');
@@ -238,6 +241,8 @@ export function SettingsPage({
     setConnectionError('');
     setConnectionNotice('');
     dialogRef.current?.showModal();
+    if (dialogRef.current)
+      releaseDialogViewport.current = activateDialogViewport(dialogRef.current);
     secretInputRef.current?.focus();
   }
 
@@ -817,7 +822,7 @@ export function SettingsPage({
 
       <dialog
         ref={dialogRef}
-        className="settings-key-dialog"
+        className="dialog settings-key-dialog"
         aria-labelledby={titleId}
         onCancel={(event) => {
           if (connectionBusy) event.preventDefault();
@@ -826,7 +831,11 @@ export function SettingsPage({
             setConnectionError('');
           }
         }}
-        onClose={() => setKey('')}
+        onClose={() => {
+          releaseDialogViewport.current?.();
+          releaseDialogViewport.current = null;
+          setKey('');
+        }}
         onClick={(event) => {
           if (event.target === event.currentTarget) {
             const b = event.currentTarget.getBoundingClientRect();

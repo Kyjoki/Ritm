@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
+import { activateDialogViewport } from '../lib/dialog-viewport';
 
 export function Dialog({
   title,
@@ -36,6 +37,7 @@ export function Dialog({
     const dialog = ref.current!;
     const previous = document.activeElement as HTMLElement | null;
     dialog.showModal();
+    const releaseViewport = activateDialogViewport(dialog);
     dialog
       .querySelector<HTMLElement>(
         'input:not([type="hidden"]):not([type="radio"]):not([type="checkbox"]):not(:disabled), textarea:not(:disabled), select:not(:disabled)',
@@ -44,6 +46,7 @@ export function Dialog({
     return () => {
       if (exitTimer.current !== null) window.clearTimeout(exitTimer.current);
       dialog.close();
+      releaseViewport();
       const target =
         previous?.isConnected && previous.getClientRects().length
           ? previous

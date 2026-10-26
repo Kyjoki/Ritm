@@ -6,6 +6,7 @@ export const habitsEnglish: Record<string, string> = {
   'Привычек пока нет — добавьте первую.': 'No habits yet — add the first one.',
   Запланировано: 'Scheduled',
   'Не запланировано': 'Rest day',
+  'Нет запланированных привычек': 'No habits scheduled',
   'Будущий день': 'Future day',
   'До начала': 'Before start',
   'До начала привычки': 'Before habit start',

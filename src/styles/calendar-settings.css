@@ -1174,14 +1174,13 @@
   color: var(--accent);
 }
 .settings-key-dialog {
+  --dialog-max-width: 465px;
   border: 1px solid var(--line);
   border-radius: 23px;
   padding: 0;
   background: var(--panel);
   color: var(--text);
   box-shadow: 0 30px 90px rgb(22 10 38 / 0.25);
-  width: min(465px, calc(100% - 32px));
-  max-height: calc(100dvh - 40px);
   overflow-y: auto;
 }
 .settings-key-dialog::backdrop {
@@ -1189,7 +1188,7 @@
   backdrop-filter: blur(7px);
 }
 .settings-key-dialog[open] {
-  animation: cal-page-enter 0.22s ease both;
+  animation: dialog-enter var(--motion-fast) var(--motion-ease) both;
 }
 .settings-key-form {
   padding: 27px;
@@ -1547,12 +1546,7 @@
     margin-top: 17px;
   }
   .settings-key-dialog {
-    width: 100%;
-    max-width: 100%;
-    margin: auto 0 0;
-    max-height: calc(100dvh - 35px);
-    border-radius: 23px 23px 0 0;
-    border-bottom: 0;
+    border-radius: 23px;
   }
   .settings-key-form {
     padding: 25px 20px calc(24px + env(safe-area-inset-bottom));

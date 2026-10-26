@@ -30,6 +30,8 @@ import {
   habitCanMarkOn,
   habitCompleteOn,
   habitCompletionRate,
+  habitDaySummary,
+  habitPeriodSummary,
   habitProgress,
   habitScheduledOn,
   habitStreak,
@@ -528,71 +530,36 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
     }
   }
 
-  const totals = availableDates.reduce(
-    (value, day) => {
-      habits.forEach((habit) => {
-        if (!habitScheduledOn(habit, day)) return;
-        value.scheduled++;
-        if (habitCompleteOn(habit, day)) value.completed++;
-      });
-      return value;
-    },
-    { completed: 0, scheduled: 0 },
-  );
-  const rate = totals.scheduled ? Math.round((totals.completed / totals.scheduled) * 100) : 0;
+  const totals = habitPeriodSummary(habits, dates, today);
+  const rate = totals.progress ?? 0;
   const comparisonLength = Math.min(availableDates.length, previousDates.length);
-  const comparisonCurrent = availableDates.slice(0, comparisonLength).reduce(
-    (value, day) => {
-      habits.forEach((habit) => {
-        if (!habitScheduledOn(habit, day)) return;
-        value.scheduled++;
-        if (habitCompleteOn(habit, day)) value.completed++;
-      });
-      return value;
-    },
-    { completed: 0, scheduled: 0 },
+  const comparisonCurrent = habitPeriodSummary(
+    habits,
+    availableDates.slice(0, comparisonLength),
+    today,
   );
-  const previous = previousDates.slice(0, comparisonLength).reduce(
-    (value, day) => {
-      habits.forEach((habit) => {
-        if (!habitScheduledOn(habit, day)) return;
-        value.scheduled++;
-        if (habitCompleteOn(habit, day)) value.completed++;
-      });
-      return value;
-    },
-    { completed: 0, scheduled: 0 },
-  );
+  const previous = habitPeriodSummary(habits, previousDates.slice(0, comparisonLength), today);
   const previousRate =
-    previous.scheduled && comparisonCurrent.scheduled
-      ? Math.round((previous.completed / previous.scheduled) * 100)
-      : null;
-  const comparisonCurrentRate = comparisonCurrent.scheduled
-    ? Math.round((comparisonCurrent.completed / comparisonCurrent.scheduled) * 100)
-    : 0;
-  const todayScheduled = activeHabits.filter((habit) => habitScheduledOn(habit, today));
-  const todayDone = todayScheduled.filter((habit) => habitCompleteOn(habit, today)).length;
+    previous.progress !== null && comparisonCurrent.progress !== null ? previous.progress : null;
+  const comparisonCurrentRate = comparisonCurrent.progress ?? 0;
+  const todaySummary = habitDaySummary(habits, today, today);
   const currentStreak = Math.max(0, ...activeHabits.map((habit) => habitStreak(habit, today)));
   const bestStreak = Math.max(0, ...activeHabits.map((habit) => habitBestStreak(habit, today)));
   const animatedRate = useCountUp(rate, !loading);
-  const animatedDone = useCountUp(todayDone, !loading);
+  const animatedDone = useCountUp(todaySummary.completed, !loading);
   const animatedCurrent = useCountUp(currentStreak, !loading);
   const animatedBest = useCountUp(bestStreak, !loading);
-  const daily = dates.map((day) => {
-    const eligible = habits.filter((habit) => habitScheduledOn(habit, day));
-    const completed = eligible.filter((habit) => habitCompleteOn(habit, day)).length;
-    return { day, scheduled: day > today ? 0 : eligible.length, completed };
-  });
+  const daily = dates.map((day) => ({ day, ...habitDaySummary(habits, day, today) }));
   const describeDay = (entry: (typeof daily)[number], label: string) =>
     entry.day > today
       ? label + '. ' + t('Будущий день')
-      : entry.scheduled
+      : entry.planned
         ? t('{date}: {done} из {total}', {
             date: label,
             done: entry.completed,
-            total: entry.scheduled,
+            total: entry.planned,
           })
-        : label + '. ' + t('Не запланировано');
+        : label + '. ' + t('Нет запланированных привычек');
   const stable = habits
     .map((habit) => ({
       habit,
@@ -610,7 +577,7 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
       const entries = daily.filter(
         (entry) => entry.day < today && habitWeekday(entry.day) === weekday,
       );
-      const scheduled = entries.reduce((sum, entry) => sum + entry.scheduled, 0);
+      const scheduled = entries.reduce((sum, entry) => sum + entry.planned, 0);
       const completed = entries.reduce((sum, entry) => sum + entry.completed, 0);
       return { weekday, scheduled, completed };
     })
@@ -726,7 +693,11 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
             <div className="habits-analytics-top">
               <div
                 className="habits-gauge"
-                aria-label={t('Выполнено {count} процентов', { count: rate })}
+                aria-label={
+                  totals.progress === null
+                    ? t('Нет запланированных привычек')
+                    : t('Выполнено {count} процентов', { count: rate })
+                }
               >
                 <svg viewBox="0 0 180 104" aria-hidden="true">
                   <path
@@ -742,17 +713,25 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
                   />
                 </svg>
                 <div className="habits-gauge-value" aria-hidden="true">
-                  <strong>{animatedRate}%</strong>
-                  <span>{t('выполнено')}</span>
+                  <strong>{totals.progress === null ? '—' : `${animatedRate}%`}</strong>
+                  <span>
+                    {t(totals.progress === null ? 'Нет запланированных привычек' : 'выполнено')}
+                  </span>
                 </div>
               </div>
               <div className="habits-kpis">
                 <div>
                   <span>{t('Сегодня выполнено')}</span>
-                  <strong aria-label={todayDone + ' / ' + todayScheduled.length}>
-                    {animatedDone}
-                    <small> / {todayScheduled.length}</small>
-                  </strong>
+                  {todaySummary.planned ? (
+                    <strong aria-label={todaySummary.completed + ' / ' + todaySummary.planned}>
+                      {animatedDone}
+                      <small> / {todaySummary.planned}</small>
+                    </strong>
+                  ) : (
+                    <strong className="habits-kpi-empty">
+                      {t('Нет запланированных привычек')}
+                    </strong>
+                  )}
                 </div>
                 <div>
                   <span>{t('Текущая серия')}</span>
@@ -770,16 +749,14 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
                 </div>
               </div>
             </div>
-            {totals.scheduled ? (
+            {totals.planned ? (
               <>
                 <div className="habits-analytics-graphs">
                   <div className="habits-chart-block">
                     <h3>{t('Выполнение по дням')}</h3>
                     <div className={'habits-bars' + (period === 'month' ? ' is-month' : '')}>
                       {daily.map((entry, index) => {
-                        const percentage = entry.scheduled
-                          ? Math.round((entry.completed / entry.scheduled) * 100)
-                          : 0;
+                        const percentage = entry.progress ?? 0;
                         const label = formatDate(
                           entry.day,
                           { weekday: 'short', day: 'numeric', month: 'short' },
@@ -825,11 +802,11 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
                         <span key={'pad-' + index} />
                       ))}
                       {daily.map((entry) => {
-                        const ratio = entry.scheduled ? entry.completed / entry.scheduled : 0;
+                        const ratio = entry.progress === null ? 0 : entry.progress / 100;
                         const level =
                           entry.day > today
                             ? 'future'
-                            : !entry.scheduled
+                            : !entry.planned
                               ? 'none'
                               : ratio === 1
                                 ? 'full'
@@ -921,11 +898,7 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
             ) : (
               <div className="habits-analytics-empty">
                 <Sparkles size={24} />
-                <p>
-                  {t(
-                    'За выбранный период пока нет запланированных дней. Начните с новой привычки.',
-                  )}
-                </p>
+                <p>{t('Нет запланированных привычек')}</p>
               </div>
             )}
           </section>

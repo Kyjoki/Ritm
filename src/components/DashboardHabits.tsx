@@ -15,8 +15,8 @@ import type { Habit } from '../../shared/types';
 import {
   habitCanMarkOn,
   habitCompleteOn,
+  habitDaySummary,
   habitProgress,
-  habitScheduledOn,
   habitStreak,
   habitTarget,
   habitWeek,
@@ -46,8 +46,7 @@ export function DashboardHabits({ today, onOpen }: { today: string; onOpen: () =
   const inFlight = useRef(new Set<string>());
   const days = useMemo(() => habitWeek(addDays(today, weekOffset * 7)), [today, weekOffset]);
   const activeHabits = habits.filter((habit) => !habit.archived);
-  const todayDone = activeHabits.filter((habit) => habitCompleteOn(habit, today)).length;
-  const todayPlanned = activeHabits.filter((habit) => habitScheduledOn(habit, today)).length;
+  const todaySummary = habitDaySummary(habits, today, today);
 
   const refresh = useCallback(async () => {
     try {
@@ -115,7 +114,9 @@ export function DashboardHabits({ today, onOpen }: { today: string; onOpen: () =
           <h2 id="dashboard-habits-title">
             {t('Привычки')}{' '}
             <span>
-              {todayDone}/{todayPlanned} {t('За сегодня').toLocaleLowerCase(language)}
+              {todaySummary.planned
+                ? `${todaySummary.completed}/${todaySummary.planned} ${t('За сегодня').toLocaleLowerCase(language)}`
+                : t('Нет запланированных привычек')}
             </span>
           </h2>
         </div>
@@ -198,7 +199,7 @@ export function DashboardHabits({ today, onOpen }: { today: string; onOpen: () =
                     </span>
                   </div>
                   {days.map((date) => {
-                    const scheduled = habitScheduledOn(habit, date);
+                    const scheduled = habitDaySummary([habit], date).planned > 0;
                     const done = habitCompleteOn(habit, date);
                     const future = date > today;
                     const available = habitCanMarkOn(habit, date, today);
