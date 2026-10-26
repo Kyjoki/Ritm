@@ -5,6 +5,8 @@ import type {
   Conversation,
   FinanceEntry,
   FinanceEntryInput,
+  Habit,
+  HabitInput,
   GoogleCalendarStatus,
   GoogleCalendarResult,
   GoogleCalendarEvent,
@@ -91,6 +93,23 @@ export const api = {
   login: (login: string, password: string) => request('/login', 'POST', { login, password }),
   logout: () => request('/logout', 'POST'),
   bootstrap: () => request<Bootstrap>('/bootstrap'),
+  habits: () => request<{ habits: Habit[] }>('/habits'),
+  createHabit: (habit: HabitInput) => request<{ habit: Habit }>('/habits', 'POST', habit),
+  updateHabit: (id: string, habit: HabitInput, expectedUpdatedAt: string) =>
+    request<{ habit: Habit }>(`/habits/${encodeURIComponent(id)}`, 'PATCH', {
+      habit,
+      expectedUpdatedAt,
+    }),
+  setHabitDay: (id: string, date: string, completed: boolean, expectedUpdatedAt: string) =>
+    request<{ habit: Habit }>(
+      `/habits/${encodeURIComponent(id)}/days/${encodeURIComponent(date)}`,
+      'PATCH',
+      { completed, expectedUpdatedAt },
+    ),
+  deleteHabit: (id: string, expectedUpdatedAt: string) =>
+    request<{ deleted: true }>(`/habits/${encodeURIComponent(id)}`, 'DELETE', {
+      expectedUpdatedAt,
+    }),
   finance: () => request<{ entries: FinanceEntry[] }>('/finance'),
   createFinanceEntry: (entry: FinanceEntryInput) =>
     request<{ entry: FinanceEntry }>('/finance', 'POST', entry),

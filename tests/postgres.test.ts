@@ -126,6 +126,21 @@ test('pg-mem: explicit migrations are repeatable and do not overwrite settings',
   );
 });
 
+test('pg-mem: habits persist across repository instances and reject stale updates', async (t) => {
+  const h = await fixture(t);
+  const created = await h.store.createHabit({ title: 'Вода' });
+  const second = new PostgresStore(h.pool, { now: h.now });
+  assert.equal((await second.habits())[0].id, created.id);
+  const marked = await second.setHabitDay(created.id, created.startDate, true, created.updatedAt);
+  assert.deepEqual((await h.store.habits())[0].completedDates, [created.startDate]);
+  await assert.rejects(
+    () => h.store.updateHabit(created.id, { title: 'Зарядка' }, created.updatedAt),
+    (error: unknown) => error instanceof AppError && error.status === 409,
+  );
+  await h.store.deleteHabit(created.id, marked.updatedAt);
+  assert.deepEqual(await second.habits(), []);
+});
+
 test('pg-mem: finance records persist separately from tasks and reject invalid changes', async (t) => {
   const { store } = await fixture(t);
   const income = await store.createFinanceEntry({

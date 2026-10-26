@@ -4,6 +4,7 @@ import {
   Check,
   CircleAlert,
   LayoutDashboard,
+  ListChecks,
   LoaderCircle,
   Moon,
   WalletCards,
@@ -34,6 +35,7 @@ import { SettingsPage } from './features/SettingsPage';
 import { AssistantPage } from './features/AssistantPage';
 import { DashboardPage } from './components/DashboardPage';
 import { FinancePage } from './features/FinancePage';
+import { HabitsPage } from './features/HabitsPage';
 import { TaskDialog } from './components/TaskDialog';
 import { LoginPage } from './features/LoginPage';
 import { GoogleEventDialog } from './components/GoogleEventDialog';
@@ -45,10 +47,11 @@ import {
   googleEventDraft,
 } from './features/google-occurrences';
 
-type Page = 'day' | 'calendar' | 'assistant' | 'finance' | 'settings' | 'login-preview';
+type Page = 'day' | 'calendar' | 'habits' | 'assistant' | 'finance' | 'settings' | 'login-preview';
 const navigation = [
   { id: 'day' as const, label: 'Мой день', icon: LayoutDashboard },
   { id: 'calendar' as const, label: 'Календарь', icon: CalendarDays },
+  { id: 'habits' as const, label: 'Привычки', icon: ListChecks },
   { id: 'assistant' as const, label: 'ИИ-помощник', icon: Sparkles },
   { id: 'finance' as const, label: 'Финансы', icon: WalletCards },
   { id: 'settings' as const, label: 'Настройки', icon: Settings2 },
@@ -860,6 +863,9 @@ export default function App() {
           </Activity>
           <Activity mode={page === 'finance' ? 'visible' : 'hidden'}>
             <FinancePage active={page === 'finance'} />
+          </Activity>
+          <Activity mode={page === 'habits' ? 'visible' : 'hidden'}>
+            <HabitsPage active={page === 'habits'} timeZone={data.settings.timeZone} />
           </Activity>
           <Activity mode={page === 'settings' ? 'visible' : 'hidden'}>
             <SettingsPage

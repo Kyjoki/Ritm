@@ -1,0 +1,224 @@
+.habits-page {
+  max-width: 1000px;
+}
+.habits-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 23px 26px;
+  background: var(--hero);
+  color: #f7efff;
+}
+.habits-summary .card-eyebrow {
+  color: #e3d3f6;
+  display: block;
+  margin-bottom: 7px;
+}
+.habits-summary strong {
+  display: block;
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: -0.055em;
+}
+.habits-summary strong span {
+  font-size: 19px;
+  opacity: 0.7;
+}
+.habits-summary-date {
+  font-size: 12px;
+  text-align: right;
+}
+.habits-add {
+  padding: 20px 24px;
+  margin-top: 17px;
+}
+.habits-add-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+.habits-add-row input {
+  flex: 1;
+}
+.habits-error {
+  margin-top: 16px;
+  padding: 12px 15px;
+  border: 1px solid var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-radius: 12px;
+  font-size: 12px;
+}
+.habits-error .text-button {
+  color: inherit;
+  margin-left: 8px;
+}
+.habits-week-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin: 29px 0 14px;
+}
+.habits-week-heading h2 {
+  font-size: 17px;
+}
+.habits-week-heading span {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.habits-list {
+  display: grid;
+  gap: 13px;
+}
+.habit-card {
+  padding: 20px 24px;
+}
+.habit-card-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.habit-card-head h2 {
+  font-size: 16px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.habit-card-head .icon-button {
+  width: 35px;
+  height: 35px;
+}
+.habit-streak {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.habit-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 20px;
+}
+.habit-day {
+  min-width: 0;
+  min-height: 82px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  gap: 3px;
+  padding: 10px 3px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: var(--field);
+}
+.habit-day:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--soft);
+}
+.habit-day:active:not(:disabled) {
+  transform: scale(0.95);
+}
+.habit-day > span:first-child {
+  color: var(--muted);
+  font-size: 10px;
+}
+.habit-day strong {
+  font-size: 15px;
+  font-weight: 600;
+}
+.habit-day-mark {
+  width: 19px;
+  height: 19px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  color: transparent;
+}
+.habit-day.is-today {
+  border-color: var(--accent);
+}
+.habit-day.is-done {
+  background: var(--soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.habit-day.is-done .habit-day-mark {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.habit-day:disabled {
+  opacity: 0.4;
+}
+.habits-empty {
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  text-align: center;
+  color: var(--muted);
+  padding: 25px;
+}
+.habits-empty h2 {
+  color: var(--text);
+}
+.habits-empty p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.habits-dialog-actions {
+  justify-content: flex-end;
+  margin-top: 22px;
+}
+@media (max-width: 600px) {
+  .habits-summary {
+    padding: 19px;
+  }
+  .habits-summary-date {
+    max-width: 120px;
+  }
+  .habits-add {
+    padding: 17px;
+  }
+  .habits-add-row .button {
+    width: 46px;
+    padding: 10px;
+  }
+  .habits-add-row .button span {
+    display: none;
+  }
+  .habit-card {
+    padding: 16px 12px;
+  }
+  .habit-days {
+    gap: 4px;
+  }
+  .habit-day {
+    min-height: 72px;
+    border-radius: 9px;
+  }
+  .habit-day > span:first-child {
+    font-size: 9px;
+  }
+  .habits-week-heading {
+    margin-top: 24px;
+  }
+}
+@media (prefers-contrast: more) {
+  .habit-day.is-done {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+}

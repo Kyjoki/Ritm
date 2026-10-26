@@ -15,10 +15,13 @@ import type {
   GoogleTransferResult,
   FinanceEntry,
   FinanceEntryInput,
+  Habit,
+  HabitInput,
 } from '../shared/types.ts';
 import { AppError, conflict, missing } from './errors.ts';
 import {
   financeEntryInputSchema,
+  habitInputSchema,
   minutes,
   scheduleInPast,
   taskInputSchema,
@@ -27,12 +30,14 @@ import {
 import {
   assertWorkspaceStorage,
   assertFinanceStorage,
+  assertHabitStorage,
   assertTransferTask,
   assertTransferSnapshot,
   assertTransferConnection,
   googleTransferKey,
   type GoogleTransferReceipt,
 } from './repository.ts';
+import { assertHabitDay, assertHabitVersion } from './habits.ts';
 
 export const defaultSettings: Settings = {
   displayName: 'Максим',
@@ -183,6 +188,74 @@ export class Store {
         'INSERT INTO config(key,json) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET json=excluded.json',
       )
       .run(key, JSON.stringify(value));
+  }
+  habits(): Habit[] {
+    const row = this.db.prepare("SELECT json FROM config WHERE key='habits'").get();
+    return row ? (JSON.parse(String(row.json)) as Habit[]) : [];
+  }
+  private writeHabits(habits: Habit[]) {
+    assertHabitStorage(habits);
+    this.writeConfig('habits', habits);
+  }
+  createHabit(input: HabitInput): Habit {
+    const fields = habitInputSchema.parse(input);
+    return this.transaction(() => {
+      const habits = this.habits();
+      if (habits.length >= 100)
+        throw new AppError(400, 'HABIT_LIMIT', 'Достигнут предел в 100 привычек.');
+      const now = this.stamp();
+      const habit: Habit = {
+        ...fields,
+        id: randomUUID(),
+        startDate: localDate(new Date(), this.settings().timeZone),
+        completedDates: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.writeHabits(habits.concat(habit));
+      return habit;
+    });
+  }
+  updateHabit(id: string, input: HabitInput, expectedUpdatedAt: string): Habit {
+    const fields = habitInputSchema.parse(input);
+    return this.transaction(() => {
+      const habits = this.habits();
+      const current = habits.find((habit) => habit.id === id);
+      if (!current) throw new AppError(404, 'NOT_FOUND', 'Привычка не найдена. Обновите страницу.');
+      assertHabitVersion(current, expectedUpdatedAt);
+      const habit = { ...current, ...fields, updatedAt: this.stamp(current.updatedAt) };
+      this.writeHabits(habits.map((item) => (item.id === id ? habit : item)));
+      return habit;
+    });
+  }
+  setHabitDay(id: string, date: string, completed: boolean, expectedUpdatedAt: string): Habit {
+    return this.transaction(() => {
+      const habits = this.habits();
+      const current = habits.find((habit) => habit.id === id);
+      if (!current) throw new AppError(404, 'NOT_FOUND', 'Привычка не найдена. Обновите страницу.');
+      assertHabitVersion(current, expectedUpdatedAt);
+      assertHabitDay(current, date, localDate(new Date(), this.settings().timeZone));
+      if (current.completedDates.includes(date) === completed) return current;
+      const dates = new Set(current.completedDates);
+      if (completed) dates.add(date);
+      else dates.delete(date);
+      const habit = {
+        ...current,
+        completedDates: [...dates].sort(),
+        updatedAt: this.stamp(current.updatedAt),
+      };
+      this.writeHabits(habits.map((item) => (item.id === id ? habit : item)));
+      return habit;
+    });
+  }
+  deleteHabit(id: string, expectedUpdatedAt: string): void {
+    this.transaction(() => {
+      const habits = this.habits();
+      const current = habits.find((habit) => habit.id === id);
+      if (!current) throw new AppError(404, 'NOT_FOUND', 'Привычка не найдена. Обновите страницу.');
+      assertHabitVersion(current, expectedUpdatedAt);
+      this.writeHabits(habits.filter((habit) => habit.id !== id));
+    });
   }
   financeEntries(): FinanceEntry[] {
     return this.db

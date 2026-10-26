@@ -10,12 +10,19 @@ import type {
   GoogleCalendarEvent,
   FinanceEntry,
   FinanceEntryInput,
+  Habit,
+  HabitInput,
 } from '../shared/types.ts';
 import { AppError } from './errors.ts';
 
 /** UTF-8 bytes of the active task/history JSON sent to the client. */
 export const MAX_WORKSPACE_BYTES = 8 * 1024 * 1024;
 export const MAX_FINANCE_BYTES = 2 * 1024 * 1024;
+export const MAX_HABITS_BYTES = 512 * 1024;
+export function assertHabitStorage(habits: Habit[]) {
+  if (Buffer.byteLength(JSON.stringify(habits), 'utf8') > MAX_HABITS_BYTES)
+    throw new AppError(400, 'HABIT_STORAGE_LIMIT', 'Хранилище привычек заполнено.');
+}
 export function assertFinanceStorage(entries: FinanceEntry[]) {
   if (Buffer.byteLength(JSON.stringify(entries), 'utf8') > MAX_FINANCE_BYTES)
     throw new AppError(
@@ -120,6 +127,16 @@ export interface RuntimeStateRepository {
 }
 
 export interface WorkspaceRepository {
+  habits(): Awaitable<Habit[]>;
+  createHabit(input: HabitInput): Awaitable<Habit>;
+  updateHabit(id: string, input: HabitInput, expectedUpdatedAt: string): Awaitable<Habit>;
+  setHabitDay(
+    id: string,
+    date: string,
+    completed: boolean,
+    expectedUpdatedAt: string,
+  ): Awaitable<Habit>;
+  deleteHabit(id: string, expectedUpdatedAt: string): Awaitable<void>;
   financeEntries(): Awaitable<FinanceEntry[]>;
   createFinanceEntry(input: FinanceEntryInput): Awaitable<FinanceEntry>;
   updateFinanceEntry(

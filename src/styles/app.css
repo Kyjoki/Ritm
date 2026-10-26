@@ -1594,7 +1594,7 @@ textarea::placeholder {
   }
   .mobile-nav {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     position: fixed;
     z-index: 25;
     bottom: 0;
@@ -1617,7 +1617,7 @@ textarea::placeholder {
     padding: 5px 2px;
     min-height: 48px;
     border-radius: 12px;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 500;
   }
   .mobile-nav button.is-active {

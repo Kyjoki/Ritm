@@ -83,6 +83,7 @@ export const taskPatchSchema = taskFields
     'Нет изменений или не указано выполнение.',
   );
 export const idSchema = z.string().uuid();
+export const habitInputSchema = z.object({ title: z.string().trim().min(1).max(80) }).strict();
 const financeCurrencySchema = z.enum(['KZT', 'USD', 'EUR', 'RUB']);
 const financeAmountSchema = z.number().int().safe().min(0).max(1_000_000_000_000);
 export const financeEntryInputSchema = z.discriminatedUnion('type', [

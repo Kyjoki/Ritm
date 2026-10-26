@@ -13,10 +13,13 @@ import type {
   GoogleTransferResult,
   FinanceEntry,
   FinanceEntryInput,
+  Habit,
+  HabitInput,
 } from '../shared/types.ts';
 import { AppError, conflict, missing } from './errors.ts';
 import {
   financeEntryInputSchema,
+  habitInputSchema,
   minutes,
   scheduleInPast,
   taskInputSchema,
@@ -31,12 +34,15 @@ import type {
 import {
   assertWorkspaceStorage,
   assertFinanceStorage,
+  assertHabitStorage,
   assertTransferTask,
   assertTransferSnapshot,
   assertTransferConnection,
   googleTransferKey,
   type GoogleTransferReceipt,
 } from './repository.ts';
+import { assertHabitDay, assertHabitVersion } from './habits.ts';
+import { localDate } from './store.ts';
 
 const { Pool } = pg;
 type Connection = Pick<PgPool | PoolClient, 'query'>;
@@ -208,6 +214,98 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
         const bDate = 'date' in b ? b.date : b.asOf;
         return bDate.localeCompare(aDate) || b.createdAt.localeCompare(a.createdAt);
       });
+  }
+  private async listHabits(client: Connection): Promise<Habit[]> {
+    const result = await client.query("SELECT json FROM ritm_config WHERE key = 'habits'");
+    return result.rows[0] ? decoded<Habit[]>(result.rows[0].json) : [];
+  }
+  private async writeHabits(client: Connection, habits: Habit[]) {
+    assertHabitStorage(habits);
+    await client.query(
+      "INSERT INTO ritm_config(key,json) VALUES('habits',$1::jsonb) ON CONFLICT(key) DO UPDATE SET json=EXCLUDED.json",
+      [JSON.stringify(habits)],
+    );
+  }
+  async habits(): Promise<Habit[]> {
+    return this.listHabits(this.pool);
+  }
+  async createHabit(input: HabitInput): Promise<Habit> {
+    const fields = habitInputSchema.parse(input);
+    return this.transaction(async (client) => {
+      const habits = await this.listHabits(client);
+      if (habits.length >= 100)
+        throw new AppError(400, 'HABIT_LIMIT', 'Достигнут предел в 100 привычек.');
+      const now = this.stamp();
+      const habit: Habit = {
+        ...fields,
+        id: randomUUID(),
+        startDate: localDate(new Date(this.clock()), (await this.readSettings(client)).timeZone),
+        completedDates: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+      await this.writeHabits(client, habits.concat(habit));
+      return habit;
+    });
+  }
+  async updateHabit(id: string, input: HabitInput, expectedUpdatedAt: string): Promise<Habit> {
+    const fields = habitInputSchema.parse(input);
+    return this.transaction(async (client) => {
+      const habits = await this.listHabits(client);
+      const current = habits.find((habit) => habit.id === id);
+      if (!current) throw new AppError(404, 'NOT_FOUND', 'Привычка не найдена. Обновите страницу.');
+      assertHabitVersion(current, expectedUpdatedAt);
+      const habit = { ...current, ...fields, updatedAt: this.stamp(current.updatedAt) };
+      await this.writeHabits(
+        client,
+        habits.map((item) => (item.id === id ? habit : item)),
+      );
+      return habit;
+    });
+  }
+  async setHabitDay(
+    id: string,
+    date: string,
+    completed: boolean,
+    expectedUpdatedAt: string,
+  ): Promise<Habit> {
+    return this.transaction(async (client) => {
+      const habits = await this.listHabits(client);
+      const current = habits.find((habit) => habit.id === id);
+      if (!current) throw new AppError(404, 'NOT_FOUND', 'Привычка не найдена. Обновите страницу.');
+      assertHabitVersion(current, expectedUpdatedAt);
+      assertHabitDay(
+        current,
+        date,
+        localDate(new Date(this.clock()), (await this.readSettings(client)).timeZone),
+      );
+      if (current.completedDates.includes(date) === completed) return current;
+      const dates = new Set(current.completedDates);
+      if (completed) dates.add(date);
+      else dates.delete(date);
+      const habit = {
+        ...current,
+        completedDates: [...dates].sort(),
+        updatedAt: this.stamp(current.updatedAt),
+      };
+      await this.writeHabits(
+        client,
+        habits.map((item) => (item.id === id ? habit : item)),
+      );
+      return habit;
+    });
+  }
+  async deleteHabit(id: string, expectedUpdatedAt: string): Promise<void> {
+    await this.transaction(async (client) => {
+      const habits = await this.listHabits(client);
+      const current = habits.find((habit) => habit.id === id);
+      if (!current) throw new AppError(404, 'NOT_FOUND', 'Привычка не найдена. Обновите страницу.');
+      assertHabitVersion(current, expectedUpdatedAt);
+      await this.writeHabits(
+        client,
+        habits.filter((habit) => habit.id !== id),
+      );
+    });
   }
   async financeEntries(): Promise<FinanceEntry[]> {
     return this.listFinanceEntries(this.pool);

@@ -20,6 +20,14 @@ export function requestLanguage(header?: string): Language {
 
 // Only server-authored status/error text is translated. Personal text is never passed here.
 const messages: Record<string, string> = {
+  'Проверьте название привычки и выбранную дату.': 'Check the habit name and selected date.',
+  'Привычка не найдена. Обновите страницу.': 'Habit not found. Refresh the page.',
+  'Привычка изменилась. Обновите данные и повторите действие.':
+    'This habit changed. Refresh your data and try again.',
+  'Можно отметить только прошедший день с даты создания привычки.':
+    'You can only mark days from the habit start date through today.',
+  'Достигнут предел в 100 привычек.': 'The 100 habit limit has been reached.',
+  'Хранилище привычек заполнено.': 'Habit storage is full.',
   'Проверьте сумму, валюту, дату и описание финансовой записи.':
     'Check the amount, currency, date and details of the finance entry.',
   'Финансовая запись не найдена. Обновите страницу.': 'Finance entry not found. Refresh the page.',

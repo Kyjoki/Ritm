@@ -4,6 +4,17 @@ export type Priority = 'low' | 'normal' | 'high';
 export type Repeat = 'none' | 'daily' | 'weekly' | 'monthly';
 export type TaskKind = 'task' | 'event';
 
+export interface HabitInput {
+  title: string;
+}
+export interface Habit extends HabitInput {
+  id: string;
+  startDate: string;
+  completedDates: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** Finance amounts use integer hundredths for the four supported currencies. */
 export type FinanceCurrency = 'KZT' | 'USD' | 'EUR' | 'RUB';
 export type FinanceEntryInput =
