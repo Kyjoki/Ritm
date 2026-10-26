@@ -5,6 +5,9 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
+  transition:
+    background-color var(--motion-page) ease,
+    color var(--motion-page) ease;
 }
 @media (min-width: 1200px) {
   html {
@@ -30,13 +33,14 @@ button:disabled {
 }
 button {
   transition:
-    background 0.18s,
-    box-shadow 0.18s,
-    transform 0.18s,
-    border-color 0.18s;
+    background-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    transform var(--motion-press) var(--motion-ease),
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease;
 }
 button:active:not(:disabled) {
-  transform: scale(0.98);
+  transform: scale(0.97);
 }
 button:focus-visible,
 a:focus-visible,
@@ -179,6 +183,10 @@ textarea::placeholder {
   border-color: #c296ee33;
   box-shadow: 0 0 24px #bc92e308;
 }
+.sidebar-nav > button.is-active > svg,
+.mobile-nav button.is-active > svg {
+  animation: ritm-nav-settle var(--motion-fast) var(--motion-ease) both;
+}
 .nav-dot {
   width: 5px;
   height: 5px;
@@ -290,7 +298,50 @@ textarea::placeholder {
 .page-container {
   max-width: 1240px;
   margin: auto;
-  animation: page-enter 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.page-container[data-page='day'] .dashboard-page,
+.page-container[data-page='calendar'] .cal-page,
+.page-container[data-page='habits'] .habits-page,
+.page-container[data-page='assistant'] .assistant-page,
+.page-container[data-page='finance'] .finance-page,
+.page-container[data-page='settings'] .settings-page {
+  animation: page-enter var(--motion-page) ease-out both;
+}
+.page-container[data-visit='return'] .dashboard-page,
+.page-container[data-visit='return'] .cal-page,
+.page-container[data-visit='return'] .habits-page,
+.page-container[data-visit='return'] .assistant-page,
+.page-container[data-visit='return'] .finance-page,
+.page-container[data-visit='return'] .settings-page {
+  animation-duration: var(--motion-fast);
+}
+.page-container[data-page='day'][data-visit='first'] .dashboard-page > .page-heading,
+.page-container[data-page='day'][data-visit='first'] .overview-grid > .panel,
+.page-container[data-page='day'][data-visit='first'] .day-work-grid > .panel,
+.page-container[data-page='day'][data-visit='first'] .dashboard-habits,
+.page-container[data-page='day'][data-visit='first'] .dashboard-bottom,
+.page-container[data-page='day'][data-visit='first'] .ai-dock {
+  animation: ritm-group-enter var(--motion-reveal) var(--motion-ease) both;
+}
+.page-container[data-page='day'][data-visit='first'] .overview-grid > .panel:nth-child(1) {
+  animation-delay: var(--motion-stagger);
+}
+.page-container[data-page='day'][data-visit='first'] .overview-grid > .panel:nth-child(2) {
+  animation-delay: calc(var(--motion-stagger) * 2);
+}
+.page-container[data-page='day'][data-visit='first'] .overview-grid > .panel:nth-child(3) {
+  animation-delay: calc(var(--motion-stagger) * 3);
+}
+.page-container[data-page='day'][data-visit='first'] .day-work-grid > .panel:nth-child(1) {
+  animation-delay: calc(var(--motion-stagger) * 4);
+}
+.page-container[data-page='day'][data-visit='first'] .day-work-grid > .panel:nth-child(2) {
+  animation-delay: calc(var(--motion-stagger) * 5);
+}
+.page-container[data-page='day'][data-visit='first'] .dashboard-habits,
+.page-container[data-page='day'][data-visit='first'] .dashboard-bottom,
+.page-container[data-page='day'][data-visit='first'] .ai-dock {
+  animation-delay: calc(var(--motion-stagger) * 6);
 }
 .page-heading {
   display: flex;
@@ -438,6 +489,15 @@ textarea::placeholder {
   background: conic-gradient(var(--accent) 0deg var(--progress), var(--ring-track) var(--progress));
   position: relative;
   color: var(--accent);
+  transition: --progress var(--motion-chart) var(--motion-ease);
+}
+@property --progress {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+.page-container[data-page='day'][data-visit='first'] .progress-ring {
+  animation: progress-ring-reveal var(--motion-chart) var(--motion-ease) both;
 }
 .progress-ring:before {
   content: '';
@@ -605,6 +665,7 @@ textarea::placeholder {
   padding: 12px 0;
   border-top: 1px solid var(--line);
   min-height: 78px;
+  animation: ritm-row-enter var(--motion-page) var(--motion-ease) both;
 }
 .check-target {
   width: 35px;
@@ -625,11 +686,21 @@ textarea::placeholder {
   border-radius: 6px;
   display: grid;
   place-items: center;
+  transition:
+    background-color var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    transform var(--motion-press) var(--motion-ease);
 }
 .is-complete .task-checkbox {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-ink);
+}
+.is-complete .task-checkbox svg {
+  animation: ritm-check-enter var(--motion-fast) var(--motion-ease) both;
+}
+.task-title {
+  transition: color var(--motion-fast) ease;
 }
 .task-copy {
   flex: 1;
@@ -952,11 +1023,12 @@ textarea::placeholder {
   overflow: auto;
   scroll-padding-block: 95px;
   box-shadow: 0 30px 100px #110e254a;
-  animation: dialog-enter 0.2s ease both;
+  animation: dialog-enter var(--motion-fast) var(--motion-ease) both;
 }
 .dialog::backdrop {
   background: #110c244d;
   backdrop-filter: blur(5px);
+  animation: dialog-backdrop-enter var(--motion-fast) ease-out both;
 }
 .dialog.is-closing {
   animation: dialog-exit 0.18s ease-in both;
@@ -1076,7 +1148,7 @@ textarea::placeholder {
   box-shadow: 0 12px 40px #17102624;
   max-width: calc(100% - 260px);
   font-size: 12px;
-  animation: toast-enter 0.2s ease;
+  animation: toast-enter var(--motion-fast) var(--motion-ease) both;
 }
 .toast > svg {
   color: var(--accent);
@@ -1234,11 +1306,52 @@ textarea::placeholder {
 @keyframes page-enter {
   from {
     opacity: 0;
-    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes ritm-group-enter {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-rise));
   }
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+@keyframes ritm-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes ritm-check-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes ritm-nav-settle {
+  from {
+    transform: scale(0.88);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+@keyframes progress-ring-reveal {
+  from {
+    --progress: 0deg;
   }
 }
 @keyframes dialog-enter {
@@ -1262,14 +1375,22 @@ textarea::placeholder {
     opacity: 0;
   }
 }
-@keyframes toast-enter {
+@keyframes dialog-backdrop-enter {
   from {
     opacity: 0;
-    margin-bottom: -8px;
   }
   to {
     opacity: 1;
-    margin-bottom: 0;
+  }
+}
+@keyframes toast-enter {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
   }
 }
 @keyframes shimmer {
@@ -1726,7 +1847,38 @@ textarea::placeholder {
     grid-template-columns: 1fr;
   }
   .mobile-nav button {
-    font-size: 11px;
+    font-size: 9px;
+    letter-spacing: -0.02em;
+  }
+  .mobile-nav button span {
+    max-width: 100%;
+    line-height: 1.1;
+    overflow-wrap: anywhere;
+    text-align: center;
+  }
+}
+@media (max-width: 760px) {
+  .page-container[data-page='day'][data-visit='first'] .overview-grid > .panel,
+  .page-container[data-page='day'][data-visit='first'] .day-work-grid > .panel {
+    animation: none;
+  }
+  .page-container[data-page='day'][data-visit='first'] .overview-grid,
+  .page-container[data-page='day'][data-visit='first'] .day-work-grid {
+    animation: ritm-group-enter var(--motion-reveal) var(--motion-ease) both;
+  }
+  .page-container[data-page='day'][data-visit='first'] .overview-grid {
+    animation-delay: var(--motion-stagger);
+  }
+  .page-container[data-page='day'][data-visit='first'] .day-work-grid {
+    animation-delay: calc(var(--motion-stagger) * 2);
+  }
+  .page-container[data-page='day'][data-visit='first'] .dashboard-habits,
+  .page-container[data-page='day'][data-visit='first'] .dashboard-bottom,
+  .page-container[data-page='day'][data-visit='first'] .ai-dock {
+    animation-delay: calc(var(--motion-stagger) * 3);
+  }
+  .task-row {
+    animation-duration: var(--motion-fast);
   }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -28,8 +28,10 @@ import { Dialog } from '../components/Dialog';
 import { GoogleSetupDialog } from '../components/GoogleSetupDialog';
 import { TelegramConnection } from '../components/TelegramConnection';
 import '../styles/calendar-settings.css';
+import '../styles/settings-motion.css';
 
 interface SettingsPageProps {
+  active?: boolean;
   settings: Settings;
   aiStatus: AiStatus;
   googleStatus: GoogleCalendarStatus;
@@ -65,6 +67,7 @@ function errorText(error: unknown, t: ReturnType<typeof useI18n>['t']): string {
 }
 
 export function SettingsPage({
+  active = true,
   settings,
   aiStatus,
   googleStatus,
@@ -82,6 +85,8 @@ export function SettingsPage({
   const [draft, setDraft] = useState<Settings>(settings);
   const [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saved' | 'error'>('idle');
+  const [motionEntry, setMotionEntry] = useState<'first' | 'return'>('first');
+  const hasBeenActive = useRef(false);
   const [error, setError] = useState('');
   const [notificationError, setNotificationError] = useState('');
   const [permissionBusy, setPermissionBusy] = useState(false);
@@ -103,6 +108,10 @@ export function SettingsPage({
   const secretInputRef = useRef<HTMLInputElement>(null);
   const titleId = useId();
   const previousSettings = useRef(settings);
+  useEffect(() => {
+    if (active) hasBeenActive.current = true;
+    else if (hasBeenActive.current) setMotionEntry('return');
+  }, [active]);
   async function googleAction(disconnect = false, extendedColors?: boolean) {
     setGoogleBusy(true);
     setGoogleError('');
@@ -283,7 +292,7 @@ export function SettingsPage({
   }
 
   return (
-    <div className="settings-page">
+    <div className="settings-page" data-motion-active={active} data-motion-entry={motionEntry}>
       <header className="page-heading">
         <div>
           <p className="page-eyebrow">{t('Ritm под твой образ жизни')}</p>
@@ -707,6 +716,7 @@ export function SettingsPage({
         <div className="settings-save-bar">
           <div
             className={`settings-save-status ${saveState === 'error' ? 'settings-error-status' : ''}`}
+            data-state={saving ? 'saving' : error ? 'error' : dirty ? 'dirty' : saveState}
             aria-live="polite"
           >
             {saving ? (

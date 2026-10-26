@@ -41,7 +41,7 @@
   color: var(--accent);
   font-size: 13px;
   font-weight: 650;
-  animation: habit-celebrate 420ms ease-out both;
+  animation: habit-celebrate var(--motion-reveal) var(--motion-ease) both;
 }
 .habits-analytics {
   margin-top: 24px;
@@ -409,6 +409,9 @@
 .habit-card-meta strong {
   color: var(--text);
 }
+.habit-card.is-record .habit-card-meta span:first-child {
+  animation: habit-record 850ms var(--motion-ease) both;
+}
 .habit-days-scroll {
   overflow-x: auto;
   margin-top: 18px;
@@ -464,6 +467,10 @@
   font-size: 13px;
   font-style: normal;
   font-weight: 700;
+  transition:
+    background-color var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    transform var(--motion-fast) var(--motion-ease);
 }
 .habit-day.is-done {
   border-color: var(--accent);
@@ -473,6 +480,7 @@
   border-color: var(--accent);
   color: var(--accent-ink);
   background: var(--accent);
+  animation: habit-check-enter var(--motion-fast) var(--motion-ease) both;
 }
 .habit-day.is-today {
   outline: 2px solid var(--accent);
@@ -679,7 +687,7 @@
 .is-entering .habits-analytics,
 .is-entering .habits-list-heading,
 .is-entering .habit-card {
-  animation: habit-reveal 550ms both;
+  animation: habit-reveal var(--motion-reveal) var(--motion-ease) both;
 }
 .is-entering .habits-analytics {
   animation-delay: 90ms;
@@ -697,17 +705,35 @@
   animation-delay: 350ms;
 }
 .is-entering .habits-bar-fill {
-  animation: habit-bar-grow 620ms backwards;
+  animation: habit-bar-grow var(--motion-chart) var(--motion-ease) backwards;
   transform-origin: bottom;
 }
 @keyframes habit-reveal {
   from {
     opacity: 0;
-    transform: translateY(9px);
+    transform: translateY(var(--motion-rise));
   }
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+@keyframes habit-check-enter {
+  from {
+    transform: scale(0.72);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+@keyframes habit-record {
+  0%,
+  100% {
+    color: var(--muted);
+  }
+  35% {
+    color: var(--accent);
+    transform: scale(1.05);
   }
 }
 @keyframes habit-bar-grow {
@@ -845,6 +871,10 @@
   .habits-heat-day,
   .habit-day {
     transition: none;
+  }
+  .habit-card.is-record .habit-card-meta span:first-child,
+  .habit-day.is-done i {
+    animation: none;
   }
 }
 @media (prefers-contrast: more) {

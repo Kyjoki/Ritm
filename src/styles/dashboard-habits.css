@@ -144,9 +144,6 @@
 .dashboard-habits-cell.is-today {
   background: var(--soft);
 }
-.dashboard-habits-cell:hover:not(:disabled) {
-  background: var(--hover);
-}
 .dashboard-habits-cell:active:not(:disabled) .dashboard-habits-mark {
   transform: scale(0.9);
 }
@@ -160,16 +157,26 @@
 }
 .dashboard-habits-mark {
   display: grid;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   place-items: center;
-  border: 1.5px solid var(--line);
+  border: 2px solid var(--accent);
   border-radius: 50%;
-  color: transparent;
+  background: var(--panel);
+  color: var(--accent);
   transition:
-    transform 180ms ease,
-    background-color 180ms ease,
-    border-color 180ms ease;
+    transform var(--motion-fast) var(--motion-ease),
+    background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) and (pointer: fine) {
+  .dashboard-habits-cell:hover:not(:disabled) {
+    background: var(--hover);
+  }
+  .dashboard-habits-cell:hover:not(:disabled) .dashboard-habits-mark {
+    transform: scale(1.08);
+    background: var(--soft);
+  }
 }
 .dashboard-habits-cell.is-done .dashboard-habits-mark {
   border-color: var(--accent);
@@ -177,11 +184,13 @@
   color: var(--accent-ink);
 }
 .dashboard-habits-cell.is-off .dashboard-habits-mark {
+  border-color: var(--line);
   border-style: dashed;
-  opacity: 0.45;
+  opacity: 0.72;
 }
 .dashboard-habits-cell.is-future .dashboard-habits-mark {
-  opacity: 0.28;
+  border-color: var(--line);
+  opacity: 0.66;
 }
 .dashboard-habits-empty {
   display: flex;

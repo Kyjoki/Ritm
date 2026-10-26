@@ -1,5 +1,12 @@
 import { useI18n } from '../lib/i18n';
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from 'react';
 import {
   ArrowRight,
   ArrowUp,
@@ -40,6 +47,7 @@ import {
 import '../styles/assistant.css';
 
 export interface AssistantPageProps {
+  active?: boolean;
   conversations: Conversation[];
   aiStatus: AiStatus;
   onCreate: () => Promise<Conversation>;
@@ -87,6 +95,7 @@ const prompts = [
     icon: MessageSquare,
   },
 ];
+const emptyMessages: ChatMessage[] = [];
 
 function getErrorMessage(error: unknown, t: ReturnType<typeof useI18n>['t']): string {
   const code =
@@ -457,6 +466,7 @@ function ProposalCard({ conversationId, message, onApply, onReject, onUndo }: Pr
 }
 
 export function AssistantPage({
+  active = true,
   conversations,
   aiStatus,
   onCreate,
@@ -483,6 +493,12 @@ export function AssistantPage({
   const [deleting, setDeleting] = useState(false);
   const [focusAfterDelete, setFocusAfterDelete] = useState<string | null | undefined>();
   const [pageError, setPageError] = useState('');
+  const [documentVisible, setDocumentVisible] = useState(
+    () => document.visibilityState === 'visible',
+  );
+  const [freshMessageIds, setFreshMessageIds] = useState<string[]>([]);
+  const [motionEntry, setMotionEntry] = useState<'first' | 'return'>('first');
+  const hasBeenActive = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLElement>(null);
@@ -497,7 +513,11 @@ export function AssistantPage({
   const composerFocusRequest = useRef<ComposerFocusRequest | null>(null);
   const focusAfterHistory = useRef(false);
   const conversation = conversations.find((item) => item.id === selectedId);
-  const messages = conversation?.messages ?? [];
+  const messages = conversation?.messages ?? emptyMessages;
+  const observedMessages = useRef({
+    conversationId: selectedId,
+    ids: new Set(messages.map((message) => message.id)),
+  });
   const selectedReview = messages.find(
     (message) => message.id === reviewMessageId && message.ideaReview,
   );
@@ -517,6 +537,42 @@ export function AssistantPage({
   const orderedConversations = [...conversations].sort((a, b) =>
     b.updatedAt.localeCompare(a.updatedAt),
   );
+
+  useEffect(() => {
+    if (active) hasBeenActive.current = true;
+    else if (hasBeenActive.current) {
+      setMotionEntry('return');
+      setFreshMessageIds([]);
+    }
+  }, [active]);
+
+  useEffect(() => {
+    const onVisibility = () => setDocumentVisible(document.visibilityState === 'visible');
+    onVisibility();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
+  useLayoutEffect(() => {
+    const ids = new Set(messages.map((message) => message.id));
+    const previous = observedMessages.current;
+    if (previous.conversationId !== selectedId) {
+      observedMessages.current = { conversationId: selectedId, ids };
+      setFreshMessageIds([]);
+      return;
+    }
+    const added = messages
+      .filter((message) => !previous.ids.has(message.id))
+      .map((message) => message.id);
+    observedMessages.current = { conversationId: selectedId, ids };
+    if (added.length) setFreshMessageIds(added.slice(-1));
+  }, [messages, selectedId]);
+
+  useEffect(() => {
+    if (!freshMessageIds.length) return;
+    const timer = window.setTimeout(() => setFreshMessageIds([]), 700);
+    return () => window.clearTimeout(timer);
+  }, [freshMessageIds]);
 
   useEffect(() => {
     if (request?.status !== 'failed' || !request.retryAt) return;
@@ -809,7 +865,11 @@ export function AssistantPage({
   }
 
   return (
-    <div className="assistant-page">
+    <div
+      className="assistant-page"
+      data-motion-active={active && documentVisible}
+      data-motion-entry={motionEntry}
+    >
       <header className="page-heading assistant-page-heading">
         <div>
           <p className="page-eyebrow">{t('Меньше рутины. Больше твоего времени.')}</p>
@@ -966,7 +1026,10 @@ export function AssistantPage({
         </aside>
         <section className="panel assistant-chat" aria-label={t('Диалог с помощником Ritm')}>
           <header className="assistant-chat-header">
-            <span className="assistant-orb" aria-hidden="true" />
+            <span
+              className={`assistant-orb${sending ? ' assistant-orb--processing' : ''}`}
+              aria-hidden="true"
+            />
             <div>
               <h2>{mode === 'idea_review' ? t('Разбор идей') : t('Помощник Ritm')}</h2>
               <p>
@@ -1085,7 +1148,7 @@ export function AssistantPage({
             >
               {messages.map((message) => (
                 <article
-                  className={`assistant-message assistant-message--${message.role}`}
+                  className={`assistant-message assistant-message--${message.role}${freshMessageIds.includes(message.id) ? ' assistant-message--fresh' : ''}`}
                   key={message.id}
                 >
                   <span className="assistant-message-author">
@@ -1143,7 +1206,10 @@ export function AssistantPage({
                   </article>
                   {visibleRequest.status === 'sending' ? (
                     <div className="assistant-waiting" role="status">
-                      <span className="assistant-orb assistant-orb--small" aria-hidden="true" />
+                      <span
+                        className="assistant-orb assistant-orb--small assistant-orb--processing"
+                        aria-hidden="true"
+                      />
                       <span>
                         {visibleRequest.mode === 'idea_review'
                           ? visibleRequest.reviewMessageId

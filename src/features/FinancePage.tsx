@@ -124,12 +124,17 @@ function Donut({
     <div className="finance-donut-wrap">
       <div
         className="finance-donut"
-        style={{ background: sectorBackground(items.map((item) => item.value)) }}
         role="img"
         aria-label={
           total ? items.map((item) => `${item.label}: ${format(item.value)}`).join(', ') : empty
         }
       >
+        <span
+          key={items.map((item) => item.value).join('-')}
+          className={`finance-donut-surface${total ? ' has-data' : ''}`}
+          style={{ background: sectorBackground(items.map((item) => item.value)) }}
+          aria-hidden="true"
+        />
         <div className="finance-donut-hole">
           <strong>{center}</strong>
           <span>{caption}</span>
@@ -176,6 +181,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
   );
   const [priceInput, setPriceInput] = useState('');
   const [priceDate, setPriceDate] = useState(localDate());
+  const [firstEntrance, setFirstEntrance] = useState(true);
 
   async function reload(initial = false) {
     if (initial) setLoading(true);
@@ -198,6 +204,11 @@ export function FinancePage({ active = true }: { active?: boolean }) {
   useEffect(() => {
     if (active) void reload(!hasLoaded.current);
   }, [active]);
+  useEffect(() => {
+    if (!active || loading || !firstEntrance) return;
+    const timer = window.setTimeout(() => setFirstEntrance(false), 650);
+    return () => window.clearTimeout(timer);
+  }, [active, loading, firstEntrance]);
 
   const money = (minor: number) =>
     new Intl.NumberFormat(locale, {
@@ -350,6 +361,37 @@ export function FinancePage({ active = true }: { active?: boolean }) {
         (!selectedDeposit || entry.id === selectedDeposit.id)) ||
       (view === 'stocks' && entry.type === 'stock'),
   );
+
+  const firstSummary =
+    view === 'account'
+      ? money(income)
+      : view === 'all'
+        ? accountBalance === null
+          ? '—'
+          : money(accountBalance)
+        : String(sectionCount);
+  const secondSummary =
+    view === 'stocks' && !stocksWithBasis.length
+      ? '—'
+      : money(
+          view === 'account'
+            ? expense
+            : view === 'all'
+              ? deposits
+              : view === 'deposits'
+                ? (selectedDeposit?.valueMinor ?? deposits)
+                : stockInvested,
+        );
+  const thirdSummary =
+    view === 'stocks'
+      ? stocksWithBasis.length
+        ? `${stockGain > 0 ? '+' : ''}${money(stockGain)}`
+        : '—'
+      : view === 'account'
+        ? money(income - expense)
+        : view === 'all'
+          ? money(stocks)
+          : currency;
 
   function openNew(
     type: Kind = view === 'deposits' ? 'deposit' : view === 'stocks' ? 'stock' : 'expense',
@@ -557,7 +599,9 @@ export function FinancePage({ active = true }: { active?: boolean }) {
   }
 
   return (
-    <div className={`finance-page${active ? ' finance-page-visible' : ''}`}>
+    <div
+      className={`finance-page${active ? ' finance-page-visible' : ''}${firstEntrance ? ' finance-first-enter' : ''}`}
+    >
       <header className="page-heading finance-heading">
         <div>
           <div className="page-eyebrow">{t('RITM · ЛИЧНЫЕ ФИНАНСЫ')}</div>
@@ -711,7 +755,9 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                 <Wallet size={21} />
               </div>
               <strong className="finance-hero-value">
-                {sectionTotal === null ? '—' : money(sectionTotal)}
+                <span key={`${view}-${currency}-${sectionTotal}`} className="finance-figure">
+                  {sectionTotal === null ? '—' : money(sectionTotal)}
+                </span>
               </strong>
               <p>
                 {t(
@@ -777,13 +823,9 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                   )}
                 </span>
                 <strong>
-                  {view === 'account'
-                    ? money(income)
-                    : view === 'all'
-                      ? accountBalance === null
-                        ? '—'
-                        : money(accountBalance)
-                      : sectionCount}
+                  <span key={firstSummary} className="finance-figure">
+                    {firstSummary}
+                  </span>
                 </strong>
               </div>
               <div className="panel finance-summary-tile">
@@ -802,17 +844,9 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                   )}
                 </span>
                 <strong>
-                  {view === 'stocks' && !stocksWithBasis.length
-                    ? '—'
-                    : money(
-                        view === 'account'
-                          ? expense
-                          : view === 'all'
-                            ? deposits
-                            : view === 'deposits'
-                              ? (selectedDeposit?.valueMinor ?? deposits)
-                              : stockInvested,
-                      )}
+                  <span key={secondSummary} className="finance-figure">
+                    {secondSummary}
+                  </span>
                 </strong>
                 {view === 'stocks' && stocksWithBasis.length < stockEntries.length && (
                   <small>
@@ -841,15 +875,9 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                   )}
                 </span>
                 <strong>
-                  {view === 'stocks'
-                    ? stocksWithBasis.length
-                      ? `${stockGain > 0 ? '+' : ''}${money(stockGain)}`
-                      : '—'
-                    : view === 'account'
-                      ? money(income - expense)
-                      : view === 'all'
-                        ? money(stocks)
-                        : currency}
+                  <span key={thirdSummary} className="finance-figure">
+                    {thirdSummary}
+                  </span>
                 </strong>
                 {view === 'stocks' && stocksWithBasis.length > 0 && stockInvested > 0 && (
                   <small className="finance-gain-percent">
@@ -889,21 +917,29 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                     )
                     .join('; ')}
                 >
-                  {monthly.map((month) => (
+                  {monthly.map((month, index) => (
                     <div className="finance-month" key={month.key}>
                       <div className="finance-month-bars">
                         <span
+                          key={`${month.key}-income-${month.income}`}
                           className="finance-bar income"
-                          style={{
-                            height: `${Math.max(month.income ? 3 : 0, (month.income / chartMax) * 100)}%`,
-                          }}
+                          style={
+                            {
+                              height: `${Math.max(month.income ? 3 : 0, (month.income / chartMax) * 100)}%`,
+                              '--finance-bar-delay': `${Math.min(index, 5) * 55}ms`,
+                            } as CSSProperties
+                          }
                           title={`${t('Поступления')}: ${money(month.income)}`}
                         />
                         <span
+                          key={`${month.key}-expense-${month.expense}`}
                           className="finance-bar expense"
-                          style={{
-                            height: `${Math.max(month.expense ? 3 : 0, (month.expense / chartMax) * 100)}%`,
-                          }}
+                          style={
+                            {
+                              height: `${Math.max(month.expense ? 3 : 0, (month.expense / chartMax) * 100)}%`,
+                              '--finance-bar-delay': `${Math.min(index, 5) * 55 + 65}ms`,
+                            } as CSSProperties
+                          }
                           title={`${t('Расходы')}: ${money(month.expense)}`}
                         />
                       </div>

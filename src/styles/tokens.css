@@ -20,10 +20,25 @@
   --cta: linear-gradient(125deg, #7651bc, #865ac1);
   --sidebar: linear-gradient(155deg, #211a32, #161321 78%);
   --title-gradient: linear-gradient(110deg, #4c2b78, #8250ba 65%, #7e66a9);
+  --motion-press: 130ms;
+  --motion-fast: 210ms;
+  --motion-page: 280ms;
+  --motion-reveal: 420ms;
+  --motion-chart: 780ms;
+  --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-rise: 10px;
+  --motion-stagger: 55ms;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+@media (max-width: 760px) {
+  :root {
+    --motion-page: 220ms;
+    --motion-reveal: 320ms;
+    --motion-rise: 5px;
+  }
 }
 :root[data-theme='dark'] {
   color-scheme: dark;

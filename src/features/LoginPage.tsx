@@ -1,5 +1,5 @@
 import { useI18n } from '../lib/i18n';
-import { useLayoutEffect, useState, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useState, type FormEvent } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -34,6 +34,9 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [capsLock, setCapsLock] = useState(false);
+  const [documentVisible, setDocumentVisible] = useState(
+    () => document.visibilityState === 'visible',
+  );
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
     document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light',
   );
@@ -45,6 +48,11 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
       else delete document.documentElement.dataset.theme;
     };
   }, [theme]);
+  useEffect(() => {
+    const onVisibility = () => setDocumentVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
@@ -66,7 +74,7 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
     }
   }
   return (
-    <div className="signin-page">
+    <div className="signin-page" data-document-visible={documentVisible}>
       <header className="signin-topbar">
         <span className="brand">
           <span className="brand-mark" aria-hidden="true">

@@ -179,7 +179,7 @@
   border-radius: 50%;
   background: conic-gradient(from 0deg, #b59afe, #d6bcff, #9d92e6, #c7a8f5, #b59afe);
   box-shadow: 0 0 24px rgba(175, 137, 232, 0.25);
-  animation: assistant-orb-turn 20s linear infinite;
+  animation: assistant-orb-turn 24s linear infinite;
 }
 .assistant-orb:after {
   content: '';
@@ -360,7 +360,10 @@
 .assistant-message {
   max-width: 100%;
   min-width: 0;
-  animation: assistant-message-in 0.2s ease both;
+}
+.assistant-message--fresh,
+.assistant-message--pending {
+  animation: assistant-message-in var(--motion-page, 280ms) var(--motion-ease, ease-out) both;
 }
 .assistant-message--user {
   margin-left: auto;
@@ -1323,4 +1326,95 @@
   padding-left: 22px;
   color: var(--text);
   line-height: 1.6;
+}
+
+/* Motion follows the actual request and never replays an existing conversation. */
+.assistant-orb--processing {
+  animation-duration: 3.8s;
+  box-shadow: 0 0 28px rgba(175, 137, 232, 0.42);
+}
+.assistant-page[data-motion-active='false'] .assistant-orb,
+.assistant-page[data-motion-active='false'] .assistant-thinking-dots i,
+.assistant-page[data-motion-active='false'] .assistant-spinner {
+  animation-play-state: paused;
+}
+.assistant-mode-switch button {
+  transition:
+    color var(--motion-fast, 200ms) ease,
+    background-color var(--motion-fast, 200ms) ease,
+    transform var(--motion-press, 130ms) ease;
+}
+.assistant-mode-switch button:active:not(:disabled) {
+  transform: scale(0.985);
+}
+.assistant-proposal {
+  transition:
+    background-color var(--motion-fast, 200ms) ease,
+    border-color var(--motion-fast, 200ms) ease;
+}
+.assistant-proposal-select input {
+  transition: transform var(--motion-press, 130ms) ease;
+}
+.assistant-proposal-select input:active:not(:disabled) {
+  transform: scale(0.9);
+}
+.assistant-message--fresh .assistant-proposals,
+.assistant-message--fresh .assistant-steps {
+  animation: assistant-detail-in var(--motion-reveal, 380ms) var(--motion-ease, ease-out) 65ms both;
+}
+.assistant-message--fresh .assistant-proposal:nth-child(2) {
+  animation: assistant-detail-in var(--motion-reveal, 380ms) var(--motion-ease, ease-out) 110ms both;
+}
+.assistant-message--fresh .assistant-proposal:nth-child(n + 3) {
+  animation: assistant-detail-in var(--motion-reveal, 380ms) var(--motion-ease, ease-out) 165ms both;
+}
+.assistant-page[data-motion-active='true'][data-motion-entry='first'] .assistant-welcome-spark,
+.assistant-page[data-motion-active='true'][data-motion-entry='first'] .assistant-welcome h3,
+.assistant-page[data-motion-active='true'][data-motion-entry='first'] .assistant-welcome > p {
+  animation: assistant-detail-in var(--motion-reveal, 380ms) var(--motion-ease, ease-out) both;
+}
+.assistant-page[data-motion-entry='first'] .assistant-welcome h3 {
+  animation-delay: 50ms;
+}
+.assistant-page[data-motion-entry='first'] .assistant-welcome > p {
+  animation-delay: 100ms;
+}
+.assistant-page[data-motion-active='true'] .assistant-welcome-prompts > button,
+.assistant-page[data-motion-active='true'] .assistant-idea-role {
+  animation: assistant-detail-in var(--motion-reveal, 380ms) var(--motion-ease, ease-out) both;
+}
+.assistant-page .assistant-welcome-prompts > button:nth-child(2),
+.assistant-page .assistant-idea-role:nth-child(2) {
+  animation-delay: 50ms;
+}
+.assistant-page .assistant-welcome-prompts > button:nth-child(3),
+.assistant-page .assistant-idea-role:nth-child(3) {
+  animation-delay: 100ms;
+}
+.assistant-page .assistant-welcome-prompts > button:nth-child(n + 4),
+.assistant-page .assistant-idea-role:nth-child(n + 4) {
+  animation-delay: 150ms;
+}
+@keyframes assistant-detail-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-rise, 10px));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (max-width: 800px) {
+  .assistant-history.panel.assistant-history--open {
+    animation: assistant-detail-in var(--motion-page, 280ms) var(--motion-ease, ease-out) both;
+  }
+  .assistant-page .assistant-welcome-prompts > button:nth-child(n + 3),
+  .assistant-page .assistant-idea-role:nth-child(n + 3) {
+    animation-delay: 100ms;
+  }
+  .assistant-message--fresh .assistant-proposals,
+  .assistant-message--fresh .assistant-steps {
+    animation-duration: var(--motion-page, 280ms);
+  }
 }

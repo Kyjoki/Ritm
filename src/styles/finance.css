@@ -9,8 +9,50 @@
   gap: 18px;
   padding-bottom: 24px;
 }
-.finance-page-visible {
-  animation: page-enter 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+.finance-page.finance-first-enter.finance-page-visible > .finance-heading,
+.finance-page.finance-first-enter.finance-page-visible > .finance-info-note,
+.finance-page.finance-first-enter.finance-page-visible > .finance-views,
+.finance-page.finance-first-enter.finance-page-visible > .finance-deposit-picker,
+.finance-page.finance-first-enter.finance-page-visible > .finance-top-grid,
+.finance-page.finance-first-enter.finance-page-visible > .finance-chart-grid,
+.finance-page.finance-first-enter.finance-page-visible > .finance-bottom-grid {
+  animation: finance-reveal var(--motion-reveal, 380ms) var(--motion-ease, ease-out) both;
+}
+.finance-page.finance-first-enter.finance-page-visible > .finance-info-note,
+.finance-page.finance-first-enter.finance-page-visible > .finance-views {
+  animation-delay: 45ms;
+}
+.finance-page.finance-first-enter.finance-page-visible > .finance-deposit-picker,
+.finance-page.finance-first-enter.finance-page-visible > .finance-top-grid {
+  animation-delay: 90ms;
+}
+.finance-page.finance-first-enter.finance-page-visible > .finance-chart-grid,
+.finance-page.finance-first-enter.finance-page-visible > .finance-bottom-grid {
+  animation-delay: 150ms;
+}
+.finance-figure {
+  display: inline-block;
+  animation: finance-value-arrive var(--motion-fast, 220ms) var(--motion-ease, ease-out) both;
+}
+@keyframes finance-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-rise, 10px));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes finance-value-arrive {
+  from {
+    opacity: 0.55;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .finance-heading {
   margin-bottom: 0;
@@ -70,9 +112,6 @@
   font-weight: 600;
   white-space: nowrap;
 }
-.finance-views button:hover {
-  color: var(--accent);
-}
 .finance-views button.active {
   color: var(--accent);
   background: var(--panel);
@@ -130,7 +169,6 @@
   color: var(--muted);
   font-size: 11px;
 }
-.finance-deposit-option:hover,
 .finance-deposit-option.active {
   border-color: var(--accent);
   background: var(--soft);
@@ -261,9 +299,6 @@
   color: #fff;
   font-size: 11px;
   font-weight: 650;
-}
-.finance-hero-action:hover {
-  background: #ffffff30;
 }
 .finance-overview-tiles {
   display: grid;
@@ -410,7 +445,18 @@
   width: min(26px, 35%);
   min-width: 4px;
   border-radius: 6px 6px 1px 1px;
-  transition: height 0.35s ease;
+  transform-origin: center bottom;
+  animation: finance-bar-rise var(--motion-chart, 760ms) var(--motion-ease, ease-out) both;
+  animation-delay: var(--finance-bar-delay, 0ms);
+  transition: height var(--motion-page, 300ms) var(--motion-ease, ease-out);
+}
+@keyframes finance-bar-rise {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
 }
 .finance-month-label {
   height: 20px;
@@ -434,6 +480,7 @@
   margin-top: 12px;
 }
 .finance-donut {
+  position: relative;
   width: clamp(144px, 16vw, 184px);
   aspect-ratio: 1;
   flex: none;
@@ -441,7 +488,33 @@
   padding: 15px;
   transform: rotate(-90deg);
 }
+.finance-donut-surface {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+@property --finance-sweep {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 360deg;
+}
+.finance-donut-surface.has-data {
+  mask-image: conic-gradient(
+    #000 0deg var(--finance-sweep),
+    transparent var(--finance-sweep) 360deg
+  );
+  animation: finance-donut-reveal var(--motion-chart, 760ms) var(--motion-ease, ease-out) both;
+}
+@keyframes finance-donut-reveal {
+  from {
+    --finance-sweep: 0deg;
+  }
+  to {
+    --finance-sweep: 360deg;
+  }
+}
 .finance-donut-hole {
+  position: relative;
   height: 100%;
   border-radius: 50%;
   background: var(--panel);
@@ -453,6 +526,11 @@
   transform: rotate(90deg);
   text-align: center;
   padding: 12px;
+}
+.finance-page:not(.finance-page-visible) .finance-bar,
+.finance-page:not(.finance-page-visible) .finance-donut-surface,
+.finance-page:not(.finance-page-visible) .finance-figure {
+  animation-play-state: paused;
 }
 .finance-donut-hole strong {
   font-size: 16px;
@@ -510,9 +588,6 @@
   border-radius: 10px;
   background: var(--field);
   color: var(--accent);
-}
-.finance-refresh:hover {
-  background: var(--soft);
 }
 .finance-record-list {
   display: grid;
@@ -595,10 +670,6 @@
   border-radius: 7px;
   font-size: 10px;
 }
-.finance-record-actions button:hover {
-  color: var(--accent);
-  background: var(--soft);
-}
 .finance-record-actions .finance-delete-confirm {
   color: var(--danger);
   font-weight: 650;
@@ -660,9 +731,28 @@
   font-size: 12px;
   text-decoration: none;
 }
-.finance-quote-link:hover,
-.finance-stock-details a:hover {
-  text-decoration: underline;
+@media (hover: hover) and (pointer: fine) {
+  .finance-views button:hover {
+    color: var(--accent);
+  }
+  .finance-deposit-option:hover {
+    border-color: var(--accent);
+    background: var(--soft);
+  }
+  .finance-hero-action:hover {
+    background: #ffffff30;
+  }
+  .finance-refresh:hover {
+    background: var(--soft);
+  }
+  .finance-record-actions button:hover {
+    color: var(--accent);
+    background: var(--soft);
+  }
+  .finance-quote-link:hover,
+  .finance-stock-details a:hover {
+    text-decoration: underline;
+  }
 }
 .finance-stock-details {
   display: flex;
@@ -764,6 +854,19 @@
 @media (max-width: 760px) {
   .finance-page {
     gap: 14px;
+  }
+  .finance-page {
+    --motion-rise: 5px;
+    --motion-chart: 600ms;
+  }
+  .finance-bar {
+    animation-delay: 0ms;
+  }
+  .finance-page.finance-first-enter.finance-page-visible > .finance-deposit-picker,
+  .finance-page.finance-first-enter.finance-page-visible > .finance-top-grid,
+  .finance-page.finance-first-enter.finance-page-visible > .finance-chart-grid,
+  .finance-page.finance-first-enter.finance-page-visible > .finance-bottom-grid {
+    animation-delay: 55ms;
   }
   .finance-heading {
     align-items: flex-start;
@@ -877,7 +980,17 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .finance-bar {
+  .finance-page.finance-first-enter.finance-page-visible > .finance-heading,
+  .finance-page.finance-first-enter.finance-page-visible > .finance-info-note,
+  .finance-page.finance-first-enter.finance-page-visible > .finance-views,
+  .finance-page.finance-first-enter.finance-page-visible > .finance-deposit-picker,
+  .finance-page.finance-first-enter.finance-page-visible > .finance-top-grid,
+  .finance-page.finance-first-enter.finance-page-visible > .finance-chart-grid,
+  .finance-page.finance-first-enter.finance-page-visible > .finance-bottom-grid,
+  .finance-figure,
+  .finance-bar,
+  .finance-donut-surface.has-data {
+    animation: none;
     transition: none;
   }
 }

@@ -362,6 +362,7 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
   const [intro, setIntro] = useState(false);
   const [introduced, setIntroduced] = useState(false);
   const [celebration, setCelebration] = useState<{ title: string; milestone: number } | null>(null);
+  const [recordId, setRecordId] = useState<string | null>(null);
   const activeHabits = habits.filter((habit) => !habit.archived);
   const archivedHabits = habits.filter((habit) => habit.archived);
   const visibleHabits = showArchived ? archivedHabits : activeHabits;
@@ -412,6 +413,11 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
     const timer = window.setTimeout(() => setCelebration(null), 2600);
     return () => window.clearTimeout(timer);
   }, [celebration]);
+  useEffect(() => {
+    if (!recordId) return;
+    const timer = window.setTimeout(() => setRecordId(null), 1050);
+    return () => window.clearTimeout(timer);
+  }, [recordId]);
   function replaceHabit(habit: Habit) {
     setHabits((current) => current.map((item) => (item.id === habit.id ? habit : item)));
   }
@@ -498,6 +504,12 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
         ? await api.setHabitProgress(habit.id, day, nextCount, habit.updatedAt)
         : await api.setHabitDay(habit.id, day, nextCount > 0, habit.updatedAt);
       replaceHabit(result.habit);
+      if (
+        !wasComplete &&
+        nextCount >= target &&
+        habitBestStreak(result.habit, today) > habitBestStreak(habit, today)
+      )
+        setRecordId(habit.id);
       if (!wasComplete && nextCount >= target) {
         const newMilestone = HABIT_MILESTONES.find(
           (milestone) =>
@@ -956,7 +968,10 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
                 const isScheduled = habitScheduledOn(habit, today);
                 const progress = habitProgress(habit, today);
                 return (
-                  <article className="habit-card panel" key={habit.id}>
+                  <article
+                    className={'habit-card panel' + (recordId === habit.id ? ' is-record' : '')}
+                    key={habit.id}
+                  >
                     <div className="habit-card-head">
                       <div className="habit-card-identity">
                         <span className="habit-card-icon">

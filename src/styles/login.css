@@ -193,17 +193,19 @@
   animation: signin-float 7s ease-in-out infinite;
 }
 .signin-mark-one {
+  --mark-tilt: -8deg;
   left: 15%;
   top: 28%;
-  transform: rotate(-8deg);
+  transform: rotate(var(--mark-tilt));
 }
 .signin-mark-two {
+  --mark-tilt: 7deg;
   right: 17%;
   bottom: 15%;
   width: 31px;
   height: 31px;
   animation-delay: -3s;
-  transform: rotate(7deg);
+  transform: rotate(var(--mark-tilt));
 }
 .signin-focus-card {
   position: relative;
@@ -485,6 +487,47 @@
   font-size: 11px;
   line-height: 1.5;
   margin: -3px 0 0;
+  animation: signin-error-in var(--motion-fast, 210ms) ease-out both;
+}
+.signin-topbar,
+.signin-visual-copy,
+.signin-focus-card,
+.signin-form-wrap {
+  animation: signin-arrive var(--motion-reveal, 420ms) var(--motion-ease, ease-out) both;
+}
+.signin-visual-copy {
+  animation-delay: 45ms;
+}
+.signin-form-wrap {
+  animation-delay: 0ms;
+}
+.signin-focus-card {
+  animation-delay: 145ms;
+}
+.signin-page[data-document-visible='false'] .signin-orbit,
+.signin-page[data-document-visible='false'] .signin-sphere,
+.signin-page[data-document-visible='false'] .signin-floating-mark {
+  animation-play-state: paused;
+}
+@keyframes signin-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-rise, 10px));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes signin-error-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .signin-caps {
   font-size: 10px;
@@ -500,25 +543,19 @@
 @keyframes signin-breathe {
   0%,
   100% {
-    box-shadow:
-      inset 4px 4px 17px rgba(247, 220, 255, 0.12),
-      inset -8px -5px 17px rgba(22, 13, 33, 0.7),
-      0 0 45px rgba(158, 100, 217, 0.12);
+    transform: translate(-50%, -50%) scale(1);
   }
   50% {
-    box-shadow:
-      inset 4px 4px 17px rgba(247, 220, 255, 0.17),
-      inset -8px -5px 17px rgba(22, 13, 33, 0.7),
-      0 0 65px rgba(158, 100, 217, 0.18);
+    transform: translate(-50%, -50%) scale(1.035);
   }
 }
 @keyframes signin-float {
   0%,
   100% {
-    margin-top: 0;
+    transform: rotate(var(--mark-tilt)) translateY(0);
   }
   50% {
-    margin-top: -7px;
+    transform: rotate(var(--mark-tilt)) translateY(-6px);
   }
 }
 @media (min-width: 1600px) {
@@ -704,7 +741,12 @@
 @media (prefers-reduced-motion: reduce) {
   .signin-orbit,
   .signin-sphere,
-  .signin-floating-mark {
+  .signin-floating-mark,
+  .signin-topbar,
+  .signin-visual-copy,
+  .signin-focus-card,
+  .signin-form-wrap,
+  .signin-error {
     animation: none;
   }
 }

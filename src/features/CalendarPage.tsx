@@ -1,5 +1,13 @@
 import { useI18n, translate, type Language } from '../lib/i18n';
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent,
+} from 'react';
 import {
   CalendarDays,
   Check,
@@ -80,6 +88,8 @@ const GRID_TIME_COLUMN = 62;
 const HOUR_HEIGHT = 48;
 const INITIAL_HOUR = 9;
 const EMPTY_GOOGLE_EVENTS: GoogleCalendarEvent[] = [];
+const MOTION_ENTRIES =
+  '.cal-grid-event, .cal-all-day-event, .cal-month-event, .cal-agenda-entry, .cal-month-dot';
 
 interface DragPreview {
   key: string;
@@ -213,9 +223,17 @@ export function CalendarPage({
   const gridScrollRef = useRef<HTMLDivElement>(null);
   const gridVisualRef = useRef<HTMLDivElement>(null);
   const allDayRef = useRef<HTMLDivElement>(null);
+  const motionPanelRef = useRef<HTMLElement>(null);
+  const periodHeadingRef = useRef<HTMLHeadingElement>(null);
+  const previousMotionPeriod = useRef<{ view: CalendarView; period: string } | null>(null);
   const dragCleanupRef = useRef<(() => void) | null>(null);
   const moveSavingRef = useRef(false);
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
+  const [dropFeedback, setDropFeedback] = useState<{
+    id: string;
+    date: string;
+    minutes: number | null;
+  } | null>(null);
   const scrolledPeriodRef = useRef<string | null>(null);
   const weekGesture = useRef<(SwipePoint & { pointerId: number; date: string }) | null>(null);
   const suppressSwipeClick = useRef(0);
@@ -223,6 +241,11 @@ export function CalendarPage({
     rangeCallback.current = onRangeChange;
   }, [onRangeChange]);
   useEffect(() => () => dragCleanupRef.current?.(), []);
+  useEffect(() => {
+    if (!dropFeedback) return;
+    const timer = window.setTimeout(() => setDropFeedback(null), 750);
+    return () => window.clearTimeout(timer);
+  }, [dropFeedback]);
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches,
   );
@@ -261,6 +284,97 @@ export function CalendarPage({
 
   const weekStart = startOfWeek(selectedDate);
   const range = calendarRange(view, selectedDate);
+  const motionPeriod =
+    view === 'week' ? weekStart : view === 'month' ? selectedDate.slice(0, 7) : selectedDate;
+  useLayoutEffect(() => {
+    const previous = previousMotionPeriod.current;
+    previousMotionPeriod.current = { view, period: motionPeriod };
+    const panel = motionPanelRef.current;
+    if (
+      !panel ||
+      panel.closest('[hidden]') ||
+      document.hidden ||
+      dragCleanupRef.current ||
+      !panel.animate ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
+      (previous?.view === view && previous.period === motionPeriod)
+    )
+      return;
+    const direction = previous
+      ? motionPeriod > previous.period
+        ? 1
+        : motionPeriod < previous.period
+          ? -1
+          : 0
+      : 0;
+    const easing = 'cubic-bezier(0.2, 0.8, 0.2, 1)';
+    const animations: Animation[] = [];
+    if (previous)
+      animations.push(
+        panel.animate([{ opacity: 0.76 }, { opacity: 1 }], {
+          duration: isMobile ? 190 : 240,
+          easing,
+        }),
+      );
+    if (previous && periodHeadingRef.current) {
+      animations.push(
+        periodHeadingRef.current.animate(
+          [
+            { opacity: 0.55, transform: `translateX(${direction * (isMobile ? 5 : 9)}px)` },
+            { opacity: 1, transform: 'translateX(0)' },
+          ],
+          { duration: isMobile ? 190 : 260, easing },
+        ),
+      );
+    }
+    const entries = panel.querySelectorAll<HTMLElement>(MOTION_ENTRIES);
+    for (let index = 0; index < Math.min(entries.length, 30); index++) {
+      animations.push(
+        entries[index].animate([{ opacity: 0.5 }, { opacity: 1 }], {
+          duration: isMobile ? 220 : 300,
+          delay: Math.min(Math.floor(index / 3) * (isMobile ? 25 : 45), isMobile ? 100 : 180),
+          easing,
+          fill: 'backwards',
+        }),
+      );
+    }
+    return () => animations.forEach((animation) => animation.cancel());
+  }, [view, motionPeriod, isMobile]);
+  useEffect(() => {
+    const panel = motionPanelRef.current;
+    if (!panel || typeof MutationObserver === 'undefined') return;
+    const seen = new WeakSet<Element>();
+    const animations = new Set<Animation>();
+    panel.querySelectorAll(MOTION_ENTRIES).forEach((entry) => seen.add(entry));
+    const observer = new MutationObserver((records) => {
+      if (document.hidden || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const added: Element[] = [];
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (!(node instanceof Element)) continue;
+          if (node.matches(MOTION_ENTRIES)) added.push(node);
+          added.push(...node.querySelectorAll(MOTION_ENTRIES));
+        }
+      }
+      let animated = 0;
+      for (const entry of added) {
+        if (seen.has(entry) || !entry.animate) continue;
+        seen.add(entry);
+        const animation = entry.animate([{ opacity: 0.5 }, { opacity: 1 }], {
+          duration: isMobile ? 200 : 280,
+          delay: Math.min(animated++ * 35, isMobile ? 70 : 140),
+          easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+        });
+        animations.add(animation);
+        animation.addEventListener('finish', () => animations.delete(animation), { once: true });
+      }
+    });
+    observer.observe(panel, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      animations.forEach((animation) => animation.cancel());
+    };
+  }, [view, motionPeriod, isMobile]);
   useEffect(() => {
     rangeCallback.current?.(range.from, range.to);
   }, [range.from, range.to, timeZone]);
@@ -641,6 +755,13 @@ export function CalendarPage({
         session.targetDate,
         session.targetMinutes === null ? null : minuteTime(session.targetMinutes),
       )
+        .then(() =>
+          setDropFeedback({
+            id: entry.event.id,
+            date: session.targetDate,
+            minutes: session.targetMinutes,
+          }),
+        )
         .catch(() => {})
         .finally(() => {
           moveSavingRef.current = false;
@@ -713,7 +834,9 @@ export function CalendarPage({
           >
             <ChevronLeft size={19} aria-hidden="true" />
           </button>
-          <h2 aria-live="polite">{periodLabel}</h2>
+          <h2 ref={periodHeadingRef} aria-live="polite">
+            {periodLabel}
+          </h2>
           <button
             className="cal-icon-button"
             type="button"
@@ -757,7 +880,11 @@ export function CalendarPage({
       </div>
 
       {view === 'month' ? (
-        <section className="panel cal-month-panel" aria-label={t('Календарь на месяц')}>
+        <section
+          ref={motionPanelRef}
+          className="panel cal-month-panel"
+          aria-label={t('Календарь на месяц')}
+        >
           <div className="cal-month-grid">
             {WEEKDAYS.map((day) => (
               <span key={day} className="cal-weekday">
@@ -842,7 +969,7 @@ export function CalendarPage({
           </div>
         </section>
       ) : isMobile && view === 'day' ? (
-        <section className="panel cal-mobile-agenda">
+        <section ref={motionPanelRef} className="panel cal-mobile-agenda">
           {occurrencesByDay.map(({ date, entries }) => (
             <div className="cal-agenda-day" key={date}>
               <div className="cal-section-head">
@@ -897,6 +1024,7 @@ export function CalendarPage({
         </section>
       ) : (
         <section
+          ref={motionPanelRef}
           className="panel cal-calendar-panel"
           aria-label={view === 'week' ? t('Расписание недели') : t('Расписание дня')}
         >
@@ -993,7 +1121,7 @@ export function CalendarPage({
                       <button
                         type="button"
                         key={entry.key}
-                        className={`cal-all-day-event ${entry.source === 'google' ? 'cal-google-entry' : ''} ${canDragEntry(entry) ? 'cal-draggable-event' : ''} ${dragPreview?.key === entry.key ? 'cal-drag-source' : ''}`}
+                        className={`cal-all-day-event ${entry.source === 'google' ? 'cal-google-entry' : ''} ${canDragEntry(entry) ? 'cal-draggable-event' : ''} ${dragPreview?.key === entry.key ? 'cal-drag-source' : ''} ${entry.source === 'google' && dropFeedback?.id === entry.event.id && dropFeedback.date === entry.date && dropFeedback.minutes === null ? 'cal-drop-settle' : ''}`}
                         onPointerDown={(event) => startEventDrag(event, entry)}
                         onClick={() => {
                           if (performance.now() >= suppressSwipeClick.current) editEntry(entry);
@@ -1106,7 +1234,7 @@ export function CalendarPage({
                       <button
                         key={entry.key}
                         type="button"
-                        className={`cal-grid-event ${entry.source === 'google' || entry.task.kind === 'event' ? 'cal-event-kind' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''} ${entry.completed ? 'cal-completed' : ''} ${duration < 75 ? 'cal-compact-event' : ''} ${canDragEntry(entry) ? 'cal-draggable-event' : ''} ${dragPreview?.key === entry.key ? 'cal-drag-source' : ''}`}
+                        className={`cal-grid-event ${entry.source === 'google' || entry.task.kind === 'event' ? 'cal-event-kind' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''} ${entry.completed ? 'cal-completed' : ''} ${duration < 75 ? 'cal-compact-event' : ''} ${canDragEntry(entry) ? 'cal-draggable-event' : ''} ${dragPreview?.key === entry.key ? 'cal-drag-source' : ''} ${entry.source === 'google' && dropFeedback?.id === entry.event.id && dropFeedback.date === entry.date && dropFeedback.minutes === entry.start ? 'cal-drop-settle' : ''}`}
                         style={{
                           ...calendarEntryStyle(entry),
                           top: ((entry.start ?? 0) / 60) * HOUR_HEIGHT + 2,

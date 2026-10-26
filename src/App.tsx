@@ -67,6 +67,16 @@ export default function App() {
   const { language, t: tr, setLanguage } = useI18n();
   const [data, setData] = useState<Bootstrap | null>(null),
     [page, setPage] = useState<Page>(currentPage);
+  const pageRef = useRef(page);
+  const visitedPages = useRef(new Set<Page>());
+  const [pageVisit, setPageVisit] = useState<'first' | 'return'>('first');
+  const activatePage = useCallback((next: Page) => {
+    if (pageRef.current === next) return;
+    visitedPages.current.add(pageRef.current);
+    pageRef.current = next;
+    setPageVisit(visitedPages.current.has(next) ? 'return' : 'first');
+    setPage(next);
+  }, []);
   const [requiresLogin, setRequiresLogin] = useState(false),
     [loading, setLoading] = useState(true),
     [loadError, setLoadError] = useState('');
@@ -136,10 +146,10 @@ export default function App() {
     };
   }, [load]);
   useEffect(() => {
-    const onHash = () => setPage(currentPage());
+    const onHash = () => activatePage(currentPage());
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
-  }, []);
+  }, [activatePage]);
   useEffect(() => {
     const expired = () => {
       loadGeneration.current++;
@@ -307,7 +317,7 @@ export default function App() {
     const outcome = params.get('google');
     if (!outcome || params.get('section') !== 'settings') return;
     history.replaceState(null, '', `${window.location.pathname}#settings`);
-    setPage('settings');
+    activatePage('settings');
     let active = true;
     void google
       .refreshStatus()
@@ -378,11 +388,14 @@ export default function App() {
       );
     }
   }, [data, today, now, notify, tr, language]);
-  const go = useCallback((next: Page) => {
-    setPage(next);
-    window.location.hash = next;
-    window.scrollTo({ top: 0, behavior: 'instant' });
-  }, []);
+  const go = useCallback(
+    (next: Page) => {
+      activatePage(next);
+      window.location.hash = next;
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    },
+    [activatePage],
+  );
   const handleError = useCallback(
     (error: unknown) => {
       if (error instanceof ApiError && error.code === 'AUTH_REQUIRED') {
@@ -672,8 +685,8 @@ export default function App() {
             {resolvedTheme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </button>
         </div>
-        <div className="page-container">
-          {page === 'day' ? (
+        <div className="page-container" data-page={page} data-visit={pageVisit}>
+          <Activity mode={page === 'day' ? 'visible' : 'hidden'}>
             <DashboardPage
               tasks={data.tasks}
               googleEvents={google.result?.events ?? []}
@@ -737,7 +750,7 @@ export default function App() {
               onCalendar={() => go('calendar')}
               onHabits={() => go('habits')}
             />
-          ) : null}
+          </Activity>
           <Activity mode={page === 'calendar' ? 'visible' : 'hidden'}>
             <CalendarPage
               tasks={data.tasks.filter((task) => !task.date)}
@@ -790,6 +803,7 @@ export default function App() {
           </Activity>
           <Activity mode={page === 'assistant' ? 'visible' : 'hidden'}>
             <AssistantPage
+              active={page === 'assistant'}
               conversations={data.conversations}
               aiStatus={data.aiStatus}
               onCreate={async () => {
@@ -870,6 +884,7 @@ export default function App() {
           </Activity>
           <Activity mode={page === 'settings' ? 'visible' : 'hidden'}>
             <SettingsPage
+              active={page === 'settings'}
               settings={data.settings}
               aiStatus={data.aiStatus}
               googleStatus={google.status}

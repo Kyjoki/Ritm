@@ -216,6 +216,35 @@
 .idea-review-expert[open] summary > svg {
   transform: rotate(180deg);
 }
+.idea-review-expert summary > svg {
+  transition: transform var(--motion-fast, 200ms) var(--motion-ease, ease-out);
+}
+.idea-review-expert[open] .idea-review-expert-body {
+  animation: idea-review-reveal var(--motion-page, 280ms) var(--motion-ease, ease-out) both;
+}
+.assistant-message--fresh .idea-review-synthesis,
+.assistant-message--fresh .idea-review-expert {
+  animation: idea-review-reveal var(--motion-reveal, 380ms) var(--motion-ease, ease-out) both;
+}
+.assistant-message--fresh .idea-review-expert:nth-child(2) {
+  animation-delay: 55ms;
+}
+.assistant-message--fresh .idea-review-expert:nth-child(3) {
+  animation-delay: 110ms;
+}
+.assistant-message--fresh .idea-review-expert:nth-child(n + 4) {
+  animation-delay: 165ms;
+}
+@keyframes idea-review-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-rise, 10px));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 .idea-review-expert-body {
   padding: 0 15px 15px;
   border-top: 1px solid var(--line);
@@ -243,5 +272,15 @@
 @media (max-width: 360px) {
   .assistant-idea-roles {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .idea-review-expert,
+  .idea-review-synthesis,
+  .idea-review-expert[open] .idea-review-expert-body {
+    animation: none !important;
+  }
+  .idea-review-expert summary > svg {
+    transition: none;
   }
 }
