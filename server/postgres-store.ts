@@ -1,4 +1,5 @@
 import pg, { type Pool as PgPool, type PoolClient } from 'pg';
+import { postgresConnectionString } from './postgres-connection.ts';
 import { randomUUID } from 'node:crypto';
 import type {
   Bootstrap,
@@ -120,7 +121,7 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
     this.pool =
       typeof connection === 'string'
         ? new Pool({
-            connectionString: connection,
+            connectionString: postgresConnectionString(connection),
             max: 3,
             idleTimeoutMillis: 10_000,
             connectionTimeoutMillis: 10_000,

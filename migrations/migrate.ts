@@ -2,6 +2,7 @@ import pg, { type Pool as PgPool } from 'pg';
 import { readFile, readdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { postgresConnectionString } from '../server/postgres-connection.ts';
 
 const { Pool } = pg;
 const migrationDir = dirname(fileURLToPath(import.meta.url));
@@ -43,7 +44,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     process.exitCode = 1;
   } else {
     const pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString: postgresConnectionString(process.env.DATABASE_URL),
       max: 1,
       connectionTimeoutMillis: 10_000,
     });

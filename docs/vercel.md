@@ -129,16 +129,29 @@ Express CDN output. [Express на Vercel](https://vercel.com/docs/frameworks/bac
 для Vercel CLI недостаточно. Перед первым выпуском `vercel deploy --dry --json`
 подтвердил: 88 файлов, локальных баз/секретов в списке отправки нет.
 
-| Переменная              | Назначение                                                        |
-| ----------------------- | ----------------------------------------------------------------- |
-| `DATABASE_URL`          | Серверное подключение к выбранному PostgreSQL                     |
-| `APP_LOGIN`             | Логин единственного владельца                                     |
-| `APP_PASSWORD`          | Длинный уникальный пароль владельца                               |
-| `APP_SESSION_SECRET`    | Постоянный случайный секрет сессий, не менее 32 байт              |
-| `SECRET_ENCRYPTION_KEY` | 32 случайных байта в base64 либо 64 hex-символа                   |
-| `APP_ORIGIN`            | Точный HTTPS origin приложения без пути                           |
-| `OPENAI_API_KEY`        | Необязательный серверный OpenAI key; иначе настройка в интерфейсе |
-| `OPENAI_MODEL`          | Название модели, по умолчанию `gpt-6-luna`                        |
+| Переменная              | Назначение                                                                             |
+| ----------------------- | -------------------------------------------------------------------------------------- |
+| `DATABASE_URL`          | Серверное подключение к выбранному PostgreSQL                                          |
+| `NODEJS_HELPERS`        | `0` в production: HTTP query/body обрабатывает Express, без дублирующих helpers Vercel |
+| `APP_LOGIN`             | Логин единственного владельца                                                          |
+| `APP_PASSWORD`          | Длинный уникальный пароль владельца                                                    |
+| `APP_SESSION_SECRET`    | Постоянный случайный секрет сессий, не менее 32 байт                                   |
+| `SECRET_ENCRYPTION_KEY` | 32 случайных байта в base64 либо 64 hex-символа                                        |
+| `APP_ORIGIN`            | Точный HTTPS origin приложения без пути                                                |
+| `OPENAI_API_KEY`        | Необязательный серверный OpenAI key; иначе настройка в интерфейсе                      |
+| `OPENAI_MODEL`          | Название модели, по умолчанию `gpt-6-luna`                                             |
+
+`NODEJS_HELPERS=0` задаётся до сборки deployment: Vercel читает его при создании
+Node.js-обвязки. Express уже разбирает query, JSON и cookies; для QStash сохраняются
+исходные байты тела запроса. Настройка не отключает предупреждения Node.
+См. [официальную настройку helpers](https://vercel.com/docs/functions/runtimes/node-js/advanced-node-configuration#disabling-helpers-for-node.js).
+
+При создании PostgreSQL pool и в CLI миграций общий `postgresConnectionString`
+заменяет устаревшие псевдонимы `prefer`, `require`, `verify-ca` на `verify-full`,
+сохраняя строгую проверку сертификата и имени сервера, действующую в pg 8.
+Параметры сертификатов и прочие настройки сохраняются; явные локальные режимы и
+opt-in `uselibpqcompat=true` не переопределяются. Строка подключения не логируется.
+Миграции при обычном запуске или деплое не выполняются.
 
 Для Google нужны отдельные серверные OAuth credentials; имена и настройки
 callback описаны в `docs/google-calendar.md`. Ключ шифрования нужно
