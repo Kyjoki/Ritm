@@ -29,14 +29,22 @@ export function activateDialogViewport(dialog: HTMLDialogElement): () => void {
 
   const update = () => {
     const viewport = window.visualViewport;
-    const top = viewport?.offsetTop ?? 0;
-    const left = viewport?.offsetLeft ?? 0;
+    const top = Math.max(0, viewport?.offsetTop ?? 0);
+    const left = Math.max(0, viewport?.offsetLeft ?? 0);
     const width = viewport?.width ?? window.innerWidth;
     const height = viewport?.height ?? window.innerHeight;
     // The desktop app uses CSS zoom; top-layer dialog coordinates inherit that zoom.
     const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
-    dialog.style.setProperty('--dialog-vv-center-y', `${(top + height / 2) / zoom}px`);
-    dialog.style.setProperty('--dialog-vv-center-x', `${(left + width / 2) / zoom}px`);
+    dialog.style.setProperty('--dialog-vv-top', `${top / zoom}px`);
+    dialog.style.setProperty('--dialog-vv-left', `${left / zoom}px`);
+    dialog.style.setProperty(
+      '--dialog-vv-right',
+      `${Math.max(0, window.innerWidth - left - width) / zoom}px`,
+    );
+    dialog.style.setProperty(
+      '--dialog-vv-bottom',
+      `${Math.max(0, window.innerHeight - top - height) / zoom}px`,
+    );
     dialog.style.setProperty('--dialog-vv-width', `${width / zoom}px`);
     dialog.style.setProperty('--dialog-vv-height', `${height / zoom}px`);
   };

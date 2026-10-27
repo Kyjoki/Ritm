@@ -1014,11 +1014,12 @@ textarea::placeholder {
   --dialog-padding-x: 25px;
   --dialog-padding-y: 25px;
   position: fixed;
-  inset: auto;
-  top: var(--dialog-vv-center-y, 50%);
-  left: var(--dialog-vv-center-x, 50%);
-  margin: 0;
-  transform: translate(-50%, -50%);
+  inset: calc(var(--dialog-vv-top, 0px) + max(16px, env(safe-area-inset-top)))
+    calc(var(--dialog-vv-right, 0px) + max(16px, env(safe-area-inset-right)))
+    calc(var(--dialog-vv-bottom, 0px) + max(16px, env(safe-area-inset-bottom)))
+    calc(var(--dialog-vv-left, 0px) + max(16px, env(safe-area-inset-left)));
+  margin: auto;
+  height: fit-content;
   padding: 25px;
   border: 1px solid var(--line);
   border-radius: 22px;
@@ -1373,17 +1374,17 @@ textarea::placeholder {
 @keyframes dialog-enter {
   from {
     opacity: 0;
-    transform: translate(-50%, -50%) scale(0.97);
+    scale: 0.97;
   }
   to {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    scale: 1;
   }
 }
 @keyframes dialog-exit {
   to {
     opacity: 0;
-    transform: translate(-50%, -50%) scale(0.97);
+    scale: 0.97;
   }
 }
 @keyframes dialog-backdrop-exit {

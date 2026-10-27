@@ -1,5 +1,6 @@
 import { useI18n } from '../lib/i18n';
 import { useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertCircle,
   Bell,
@@ -820,120 +821,123 @@ export function SettingsPage({
         </button>
       ) : null}
 
-      <dialog
-        ref={dialogRef}
-        className="dialog settings-key-dialog"
-        aria-labelledby={titleId}
-        onCancel={(event) => {
-          if (connectionBusy) event.preventDefault();
-          else {
+      {createPortal(
+        <dialog
+          ref={dialogRef}
+          className="dialog settings-key-dialog"
+          aria-labelledby={titleId}
+          onCancel={(event) => {
+            if (connectionBusy) event.preventDefault();
+            else {
+              setKey('');
+              setConnectionError('');
+            }
+          }}
+          onClose={() => {
+            releaseDialogViewport.current?.();
+            releaseDialogViewport.current = null;
             setKey('');
-            setConnectionError('');
-          }
-        }}
-        onClose={() => {
-          releaseDialogViewport.current?.();
-          releaseDialogViewport.current = null;
-          setKey('');
-        }}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) {
-            const b = event.currentTarget.getBoundingClientRect();
-            if (
-              event.clientX < b.left ||
-              event.clientX > b.right ||
-              event.clientY < b.top ||
-              event.clientY > b.bottom
-            )
-              closeConnection();
-          }
-        }}
-      >
-        <form onSubmit={configure} className="settings-key-form">
-          <header className="settings-dialog-head">
-            <div className="settings-key-icon">
-              <KeyRound size={23} aria-hidden="true" />
-            </div>
-            <button
-              type="button"
-              className="settings-close"
-              aria-label={t('Закрыть настройку OpenAI')}
-              disabled={connectionBusy}
-              onClick={closeConnection}
-            >
-              <X size={21} aria-hidden="true" />
-            </button>
-          </header>
-          <h2 id={titleId}>{t('Твой помощник на связи')}</h2>
-          <p className="settings-dialog-copy">
-            {t('Добавь ключ OpenAI, чтобы планировать день и разбирать задачи вместе с Ritm.')}
-          </p>
-          <label className="settings-field">
-            {t('API-ключ OpenAI')}
-            <input
-              ref={secretInputRef}
-              className="field"
-              type="password"
-              autoComplete="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              required
-              minLength={20}
-              maxLength={512}
-              value={key}
-              placeholder="sk-…"
-              onChange={(event) => setKey(event.target.value)}
-              disabled={connectionBusy}
-            />
-          </label>
-          <label className="settings-field">
-            {t('Модель')}
-            <input
-              className="field"
-              value={model}
-              required
-              maxLength={100}
-              placeholder={t('Название модели')}
-              onChange={(event) => setModel(event.target.value)}
-              disabled={connectionBusy}
-            />
-          </label>
-          <p className="settings-key-security">
-            <ShieldCheck size={17} aria-hidden="true" />
-            {t('Ключ передаётся серверу и не сохраняется в браузере.')}
-          </p>
-          {connectionError ? (
-            <p className="settings-inline-error" role="alert">
-              <AlertCircle size={17} aria-hidden="true" />
-              {t(connectionError)}
+          }}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              const b = event.currentTarget.getBoundingClientRect();
+              if (
+                event.clientX < b.left ||
+                event.clientX > b.right ||
+                event.clientY < b.top ||
+                event.clientY > b.bottom
+              )
+                closeConnection();
+            }
+          }}
+        >
+          <form onSubmit={configure} className="settings-key-form">
+            <header className="settings-dialog-head">
+              <div className="settings-key-icon">
+                <KeyRound size={23} aria-hidden="true" />
+              </div>
+              <button
+                type="button"
+                className="settings-close"
+                aria-label={t('Закрыть настройку OpenAI')}
+                disabled={connectionBusy}
+                onClick={closeConnection}
+              >
+                <X size={21} aria-hidden="true" />
+              </button>
+            </header>
+            <h2 id={titleId}>{t('Твой помощник на связи')}</h2>
+            <p className="settings-dialog-copy">
+              {t('Добавь ключ OpenAI, чтобы планировать день и разбирать задачи вместе с Ritm.')}
             </p>
-          ) : null}
-          <div className="settings-dialog-actions">
-            <button
-              type="button"
-              className="button button-secondary"
-              disabled={connectionBusy}
-              onClick={closeConnection}
-            >
-              {t('Отмена')}
-            </button>
-            <button
-              type="submit"
-              className="button button-primary"
-              disabled={connectionBusy || !key.trim() || !model.trim()}
-            >
-              {connectionBusy ? (
-                <>
-                  <LoaderCircle className="settings-spinner" size={17} aria-hidden="true" />
-                  {t('Сохраняем…')}
-                </>
-              ) : (
-                t('Сохранить ключ')
-              )}
-            </button>
-          </div>
-        </form>
-      </dialog>
+            <label className="settings-field">
+              {t('API-ключ OpenAI')}
+              <input
+                ref={secretInputRef}
+                className="field"
+                type="password"
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                required
+                minLength={20}
+                maxLength={512}
+                value={key}
+                placeholder="sk-…"
+                onChange={(event) => setKey(event.target.value)}
+                disabled={connectionBusy}
+              />
+            </label>
+            <label className="settings-field">
+              {t('Модель')}
+              <input
+                className="field"
+                value={model}
+                required
+                maxLength={100}
+                placeholder={t('Название модели')}
+                onChange={(event) => setModel(event.target.value)}
+                disabled={connectionBusy}
+              />
+            </label>
+            <p className="settings-key-security">
+              <ShieldCheck size={17} aria-hidden="true" />
+              {t('Ключ передаётся серверу и не сохраняется в браузере.')}
+            </p>
+            {connectionError ? (
+              <p className="settings-inline-error" role="alert">
+                <AlertCircle size={17} aria-hidden="true" />
+                {t(connectionError)}
+              </p>
+            ) : null}
+            <div className="settings-dialog-actions">
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={connectionBusy}
+                onClick={closeConnection}
+              >
+                {t('Отмена')}
+              </button>
+              <button
+                type="submit"
+                className="button button-primary"
+                disabled={connectionBusy || !key.trim() || !model.trim()}
+              >
+                {connectionBusy ? (
+                  <>
+                    <LoaderCircle className="settings-spinner" size={17} aria-hidden="true" />
+                    {t('Сохраняем…')}
+                  </>
+                ) : (
+                  t('Сохранить ключ')
+                )}
+              </button>
+            </div>
+          </form>
+        </dialog>,
+        document.body,
+      )}
     </div>
   );
 }

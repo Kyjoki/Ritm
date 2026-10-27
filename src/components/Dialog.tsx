@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { activateDialogViewport } from '../lib/dialog-viewport';
@@ -54,7 +55,7 @@ export function Dialog({
       target?.focus({ preventScroll: true });
     };
   }, []);
-  return (
+  return createPortal(
     <dialog
       ref={ref}
       className={`dialog ${className}`}
@@ -97,6 +98,7 @@ export function Dialog({
         </button>
       </div>
       {children}
-    </dialog>
+    </dialog>,
+    document.body,
   );
 }
