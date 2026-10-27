@@ -2110,3 +2110,203 @@
     color: var(--text);
   }
 }
+
+/* The calendar owns its workspace instead of inheriting dashboard-sized cards. */
+.cal-page {
+  --cal-bottom-reserve: 52px;
+}
+.cal-page .page-heading {
+  margin-bottom: 8px;
+  min-height: 42px;
+}
+.cal-page .page-eyebrow,
+.cal-page .page-description {
+  display: none;
+}
+.cal-page .page-heading h1 {
+  font-size: 26px;
+}
+.cal-page .page-heading > .button {
+  min-height: 38px;
+  padding-block: 8px;
+}
+.cal-page .cal-toolbar {
+  margin: 0 0 10px;
+  gap: 10px;
+}
+.cal-page .cal-period h2 {
+  font-size: 17px;
+}
+.cal-page .cal-sync-footer {
+  align-items: center;
+  margin: 0 0 10px;
+  padding: 5px 11px;
+  min-height: 40px;
+}
+.cal-page .cal-sync-footer:not(.cal-google-status-warning) .cal-google-status-copy > span,
+.cal-page .cal-sync-footer:not(.cal-google-status-warning) .cal-google-updated {
+  display: none;
+}
+.cal-page .cal-calendar-panel,
+.cal-page .cal-month-panel,
+.cal-page .cal-mobile-agenda {
+  height: max(
+    320px,
+    calc(
+      var(--cal-visible-height, 100dvh) - var(--cal-panel-top, 210px) - var(--cal-bottom-reserve)
+    )
+  );
+  min-height: 320px;
+}
+.cal-page .cal-calendar-panel {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px 8px;
+}
+.cal-page .cal-grid-header {
+  flex: none;
+  padding-bottom: 8px;
+}
+.cal-page .cal-grid-header,
+.cal-page .cal-overlap-row,
+.cal-page .cal-all-day {
+  margin-right: var(--cal-scrollbar-gutter, 0px);
+}
+.cal-page .cal-day-heading {
+  min-height: 46px;
+  gap: 2px;
+}
+.cal-page .cal-day-heading span {
+  font-size: 13px;
+}
+.cal-page .cal-day-heading strong {
+  font-size: 21px;
+}
+.cal-page .cal-grid-scroll {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+.cal-page .cal-hour-labels {
+  font-size: 12px;
+}
+.cal-page .cal-grid-event strong {
+  font-size: 14px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.cal-page .cal-grid-event .cal-event-time {
+  font-size: 12px;
+}
+.cal-page .cal-grid-event.cal-tiny-event {
+  padding: 2px 5px;
+}
+.cal-page .cal-grid-event.cal-tiny-event strong {
+  -webkit-line-clamp: 1;
+  font-size: 12px;
+}
+.cal-page .cal-grid-event.cal-tiny-event .cal-event-time {
+  display: none;
+}
+.cal-page .cal-calendar-foot {
+  flex: none;
+  margin-top: 7px;
+  font-size: 10px;
+}
+.cal-page .cal-month-panel,
+.cal-page .cal-mobile-agenda {
+  overflow-y: auto;
+}
+.cal-page .cal-month-grid {
+  height: 100%;
+  min-height: 397px;
+  grid-template-rows: 25px repeat(6, minmax(62px, 1fr));
+}
+.cal-page .cal-month-cell {
+  min-height: 0;
+}
+.cal-page .cal-month-event {
+  font-size: 12px;
+}
+.cal-secondary {
+  margin-top: 8px;
+}
+.cal-secondary > summary {
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.cal-secondary > summary::-webkit-details-marker {
+  display: none;
+}
+.cal-secondary > summary::after {
+  content: '⌄';
+  margin-left: auto;
+  color: var(--accent);
+  font-size: 18px;
+}
+.cal-secondary[open] > summary::after {
+  transform: rotate(180deg);
+}
+.cal-secondary .cal-bottom-grid {
+  margin-top: 10px;
+}
+
+@media (max-width: 760px) {
+  .main-content:has(.page-container[data-page='calendar']) {
+    padding-inline: 12px;
+  }
+  .cal-page {
+    --cal-bottom-reserve: calc(86px + env(safe-area-inset-bottom));
+  }
+  .cal-page .page-heading {
+    margin-bottom: 7px;
+  }
+  .cal-page .page-heading h1 {
+    font-size: 22px;
+  }
+  .cal-page .cal-toolbar {
+    margin-bottom: 7px;
+    gap: 6px;
+  }
+  .cal-page .cal-period h2 {
+    font-size: 13px;
+  }
+  .cal-page .cal-sync-footer {
+    margin-bottom: 7px;
+    padding: 3px 6px;
+  }
+  .cal-page .cal-calendar-panel {
+    padding: 7px 3px 0;
+  }
+  .cal-page.cal-mobile-week .cal-calendar-panel {
+    margin-inline: -4px;
+  }
+  .cal-page .cal-grid-scroll,
+  .cal-page.cal-mobile-week .cal-calendar-panel:has(.cal-overlap-row) .cal-grid-scroll {
+    height: auto;
+    max-height: none;
+  }
+  .cal-page .cal-grid-event strong {
+    font-size: 11px;
+    line-height: 1.3;
+  }
+  .cal-page .cal-grid-event .cal-event-time {
+    font-size: 10px;
+  }
+  .cal-page .cal-month-grid {
+    min-height: 386px;
+    grid-template-rows: 20px repeat(6, minmax(61px, 1fr));
+  }
+  .cal-page .cal-month-event {
+    font-size: 0;
+  }
+}

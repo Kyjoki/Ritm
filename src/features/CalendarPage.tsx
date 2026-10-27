@@ -26,6 +26,7 @@ import { Dialog } from '../components/Dialog';
 import { mobileCalendarGroups } from './mobile-calendar-groups';
 import { calendarWeekSwipe, type SwipePoint } from './calendar-swipe';
 import { calendarDragTarget, calendarDragWeekEdge } from './calendar-drag';
+import { CALENDAR_GRID_METRICS } from './calendar-grid-metrics';
 import { EventPreviewDialog } from './EventPreviewDialog';
 import { canEditGoogleEvent, googleEventDraft } from './google-occurrences';
 import type {
@@ -84,8 +85,6 @@ type CalendarView = 'day' | 'week' | 'month';
 const VIEW_LABELS: Record<CalendarView, string> = { day: 'День', week: 'Неделя', month: 'Месяц' };
 const WEEKDAYS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
-const GRID_TIME_COLUMN = 62;
-const HOUR_HEIGHT = 48;
 const INITIAL_HOUR = 9;
 const EMPTY_GOOGLE_EVENTS: GoogleCalendarEvent[] = [];
 const MOTION_ENTRIES =
@@ -249,6 +248,8 @@ export function CalendarPage({
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches,
   );
+  const gridMetrics = isMobile ? CALENDAR_GRID_METRICS.mobile : CALENDAR_GRID_METRICS.desktop;
+  const { hourHeight, timeColumn } = gridMetrics;
   const [view, setView] = useState<CalendarView>('week');
   const [eventPicker, setEventPicker] = useState<{ date: string; keys: string[] } | null>(null);
   const [preview, setPreview] = useState<{ date: string; key: string } | null>(null);
@@ -281,6 +282,52 @@ export function CalendarPage({
     media.addEventListener('change', listener);
     return () => media.removeEventListener('change', listener);
   }, []);
+  useLayoutEffect(() => {
+    const panel = motionPanelRef.current;
+    const page = panel?.closest<HTMLElement>('.cal-page');
+    if (!panel || !page) return;
+    const fitPanel = () => {
+      page.style.setProperty(
+        '--cal-visible-height',
+        `${window.visualViewport?.height ?? window.innerHeight}px`,
+      );
+      page.style.setProperty(
+        '--cal-panel-top',
+        `${panel.getBoundingClientRect().top + window.scrollY}px`,
+      );
+    };
+    fitPanel();
+    const observer = new ResizeObserver(fitPanel);
+    for (const selector of ['.page-heading', '.cal-toolbar', '.cal-sync-footer']) {
+      const control = page.querySelector(selector);
+      if (control) observer.observe(control);
+    }
+    window.addEventListener('resize', fitPanel);
+    window.visualViewport?.addEventListener('resize', fitPanel);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', fitPanel);
+      window.visualViewport?.removeEventListener('resize', fitPanel);
+    };
+  }, [view, isMobile, googleStatus?.status, googleLoading, googleError, googlePartial]);
+  useLayoutEffect(() => {
+    const scroll = gridScrollRef.current;
+    const panel = motionPanelRef.current;
+    if (!scroll || !panel) return;
+    const alignColumns = () =>
+      panel.style.setProperty(
+        '--cal-scrollbar-gutter',
+        `${scroll.offsetWidth - scroll.clientWidth}px`,
+      );
+    alignColumns();
+    const observer = new ResizeObserver(alignColumns);
+    observer.observe(scroll);
+    window.addEventListener('resize', alignColumns);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', alignColumns);
+    };
+  }, [view, isMobile]);
 
   const weekStart = startOfWeek(selectedDate);
   const range = calendarRange(view, selectedDate);
@@ -457,17 +504,17 @@ export function CalendarPage({
       };
     });
   }, [tasks, googleEvents, selectedDate, timeZone, language]);
-  const gridHeight = HOURS.length * HOUR_HEIGHT;
+  const gridHeight = HOURS.length * hourHeight;
   useEffect(() => {
     if ((isMobile && view === 'day') || view === 'month') {
       scrolledPeriodRef.current = null;
       return;
     }
-    const period = `${view}:${selectedDate}`;
+    const period = `${view}:${selectedDate}:${hourHeight}`;
     if (!gridScrollRef.current || scrolledPeriodRef.current === period) return;
-    gridScrollRef.current.scrollTop = INITIAL_HOUR * HOUR_HEIGHT;
+    gridScrollRef.current.scrollTop = INITIAL_HOUR * hourHeight;
     scrolledPeriodRef.current = period;
-  }, [isMobile, view, selectedDate]);
+  }, [isMobile, view, selectedDate, hourHeight]);
   const visibleCount = occurrencesByDay.reduce((total, day) => total + day.entries.length, 0);
   const noDateTasks = tasks.filter((task) => task.date === null && !task.completed);
   const periodLabel =
@@ -486,14 +533,11 @@ export function CalendarPage({
   }
 
   function showNow() {
-    scrolledPeriodRef.current = `${view}:${today}`;
+    scrolledPeriodRef.current = `${view}:${today}:${hourHeight}`;
     setSelectedDate(today);
     window.requestAnimationFrame(() =>
       gridScrollRef.current?.scrollTo({
-        top: Math.max(
-          0,
-          (minutesInZone(timeZone, new Date()) / 60) * HOUR_HEIGHT - HOUR_HEIGHT * 2,
-        ),
+        top: Math.max(0, (minutesInZone(timeZone, new Date()) / 60) * hourHeight - hourHeight * 2),
         behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
           ? 'instant'
           : 'smooth',
@@ -642,9 +686,9 @@ export function CalendarPage({
           left: rect.left,
           top: rect.top,
           width: rect.width,
-          timeColumn: isMobile ? 40 : GRID_TIME_COLUMN,
+          timeColumn,
           days: view === 'week' ? 7 : 1,
-          hourHeight: HOUR_HEIGHT,
+          hourHeight,
         },
         session.grabY,
         session.duration,
@@ -688,8 +732,8 @@ export function CalendarPage({
         const scroll = gridScrollRef.current;
         if (!allDay && scroll) {
           const bounds = scroll.getBoundingClientRect();
-          if (session.point.y < bounds.top + 18) scroll.scrollTop -= 8;
-          else if (session.point.y > bounds.bottom - 18) scroll.scrollTop += 8;
+          if (session.point.y < bounds.top + 18) scroll.scrollTop -= hourHeight / 6;
+          else if (session.point.y > bounds.bottom - 18) scroll.scrollTop += hourHeight / 6;
         }
         if (session.edge && performance.now() - session.edgeSince >= 650) {
           session.currentDate = addDays(
@@ -879,6 +923,81 @@ export function CalendarPage({
         </div>
       </div>
 
+      {googleStatus || googleLoading || googleError ? (
+        <div
+          className={`cal-google-status cal-sync-footer ${googleError || googlePartial || googleStatus?.status === 'reauth_required' ? 'cal-google-status-warning' : ''}`}
+          role={googleError ? 'alert' : initialGoogleLoading ? 'status' : undefined}
+        >
+          {googleLoading ? (
+            <LoaderCircle size={18} className="spinning" aria-hidden="true" />
+          ) : googleError || googlePartial || googleStatus?.status === 'reauth_required' ? (
+            <AlertCircle size={18} aria-hidden="true" />
+          ) : (
+            <CalendarDays size={18} aria-hidden="true" />
+          )}
+          <div className="cal-google-status-copy">
+            <strong>
+              {initialGoogleLoading
+                ? t('Загружаем Google Calendar…')
+                : googleError
+                  ? t('Google Calendar требует внимания')
+                  : googleStatus?.status === 'reauth_required'
+                    ? t('Подключи Google Calendar заново')
+                    : googlePartial
+                      ? t('Загружена часть событий Google')
+                      : googleConnected
+                        ? t('Календарь синхронизирован')
+                        : t('Google Calendar пока не подключён')}
+            </strong>
+            <span>
+              {googleError
+                ? t('{p0} Показанные события могут быть неактуальны.', { p0: googleError })
+                : googlePartial
+                  ? t(
+                      'Часть событий не загружена. Свободное время нужно уточнить в Google Calendar.',
+                    )
+                  : initialGoogleLoading
+                    ? t('Обновляем выбранный период и синхронизируем записи.')
+                    : googleStatus?.status === 'reauth_required'
+                      ? t('Разрешение нужно обновить в настройках.')
+                      : googleConnected
+                        ? t(
+                            'Изменения сохраняются в Google Calendar. Расписание обновляется автоматически.',
+                          )
+                        : t(
+                            'Подключи Google Calendar в настройках, чтобы работать с единым расписанием.',
+                          )}
+            </span>
+            {fetchedLabel ? (
+              <small className="cal-google-updated">
+                {t('Последнее обновление:')}{' '}
+                <time dateTime={googleFetchedAt ?? undefined}>{fetchedLabel}</time>
+                {googleLoading ? t(' · Обновляем…') : ''}
+              </small>
+            ) : null}
+          </div>
+          <div className="cal-google-status-actions">
+            {onGoogleRefresh && (googleConnected || Boolean(googleError)) ? (
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={googleLoading}
+                onClick={onGoogleRefresh}
+              >
+                <RefreshCw size={15} aria-hidden="true" />
+                {t('Обновить')}
+              </button>
+            ) : null}
+            {onOpenSettings && !googleConnected ? (
+              <button type="button" className="cal-google-settings" onClick={onOpenSettings}>
+                {t('Настройки')}
+                <ChevronRight size={15} aria-hidden="true" />
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       {view === 'month' ? (
         <section
           ref={motionPanelRef}
@@ -1031,7 +1150,7 @@ export function CalendarPage({
           <div
             className="cal-grid-header"
             style={{
-              gridTemplateColumns: `${isMobile ? 40 : GRID_TIME_COLUMN}px repeat(${periodDays.length}, minmax(0, 1fr))`,
+              gridTemplateColumns: `${timeColumn}px repeat(${periodDays.length}, minmax(0, 1fr))`,
             }}
           >
             <span className="cal-timezone">
@@ -1102,7 +1221,7 @@ export function CalendarPage({
               ref={allDayRef}
               className="cal-all-day"
               style={{
-                gridTemplateColumns: `${isMobile ? 40 : GRID_TIME_COLUMN}px repeat(${periodDays.length}, minmax(0, 1fr))`,
+                gridTemplateColumns: `${timeColumn}px repeat(${periodDays.length}, minmax(0, 1fr))`,
               }}
             >
               <span>{t('Весь день / без времени')}</span>
@@ -1163,13 +1282,13 @@ export function CalendarPage({
               ref={gridVisualRef}
               className="cal-grid"
               style={{
-                gridTemplateColumns: `${isMobile ? 40 : GRID_TIME_COLUMN}px repeat(${periodDays.length}, minmax(0, 1fr))`,
+                gridTemplateColumns: `${timeColumn}px repeat(${periodDays.length}, minmax(0, 1fr))`,
                 height: gridHeight,
               }}
             >
               <div className="cal-hour-labels">
                 {HOURS.map((hour) => (
-                  <span key={hour} style={{ height: HOUR_HEIGHT }}>
+                  <span key={hour} style={{ height: hourHeight }}>
                     {formatTime(hour * 60, { compact: true }).replace(' ', '')}
                   </span>
                 ))}
@@ -1186,8 +1305,8 @@ export function CalendarPage({
                     <div
                       className="cal-drag-target"
                       style={{
-                        top: (dragPreview.minutes / 60) * HOUR_HEIGHT,
-                        height: Math.max(22, (dragPreview.duration / 60) * HOUR_HEIGHT),
+                        top: (dragPreview.minutes / 60) * hourHeight,
+                        height: Math.max(22, (dragPreview.duration / 60) * hourHeight),
                       }}
                       aria-hidden="true"
                     >
@@ -1208,8 +1327,8 @@ export function CalendarPage({
                             : -1
                         }
                         style={{
-                          top: ((hour * 60 + minute) / 60) * HOUR_HEIGHT,
-                          height: HOUR_HEIGHT / 2,
+                          top: ((hour * 60 + minute) / 60) * hourHeight,
+                          height: hourHeight / 2,
                         }}
                         aria-label={t('Добавить запись: {p0}, {p1}', {
                           p0: formatDate(date, { day: 'numeric', month: 'long' }, language),
@@ -1234,11 +1353,11 @@ export function CalendarPage({
                       <button
                         key={entry.key}
                         type="button"
-                        className={`cal-grid-event ${entry.source === 'google' || entry.task.kind === 'event' ? 'cal-event-kind' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''} ${entry.completed ? 'cal-completed' : ''} ${duration < 75 ? 'cal-compact-event' : ''} ${canDragEntry(entry) ? 'cal-draggable-event' : ''} ${dragPreview?.key === entry.key ? 'cal-drag-source' : ''} ${entry.source === 'google' && dropFeedback?.id === entry.event.id && dropFeedback.date === entry.date && dropFeedback.minutes === entry.start ? 'cal-drop-settle' : ''}`}
+                        className={`cal-grid-event ${entry.source === 'google' || entry.task.kind === 'event' ? 'cal-event-kind' : ''} ${entry.source === 'google' ? 'cal-google-entry' : ''} ${entry.completed ? 'cal-completed' : ''} ${duration < 75 ? 'cal-compact-event' : ''} ${duration < 45 ? 'cal-tiny-event' : ''} ${canDragEntry(entry) ? 'cal-draggable-event' : ''} ${dragPreview?.key === entry.key ? 'cal-drag-source' : ''} ${entry.source === 'google' && dropFeedback?.id === entry.event.id && dropFeedback.date === entry.date && dropFeedback.minutes === entry.start ? 'cal-drop-settle' : ''}`}
                         style={{
                           ...calendarEntryStyle(entry),
-                          top: ((entry.start ?? 0) / 60) * HOUR_HEIGHT + 2,
-                          height: Math.max(22, (duration / 60) * HOUR_HEIGHT - 4),
+                          top: ((entry.start ?? 0) / 60) * hourHeight + 2,
+                          height: Math.max(22, (duration / 60) * hourHeight - 4),
                           width: `calc(${100 / entry.lanes}% - ${isMobile ? 2 : 7}px)`,
                           left: `calc(${(entry.lane * 100) / entry.lanes}% + ${isMobile ? 1 : 4}px)`,
                         }}
@@ -1273,7 +1392,7 @@ export function CalendarPage({
                   {date === today ? (
                     <div
                       className="cal-now-line"
-                      style={{ top: (nowMinutes / 60) * HOUR_HEIGHT }}
+                      style={{ top: (nowMinutes / 60) * hourHeight }}
                       aria-hidden="true"
                     />
                   ) : null}
@@ -1288,134 +1407,64 @@ export function CalendarPage({
         </section>
       )}
 
-      {googleStatus || googleLoading || googleError ? (
-        <div
-          className={`cal-google-status cal-sync-footer ${googleError || googlePartial || googleStatus?.status === 'reauth_required' ? 'cal-google-status-warning' : ''}`}
-          role={googleError ? 'alert' : initialGoogleLoading ? 'status' : undefined}
-        >
-          {googleLoading ? (
-            <LoaderCircle size={18} className="spinning" aria-hidden="true" />
-          ) : googleError || googlePartial || googleStatus?.status === 'reauth_required' ? (
-            <AlertCircle size={18} aria-hidden="true" />
-          ) : (
-            <CalendarDays size={18} aria-hidden="true" />
-          )}
-          <div className="cal-google-status-copy">
-            <strong>
-              {initialGoogleLoading
-                ? t('Загружаем Google Calendar…')
-                : googleError
-                  ? t('Google Calendar требует внимания')
-                  : googleStatus?.status === 'reauth_required'
-                    ? t('Подключи Google Calendar заново')
-                    : googlePartial
-                      ? t('Загружена часть событий Google')
-                      : googleConnected
-                        ? t('Календарь синхронизирован')
-                        : t('Google Calendar пока не подключён')}
-            </strong>
-            <span>
-              {googleError
-                ? t('{p0} Показанные события могут быть неактуальны.', { p0: googleError })
-                : googlePartial
-                  ? t(
-                      'Часть событий не загружена. Свободное время нужно уточнить в Google Calendar.',
-                    )
-                  : initialGoogleLoading
-                    ? t('Обновляем выбранный период и синхронизируем записи.')
-                    : googleStatus?.status === 'reauth_required'
-                      ? t('Разрешение нужно обновить в настройках.')
-                      : googleConnected
-                        ? t(
-                            'Изменения сохраняются в Google Calendar. Расписание обновляется автоматически.',
-                          )
-                        : t(
-                            'Подключи Google Calendar в настройках, чтобы работать с единым расписанием.',
-                          )}
-            </span>
-            {fetchedLabel ? (
-              <small className="cal-google-updated">
-                {t('Последнее обновление:')}{' '}
-                <time dateTime={googleFetchedAt ?? undefined}>{fetchedLabel}</time>
-                {googleLoading ? t(' · Обновляем…') : ''}
+      <details className="cal-secondary">
+        <summary>
+          {t('Твой темп')} · {t('Без даты')} ({noDateTasks.length})
+        </summary>
+        <div className="cal-bottom-grid">
+          <section className="panel cal-summary">
+            <div className="cal-section-head">
+              <h2>
+                <Sparkles size={17} aria-hidden="true" />
+                {t('Твой темп')}
+              </h2>
+              <span>
+                {view === 'month'
+                  ? t('Выбранный день')
+                  : view === 'week'
+                    ? t('Эта неделя')
+                    : t('Выбранный день')}
+              </span>
+            </div>
+            <p>
+              {(view === 'month' ? selectedEntries.length : visibleCount) ? (
+                <>
+                  {uncertainGoogle ? t('Показано') : t('В плане')}{' '}
+                  <strong>{view === 'month' ? selectedEntries.length : visibleCount}</strong>{' '}
+                  {recordWord(view === 'month' ? selectedEntries.length : visibleCount, language)}
+                  {t('. Оставь немного времени для себя.')}
+                </>
+              ) : uncertainGoogle ? (
+                t('Обновляем расписание. Дождись синхронизации.')
+              ) : (
+                t('Пока всё свободно. Начни с одного важного дела.')
+              )}
+            </p>
+            <small>{t('При редактировании повторения изменится только выбранная запись.')}</small>
+          </section>
+          <section className="panel cal-backlog">
+            <div className="cal-section-head">
+              <h2>{t('Без даты')}</h2>
+              <span>{noDateTasks.length}</span>
+            </div>
+            {noDateTasks.length ? (
+              noDateTasks.slice(0, 4).map((task) => (
+                <button type="button" key={task.id} onClick={() => onEdit(task)}>
+                  <span>{task.title}</span>
+                  <ChevronRight size={16} aria-hidden="true" />
+                </button>
+              ))
+            ) : (
+              <p>{t('Все дела уже нашли своё место в расписании.')}</p>
+            )}
+            {noDateTasks.length > 4 ? (
+              <small>
+                {t('Ещё {count} в разделе «Мой день»', { count: noDateTasks.length - 4 })}
               </small>
             ) : null}
-          </div>
-          <div className="cal-google-status-actions">
-            {onGoogleRefresh && (googleConnected || Boolean(googleError)) ? (
-              <button
-                type="button"
-                className="button button-secondary"
-                disabled={googleLoading}
-                onClick={onGoogleRefresh}
-              >
-                <RefreshCw size={15} aria-hidden="true" />
-                {t('Обновить')}
-              </button>
-            ) : null}
-            {onOpenSettings && !googleConnected ? (
-              <button type="button" className="cal-google-settings" onClick={onOpenSettings}>
-                {t('Настройки')}
-                <ChevronRight size={15} aria-hidden="true" />
-              </button>
-            ) : null}
-          </div>
+          </section>
         </div>
-      ) : null}
-
-      <div className="cal-bottom-grid">
-        <section className="panel cal-summary">
-          <div className="cal-section-head">
-            <h2>
-              <Sparkles size={17} aria-hidden="true" />
-              {t('Твой темп')}
-            </h2>
-            <span>
-              {view === 'month'
-                ? t('Выбранный день')
-                : view === 'week'
-                  ? t('Эта неделя')
-                  : t('Выбранный день')}
-            </span>
-          </div>
-          <p>
-            {(view === 'month' ? selectedEntries.length : visibleCount) ? (
-              <>
-                {uncertainGoogle ? t('Показано') : t('В плане')}{' '}
-                <strong>{view === 'month' ? selectedEntries.length : visibleCount}</strong>{' '}
-                {recordWord(view === 'month' ? selectedEntries.length : visibleCount, language)}
-                {t('. Оставь немного времени для себя.')}
-              </>
-            ) : uncertainGoogle ? (
-              t('Обновляем расписание. Дождись синхронизации.')
-            ) : (
-              t('Пока всё свободно. Начни с одного важного дела.')
-            )}
-          </p>
-          <small>{t('При редактировании повторения изменится только выбранная запись.')}</small>
-        </section>
-        <section className="panel cal-backlog">
-          <div className="cal-section-head">
-            <h2>{t('Без даты')}</h2>
-            <span>{noDateTasks.length}</span>
-          </div>
-          {noDateTasks.length ? (
-            noDateTasks.slice(0, 4).map((task) => (
-              <button type="button" key={task.id} onClick={() => onEdit(task)}>
-                <span>{task.title}</span>
-                <ChevronRight size={16} aria-hidden="true" />
-              </button>
-            ))
-          ) : (
-            <p>{t('Все дела уже нашли своё место в расписании.')}</p>
-          )}
-          {noDateTasks.length > 4 ? (
-            <small>
-              {t('Ещё {count} в разделе «Мой день»', { count: noDateTasks.length - 4 })}
-            </small>
-          ) : null}
-        </section>
-      </div>
+      </details>
       {eventPicker && isMobile && view === 'week' ? (
         <Dialog
           title={t('Пересекающиеся события')}
