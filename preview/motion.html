@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Ritm · Проверка движения</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font:
+          14px/1.5 system-ui,
+          sans-serif;
+        background: #e8e3f1;
+        color: #30243f;
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 20px;
+        background: #fff9;
+        border-bottom: 1px solid #cfc3df;
+      }
+      strong {
+        margin-right: auto;
+      }
+      button,
+      select,
+      a {
+        font: inherit;
+        color: inherit;
+      }
+      button,
+      select {
+        min-height: 44px;
+        padding: 8px 14px;
+        background: #fff;
+        border: 1px solid #cfc3df;
+        border-radius: 12px;
+        cursor: pointer;
+      }
+      button[aria-pressed='true'] {
+        background: #7651bc;
+        color: white;
+        border-color: #7651bc;
+      }
+      button:focus-visible,
+      select:focus-visible {
+        outline: 3px solid #9670d5;
+        outline-offset: 2px;
+      }
+      nav {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        padding: 12px 20px 0;
+      }
+      #hint {
+        margin: 8px 20px 12px;
+        min-height: 42px;
+      }
+      main {
+        display: flex;
+        justify-content: center;
+        padding: 0 12px 12px;
+      }
+      iframe {
+        width: 100%;
+        height: calc(100dvh - 192px);
+        min-height: 360px;
+        border: 1px solid #cfc3df;
+        border-radius: 18px;
+        background: #f7f5fb;
+      }
+      @media (max-width: 600px) {
+        header,
+        nav {
+          padding-inline: 12px;
+        }
+        #hint {
+          margin-inline: 12px;
+        }
+        main {
+          padding-inline: 0;
+        }
+        iframe {
+          border-radius: 0;
+          max-width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Ritm · движение в настоящем интерфейсе</strong><span>Локальные демоданные</span>
+      <select id="device" aria-label="Ширина экрана">
+        <option value="desktop">Компьютер</option>
+        <option value="360">Телефон · 360 px</option>
+        <option value="390">Телефон · 390 px</option>
+        <option value="430">Телефон · 430 px</option>
+      </select>
+      <button id="replay">Повторить первое появление</button>
+      <a href="/?design-preview=1#day" target="_blank" rel="noopener">Открыть без рамки ↗</a>
+    </header>
+    <nav aria-label="Сценарий просмотра">
+      <button data-page="day" data-step="0" aria-pressed="true">1. Мой день</button>
+      <button data-page="finance" data-step="1" aria-pressed="false">2. Графики</button>
+      <button data-page="day" data-step="2" aria-pressed="false">3. Выполнение</button>
+      <button data-page="habits" data-step="3" aria-pressed="false">4. Период</button>
+      <button data-page="habits" data-step="4" aria-pressed="false">5. Переходы</button>
+      <button data-page="habits" data-step="5" aria-pressed="false">6. Диалог</button>
+    </nav>
+    <p id="hint" role="status">
+      Перезагрузите первое появление: сначала заголовок, затем показатели, линия и заливка. В
+      обычных переходах страницы сохраняют своё состояние.
+    </p>
+    <main>
+      <iframe
+        id="app"
+        title="Ritm — интерактивная демонстрация motion design"
+        src="/?design-preview=1#day"
+      ></iframe>
+    </main>
+    <script>
+      const app = document.querySelector('#app');
+      const hints = [
+        'Перезагрузите первое появление: сначала заголовок, затем показатели, линия и заливка. В обычных переходах страницы сохраняют своё состояние.',
+        'Посмотрите рост столбцов и заполнение кольца. Переключите «Основной счёт / Всё вместе»: показатели плавно достигают новых значений.',
+        'Нажмите квадрат слева у любой задачи: галочка, кольцо прогресса и перестройка соседних строк. Повторное нажатие отменяет выполнение. Это локальные данные.',
+        'Переключите «Неделя / Месяц» и стрелки периода. Затем отметьте привычку: дуга, число и столбец обновляются без исчезновения карточки.',
+        'Введите черновик задачи или сообщения, переключите раздел через навигацию Ritm и вернитесь. Индикатор движется, введённый текст сохраняется.',
+        'Нажмите «Новая привычка», введите несколько букв, закройте крестиком или Escape. Окно появляется из центра и плавно закрывается вместе с затемнением.',
+      ];
+      document.querySelectorAll('[data-step]').forEach((button) =>
+        button.addEventListener('click', () => {
+          document
+            .querySelectorAll('[data-step]')
+            .forEach((item) => item.setAttribute('aria-pressed', String(item === button)));
+          document.querySelector('#hint').textContent = hints[Number(button.dataset.step)];
+          app.contentWindow.location.hash = button.dataset.page;
+        }),
+      );
+      document.querySelector('#device').addEventListener('change', (event) => {
+        app.style.width = event.target.value === 'desktop' ? '100%' : event.target.value + 'px';
+      });
+      document
+        .querySelector('#replay')
+        .addEventListener('click', () => app.contentWindow.location.reload());
+    </script>
+  </body>
+</html>

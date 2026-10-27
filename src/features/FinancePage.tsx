@@ -1,3 +1,10 @@
+import {
+  MotionBar,
+  MotionList,
+  MotionNumber,
+  useMotionValues,
+  useMotionNumber,
+} from '../components/Motion';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import {
   ArrowDownLeft,
@@ -120,6 +127,12 @@ function Donut({
   format: (minor: number) => string;
 }) {
   const total = items.reduce((sum, item) => sum + item.value, 0);
+  const animatedValues = useMotionValues(
+    items.map((item) => item.value),
+    true,
+    false,
+  );
+  const sweep = useMotionNumber(total ? 360 : 0);
   return (
     <div className="finance-donut-wrap">
       <div
@@ -130,9 +143,13 @@ function Donut({
         }
       >
         <span
-          key={items.map((item) => item.value).join('-')}
           className={`finance-donut-surface${total ? ' has-data' : ''}`}
-          style={{ background: sectorBackground(items.map((item) => item.value)) }}
+          style={
+            {
+              background: sectorBackground(animatedValues),
+              '--finance-sweep': `${sweep}deg`,
+            } as CSSProperties
+          }
           aria-hidden="true"
         />
         <div className="finance-donut-hole">
@@ -361,37 +378,6 @@ export function FinancePage({ active = true }: { active?: boolean }) {
         (!selectedDeposit || entry.id === selectedDeposit.id)) ||
       (view === 'stocks' && entry.type === 'stock'),
   );
-
-  const firstSummary =
-    view === 'account'
-      ? money(income)
-      : view === 'all'
-        ? accountBalance === null
-          ? '—'
-          : money(accountBalance)
-        : String(sectionCount);
-  const secondSummary =
-    view === 'stocks' && !stocksWithBasis.length
-      ? '—'
-      : money(
-          view === 'account'
-            ? expense
-            : view === 'all'
-              ? deposits
-              : view === 'deposits'
-                ? (selectedDeposit?.valueMinor ?? deposits)
-                : stockInvested,
-        );
-  const thirdSummary =
-    view === 'stocks'
-      ? stocksWithBasis.length
-        ? `${stockGain > 0 ? '+' : ''}${money(stockGain)}`
-        : '—'
-      : view === 'account'
-        ? money(income - expense)
-        : view === 'all'
-          ? money(stocks)
-          : currency;
 
   function openNew(
     type: Kind = view === 'deposits' ? 'deposit' : view === 'stocks' ? 'stock' : 'expense',
@@ -755,8 +741,12 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                 <Wallet size={21} />
               </div>
               <strong className="finance-hero-value">
-                <span key={`${view}-${currency}-${sectionTotal}`} className="finance-figure">
-                  {sectionTotal === null ? '—' : money(sectionTotal)}
+                <span className="finance-figure">
+                  {sectionTotal === null ? (
+                    '—'
+                  ) : (
+                    <MotionNumber value={sectionTotal} format={money} step={100} />
+                  )}
                 </span>
               </strong>
               <p>
@@ -823,8 +813,22 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                   )}
                 </span>
                 <strong>
-                  <span key={firstSummary} className="finance-figure">
-                    {firstSummary}
+                  <span className="finance-figure">
+                    {view === 'all' && accountBalance === null ? (
+                      '—'
+                    ) : (
+                      <MotionNumber
+                        value={
+                          view === 'account'
+                            ? income
+                            : view === 'all'
+                              ? accountBalance!
+                              : sectionCount
+                        }
+                        format={view === 'account' || view === 'all' ? money : undefined}
+                        step={view === 'account' || view === 'all' ? 100 : 1}
+                      />
+                    )}
                   </span>
                 </strong>
               </div>
@@ -844,8 +848,24 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                   )}
                 </span>
                 <strong>
-                  <span key={secondSummary} className="finance-figure">
-                    {secondSummary}
+                  <span className="finance-figure">
+                    {view === 'stocks' && !stocksWithBasis.length ? (
+                      '—'
+                    ) : (
+                      <MotionNumber
+                        value={
+                          view === 'account'
+                            ? expense
+                            : view === 'all'
+                              ? deposits
+                              : view === 'deposits'
+                                ? (selectedDeposit?.valueMinor ?? deposits)
+                                : stockInvested
+                        }
+                        format={money}
+                        step={100}
+                      />
+                    )}
                   </span>
                 </strong>
                 {view === 'stocks' && stocksWithBasis.length < stockEntries.length && (
@@ -875,8 +895,26 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                   )}
                 </span>
                 <strong>
-                  <span key={thirdSummary} className="finance-figure">
-                    {thirdSummary}
+                  <span className="finance-figure">
+                    {view === 'deposits' ? (
+                      currency
+                    ) : view === 'stocks' && !stocksWithBasis.length ? (
+                      '—'
+                    ) : (
+                      <MotionNumber
+                        value={
+                          view === 'stocks'
+                            ? stockGain
+                            : view === 'account'
+                              ? income - expense
+                              : stocks
+                        }
+                        step={100}
+                        format={(value) =>
+                          (view === 'stocks' && value > 0 ? '+' : '') + money(value)
+                        }
+                      />
+                    )}
                   </span>
                 </strong>
                 {view === 'stocks' && stocksWithBasis.length > 0 && stockInvested > 0 && (
@@ -920,26 +958,16 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                   {monthly.map((month, index) => (
                     <div className="finance-month" key={month.key}>
                       <div className="finance-month-bars">
-                        <span
-                          key={`${month.key}-income-${month.income}`}
+                        <MotionBar
                           className="finance-bar income"
-                          style={
-                            {
-                              height: `${Math.max(month.income ? 3 : 0, (month.income / chartMax) * 100)}%`,
-                              '--finance-bar-delay': `${Math.min(index, 5) * 55}ms`,
-                            } as CSSProperties
-                          }
+                          value={Math.max(month.income ? 3 : 0, (month.income / chartMax) * 100)}
+                          index={index}
                           title={`${t('Поступления')}: ${money(month.income)}`}
                         />
-                        <span
-                          key={`${month.key}-expense-${month.expense}`}
+                        <MotionBar
                           className="finance-bar expense"
-                          style={
-                            {
-                              height: `${Math.max(month.expense ? 3 : 0, (month.expense / chartMax) * 100)}%`,
-                              '--finance-bar-delay': `${Math.min(index, 5) * 55 + 65}ms`,
-                            } as CSSProperties
-                          }
+                          value={Math.max(month.expense ? 3 : 0, (month.expense / chartMax) * 100)}
+                          index={index}
                           title={`${t('Расходы')}: ${money(month.expense)}`}
                         />
                       </div>
@@ -1050,7 +1078,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                 </button>
               </div>
               {records.length ? (
-                <ul className="finance-record-list">
+                <MotionList as="ul" className="finance-record-list">
                   {records.map((entry) => {
                     const isAsset =
                       entry.type === 'account' ||
@@ -1085,7 +1113,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                         ? entry.valueMinor - purchaseValue
                         : null;
                     return (
-                      <li key={entry.id} className="finance-record">
+                      <li key={entry.id} data-motion-key={entry.id} className="finance-record">
                         <span className={`finance-record-icon ${entry.type}`}>
                           <Icon size={17} />
                         </span>
@@ -1196,7 +1224,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                       </li>
                     );
                   })}
-                </ul>
+                </MotionList>
               ) : (
                 <div className="finance-empty">
                   <Coins size={24} />

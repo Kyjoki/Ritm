@@ -28,6 +28,7 @@ export const coreEnglish: Record<string, string> = {
   'Ваши данные сохранены на сервере. Обновите страницу, чтобы продолжить.':
     'Your data is saved on the server. Reload the page to continue.',
   'Ваши дела. Ваш темп. Один ясный план.': 'Your tasks. Your pace. One clear plan.',
+  'Локальный preview · демоданные': 'Local preview · demo data',
   'Вернуть в задачи': 'Reopen task',
   'Вернуть в план': 'Return to plan',
   'Весь день': 'All day',

@@ -175,6 +175,8 @@
   }
   .dashboard-habits-cell:hover:not(:disabled) .dashboard-habits-mark {
     transform: scale(1.08);
+  }
+  .dashboard-habits-cell:not(.is-done):hover:not(:disabled) .dashboard-habits-mark {
     background: var(--soft);
   }
 }

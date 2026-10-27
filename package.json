@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "preview:visual": "node scripts/preview-visual.mjs",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "start": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --import tsx server/index.ts",

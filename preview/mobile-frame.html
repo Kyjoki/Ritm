@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ritm · Mobile visual preview</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: start center;
+        background: #e8e4ee;
+      }
+      iframe {
+        display: block;
+        width: 390px;
+        height: 700px;
+        border: 0;
+        background: white;
+      }
+    </style>
+  </head>
+  <body>
+    <iframe title="Ritm mobile preview" src="/?design-preview=1#day"></iframe>
+    <script>
+      const width = Number(new URLSearchParams(location.search).get('w'));
+      if ([360, 390, 430].includes(width))
+        document.querySelector('iframe').style.width = `${width}px`;
+    </script>
+  </body>
+</html>

@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import {
   ArrowUpRight,
   CalendarDays,
@@ -18,6 +18,7 @@ import { durationText, formatDate, formatTime, greeting } from '../lib/date';
 import { calendarEntryStyle } from '../lib/calendar-colors';
 import { Orb } from './Orb';
 import { DashboardHabits } from './DashboardHabits';
+import { MotionLine, MotionList, MotionNumber, MotionRing } from './Motion';
 import { useI18n } from '../lib/i18n';
 
 interface Props {
@@ -144,6 +145,16 @@ export function DashboardPage({
     .filter((o) => !o.completed && o.end > now)
     .sort((a, b) => a.start - b.start)[0];
   const schedule = timed.sort((a, b) => a.start - b.start);
+  // A visual summary of the actual timed entries, kept separate from task progress.
+  const rhythm = Array.from({ length: 13 }, (_, hour) => {
+    const start = (hour + 9) * 60;
+    const busyMinutes = schedule.reduce(
+      (minutes, entry) =>
+        minutes + Math.max(0, Math.min(entry.end, start + 60) - Math.max(entry.start, start)),
+      0,
+    );
+    return Math.min(1, busyMinutes / 60);
+  });
   const openEntry = (entry: CalendarOccurrence) =>
     entry.source === 'google' ? onGoogleEdit(entry.event, entry.date) : onEdit(entry.task);
   const undated = tasks.filter((t) => !t.date && !t.completed),
@@ -229,30 +240,34 @@ export function DashboardPage({
         <div className="panel progress-card">
           <span className="card-eyebrow">{tr('Твой прогресс')}</span>
           <div className="progress-body">
-            <div
-              className="progress-ring"
-              style={
-                {
-                  '--progress': `${todayCount && !todayUnknownGoogleCount ? (todayCompleted / todayCount) * 360 : 0}deg`,
-                } as CSSProperties
+            <MotionRing
+              value={
+                todayCount && !todayUnknownGoogleCount ? (todayCompleted / todayCount) * 360 : 0
               }
             >
               <Sparkles size={19} />
-            </div>
+            </MotionRing>
             <div>
               <strong>
-                {todayUnknownGoogleCount
-                  ? '—'
-                  : googlePending && !todayCount
-                    ? '…'
-                    : todayCount
-                      ? tr('{completed} из {total}', {
-                          completed: todayCompleted,
-                          total: todayCount,
-                        })
-                      : googleUncertain
-                        ? '—'
-                        : tr('Нет задач')}
+                {todayUnknownGoogleCount ? (
+                  '—'
+                ) : googlePending && !todayCount ? (
+                  '…'
+                ) : todayCount ? (
+                  <MotionNumber
+                    value={todayCompleted}
+                    format={(value) =>
+                      tr('{completed} из {total}', {
+                        completed: Math.round(value),
+                        total: todayCount,
+                      })
+                    }
+                  />
+                ) : googleUncertain ? (
+                  '—'
+                ) : (
+                  tr('Нет задач')
+                )}
               </strong>
               <span>
                 {todayUnknownGoogleCount
@@ -265,6 +280,14 @@ export function DashboardPage({
                         ? tr('Данные Google не проверены')
                         : tr('на сегодня')}
               </span>
+            </div>
+          </div>
+          <div className="progress-chart" aria-hidden="true">
+            <MotionLine values={rhythm} />
+            <div>
+              <span>9 AM</span>
+              <span>3 PM</span>
+              <span>9 PM</span>
             </div>
           </div>
           <p className="card-footnote">
@@ -407,14 +430,18 @@ export function DashboardPage({
             </p>
           ) : null}
           {todoCount ? (
-            <div className="today-list">
+            <MotionList className="today-list">
               {googleTodos.map((entry) => {
                 if (entry.source !== 'google') return null;
                 const event = entry.event;
                 const isComplete = event.googleTask?.status === 'completed';
                 const busy = busyGoogleTaskIds?.has(event.id) ?? false;
                 return (
-                  <div className={`task-row${isComplete ? ' is-complete' : ''}`} key={entry.key}>
+                  <div
+                    className={`task-row${isComplete ? ' is-complete' : ''}`}
+                    key={entry.key}
+                    data-motion-key={entry.key}
+                  >
                     <button
                       className="check-target"
                       onClick={() =>
@@ -459,7 +486,11 @@ export function DashboardPage({
               {dayEntries.map((o) => {
                 const task = o.task;
                 return (
-                  <div className={`task-row${o.completed ? ' is-complete' : ''}`} key={o.key}>
+                  <div
+                    className={`task-row${o.completed ? ' is-complete' : ''}`}
+                    key={o.key}
+                    data-motion-key={o.key}
+                  >
                     <button
                       className="check-target"
                       onClick={() => onToggle(task, o.date, o.completed)}
@@ -492,7 +523,7 @@ export function DashboardPage({
                   </div>
                 );
               })}
-            </div>
+            </MotionList>
           ) : googleUncertain ? (
             <div className="empty-inline" role={googlePending ? 'status' : undefined}>
               {googlePending ? (
@@ -564,7 +595,7 @@ export function DashboardPage({
           {schedule.length ? (
             <div className="schedule-list">
               {schedule.slice(0, 6).map((o) => (
-                <div className="schedule-row" key={o.key}>
+                <div className="schedule-row" key={o.key} data-motion-key={o.key}>
                   <time>{formatTime(o.start)}</time>
                   <button
                     className={`schedule-event${o.completed ? ' is-complete' : ''}`}

@@ -1,0 +1,297 @@
+/* Motion owns timing, never app scale or calendar coordinates. JS uses the same values. */
+:root {
+  --motion-chart: 920ms;
+  --motion-update: 520ms;
+  --motion-reveal: 440ms;
+  --motion-stagger: 55ms;
+  --motion-rise: 12px;
+  --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+.motion-page {
+  display: contents;
+}
+.motion-v2 .motion-number,
+.motion-v2 .motion-number > span {
+  display: inline;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.motion-list {
+  position: relative;
+}
+.motion-presence {
+  display: contents;
+}
+/* Replace former page-wide and remount-driven CSS animations with scoped primitives. */
+.motion-v2
+  :is(.dashboard-page, .cal-page, .habits-page, .finance-page, .assistant-page, .settings-page),
+.motion-v2
+  .motion-page
+  :is(
+    .page-heading,
+    .overview-grid,
+    .overview-grid > .panel,
+    .day-work-grid,
+    .day-work-grid > .panel,
+    .dashboard-habits,
+    .dashboard-bottom,
+    .ai-dock,
+    .finance-top-grid,
+    .finance-chart-grid,
+    .finance-bottom-grid,
+    .finance-hero,
+    .finance-summary-tile,
+    .finance-chart-card,
+    .finance-records,
+    .finance-figure,
+    .settings-card,
+    .habits-analytics,
+    .habits-analytics-top,
+    .habits-analytics-graphs,
+    .habits-list,
+    .habits-list-heading,
+    .habit-card,
+    .habits-gauge,
+    .habits-kpis,
+    .task-row
+  ) {
+  animation: none !important;
+}
+.motion-v2 .motion-bar,
+.motion-v2 .habits-gauge-fill,
+.motion-v2 .progress-ring,
+.motion-v2 .finance-donut-surface,
+.motion-v2 .motion-line polyline {
+  animation: none !important;
+  transition: none !important;
+}
+.motion-v2 .motion-line polyline {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  vector-effect: none;
+}
+.motion-v2 .motion-page[data-active='false'] *,
+.motion-v2 .motion-page[data-active='false'] *::before,
+.motion-v2 .motion-page[data-active='false'] *::after {
+  animation-play-state: paused !important;
+}
+.motion-v2[data-document-hidden='true'] *,
+.motion-v2[data-document-hidden='true'] *::before,
+.motion-v2[data-document-hidden='true'] *::after {
+  animation-play-state: paused !important;
+}
+
+/* One travelling surface instead of six independent active fills. */
+[data-motion-indicator='true'] {
+  position: relative;
+  isolation: isolate;
+}
+.motion-v2 .mobile-nav[data-motion-indicator='true'] {
+  position: fixed;
+}
+[data-motion-indicator='true']::before {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  left: 0;
+  top: 0;
+  width: var(--indicator-width);
+  height: var(--indicator-height);
+  transform: translate(var(--indicator-x), var(--indicator-y));
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 3px 10px #28193c0a;
+  transition:
+    transform 340ms var(--motion-ease),
+    width 340ms var(--motion-ease),
+    height 340ms var(--motion-ease);
+  z-index: -1;
+}
+.motion-v2 [data-motion-indicator='true'] > button.is-active {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+.motion-v2 .sidebar-nav[data-motion-indicator='true']::before {
+  background: linear-gradient(115deg, #ac7dea4d, #7f5bb224);
+  border-color: #e0beff45;
+  box-shadow: inset 0 1px #ffffff18;
+}
+.motion-v2.sidebar-light .sidebar-nav[data-motion-indicator='true']::before,
+.motion-v2 .mobile-nav[data-motion-indicator='true']::before {
+  background: var(--soft);
+  border-color: var(--line);
+}
+.motion-v2
+  :is(.button, .icon-button, .text-button, .habit-day, .dashboard-habits-cell, .check-target) {
+  transition:
+    scale 120ms var(--motion-ease),
+    background-color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+.motion-v2
+  :is(.button, .icon-button, .habit-day, .dashboard-habits-cell, .check-target):active:not(
+    :disabled
+  ) {
+  scale: 0.955;
+}
+.motion-v2
+  :is(
+    .habit-day.is-done i,
+    .dashboard-habits-cell.is-done .dashboard-habits-mark,
+    .task-row.is-complete .task-checkbox
+  ) {
+  animation: motion-complete 360ms var(--motion-ease);
+}
+.motion-v2
+  :is(.task-checkbox, .habit-day.is-done, .dashboard-habits-cell.is-done)
+  .lucide-check
+  :is(path, polyline) {
+  stroke-dasharray: 24;
+  animation: motion-check 300ms var(--motion-ease) both;
+}
+.motion-v2 .habits-heat-day {
+  transition:
+    background-color 380ms ease,
+    border-color 200ms ease;
+}
+.motion-v2 .assistant-message--fresh {
+  animation: motion-message 380ms var(--motion-ease) both;
+}
+.motion-v2 .assistant-message--pending {
+  animation: motion-message 220ms var(--motion-ease) both;
+}
+.dialog:not(.is-closing) {
+  animation: motion-dialog-in 340ms var(--motion-ease) both;
+}
+.dialog::backdrop {
+  animation-duration: 260ms;
+}
+.dialog.is-closing {
+  animation-duration: 180ms;
+}
+.dialog.is-closing::backdrop {
+  animation-duration: 180ms;
+}
+.motion-v2 .toast {
+  animation-duration: 300ms;
+}
+.motion-v2 .habits-date-detail {
+  animation: motion-message 200ms var(--motion-ease);
+}
+.motion-chart-tooltip {
+  position: absolute;
+  z-index: 4;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  translate: -50% 4px;
+  opacity: 0;
+  pointer-events: none;
+  width: max-content;
+  max-width: 230px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font-size: 11px;
+  line-height: 1.4;
+  transition:
+    opacity 160ms ease,
+    translate 200ms var(--motion-ease);
+}
+.habits-bar-button {
+  position: relative;
+}
+.habits-bar-button:is(:hover, :focus-visible) .motion-chart-tooltip {
+  opacity: 1;
+  translate: -50% 0;
+}
+.habits-bar-button:first-child .motion-chart-tooltip {
+  left: 0;
+  translate: 0 4px;
+}
+.habits-bar-button:first-child:is(:hover, :focus-visible) .motion-chart-tooltip {
+  translate: 0 0;
+}
+.habits-bar-button:last-child .motion-chart-tooltip {
+  left: auto;
+  right: 0;
+  translate: 0 4px;
+}
+.habits-bar-button:last-child:is(:hover, :focus-visible) .motion-chart-tooltip {
+  translate: 0 0;
+}
+@keyframes motion-complete {
+  0% {
+    scale: 0.8;
+  }
+  55% {
+    scale: 1.13;
+  }
+  100% {
+    scale: 1;
+  }
+}
+@keyframes motion-check {
+  from {
+    stroke-dashoffset: 24;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes motion-message {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+@keyframes motion-dialog-in {
+  from {
+    opacity: 0;
+    scale: 0.955;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+@media (max-width: 760px) {
+  :root {
+    --motion-rise: 5px;
+    --motion-chart: 690ms;
+    --motion-update: 390ms;
+  }
+  [data-motion-indicator='true']::before {
+    transition-duration: 240ms;
+  }
+  .dialog:not(.is-closing) {
+    animation-duration: 240ms;
+  }
+  .motion-v2 .assistant-message--fresh {
+    animation-duration: 260ms;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .motion-v2 *,
+  .motion-v2 *::before,
+  .motion-v2 *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .dialog,
+  .dialog::backdrop {
+    animation: none !important;
+  }
+}

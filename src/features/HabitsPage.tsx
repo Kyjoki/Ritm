@@ -19,6 +19,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { Habit, HabitInput } from '../../shared/types';
+import { MotionArc, MotionBar, MotionList, MotionNumber } from '../components/Motion';
 import { Dialog } from '../components/Dialog';
 import { api } from '../lib/api';
 import { dateInZone, formatDate } from '../lib/date';
@@ -85,32 +86,6 @@ function periodDates(today: string, period: 'week' | 'month', offset: number) {
   const result: string[] = [];
   for (let day = start; day <= end; day = addDays(day, 1)) result.push(day);
   return result;
-}
-
-function useCountUp(value: number, enabled: boolean) {
-  const [shown, setShown] = useState(value);
-  const presented = useRef(value);
-  useEffect(() => {
-    if (!enabled || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setShown(value);
-      presented.current = value;
-      return;
-    }
-    const from = presented.current;
-    const started = performance.now();
-    let frame = 0;
-    const step = (now: number) => {
-      const amount = Math.min(1, (now - started) / 560);
-      const eased = 1 - Math.pow(1 - amount, 3);
-      presented.current = Math.round(from + (value - from) * eased);
-      setShown(presented.current);
-      if (amount < 1) frame = requestAnimationFrame(step);
-      else presented.current = value;
-    };
-    frame = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(frame);
-  }, [enabled, value]);
-  return shown;
 }
 
 function HabitIconView({ icon, size = 20 }: { icon?: HabitIcon; size?: number }) {
@@ -550,10 +525,6 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
   const todaySummary = habitDaySummary(visibleHabits, today, today);
   const currentStreak = Math.max(0, ...visibleHabits.map((habit) => habitStreak(habit, today)));
   const bestStreak = Math.max(0, ...visibleHabits.map((habit) => habitBestStreak(habit, today)));
-  const animatedRate = useCountUp(rate, !loading);
-  const animatedDone = useCountUp(todaySummary.completed, !loading);
-  const animatedCurrent = useCountUp(currentStreak, !loading);
-  const animatedBest = useCountUp(bestStreak, !loading);
   const daily = dates.map((day) => ({ day, ...habitDaySummary(visibleHabits, day, today) }));
   const describeDay = (entry: (typeof daily)[number], label: string) =>
     entry.day > today
@@ -712,15 +683,16 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
                     pathLength="100"
                     className="habits-gauge-track"
                   />
-                  <path
-                    d="M 12 92 A 78 78 0 0 1 168 92"
-                    pathLength="100"
-                    className="habits-gauge-fill"
-                    strokeDasharray={animatedRate + ' 100'}
-                  />
+                  <MotionArc value={rate} />
                 </svg>
                 <div className="habits-gauge-value" aria-hidden="true">
-                  <strong>{totals.progress === null ? '—' : `${animatedRate}%`}</strong>
+                  <strong>
+                    {totals.progress === null ? (
+                      '—'
+                    ) : (
+                      <MotionNumber value={rate} format={(value) => `${Math.round(value)}%`} />
+                    )}
+                  </strong>
                   <span>
                     {t(
                       totals.progress === null
@@ -735,7 +707,7 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
                   <span>{t('Сегодня выполнено')}</span>
                   {todaySummary.planned ? (
                     <strong aria-label={todaySummary.completed + ' / ' + todaySummary.planned}>
-                      {animatedDone}
+                      <MotionNumber value={todaySummary.completed} />
                       <small> / {todaySummary.planned}</small>
                     </strong>
                   ) : (
@@ -747,14 +719,14 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
                 <div>
                   <span>{t('Текущая серия')}</span>
                   <strong aria-label={currentStreak + ' ' + t('дней')}>
-                    {animatedCurrent}
+                    <MotionNumber value={currentStreak} />
                     <small> {t('дн.')}</small>
                   </strong>
                 </div>
                 <div>
                   <span>{t('Лучшая серия')}</span>
                   <strong aria-label={bestStreak + ' ' + t('дней')}>
-                    {animatedBest}
+                    <MotionNumber value={bestStreak} />
                     <small> {t('дн.')}</small>
                   </strong>
                 </div>
@@ -780,18 +752,19 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
                             className={
                               'habits-bar-button' + (entry.day === selected ? ' is-selected' : '')
                             }
-                            key={entry.day}
+                            key={index}
                             onClick={() => setSelectedDay(entry.day)}
                             aria-label={description}
                             title={description}
                           >
+                            <span className="motion-chart-tooltip" aria-hidden="true">
+                              {description}
+                            </span>
                             <span className="habits-bar-track">
-                              <span
+                              <MotionBar
                                 className="habits-bar-fill"
-                                style={{
-                                  height: percentage + '%',
-                                  animationDelay: Math.min(index * 28, 450) + 'ms',
-                                }}
+                                value={percentage}
+                                index={index}
                               />
                             </span>
                             <span className="habits-bar-label">
@@ -943,7 +916,7 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
               </p>
             </div>
           ) : (
-            <div className="habits-list">
+            <MotionList className="habits-list">
               {visibleHabits.map((habit) => {
                 const streak = habitStreak(habit, today);
                 const best = habitBestStreak(habit, today);
@@ -958,6 +931,7 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
                   <article
                     className={'habit-card panel' + (recordId === habit.id ? ' is-record' : '')}
                     key={habit.id}
+                    data-motion-key={habit.id}
                   >
                     <div className="habit-card-head">
                       <div className="habit-card-identity">
@@ -1021,10 +995,16 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
                     </div>
                     <div className="habit-card-meta">
                       <span>
-                        <Flame size={15} /> {t('Серия')}: <strong>{streak}</strong>
+                        <Flame size={15} /> {t('Серия')}:{' '}
+                        <strong>
+                          <MotionNumber value={streak} />
+                        </strong>
                       </span>
                       <span>
-                        {t('Рекорд')}: <strong>{best}</strong>
+                        {t('Рекорд')}:{' '}
+                        <strong>
+                          <MotionNumber value={best} />
+                        </strong>
                       </span>
                       {nextMilestone && (
                         <span>
@@ -1166,7 +1146,7 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
                   </article>
                 );
               })}
-            </div>
+            </MotionList>
           )}
         </>
       )}

@@ -497,6 +497,12 @@ export function AssistantPage({
     () => document.visibilityState === 'visible',
   );
   const [freshMessageIds, setFreshMessageIds] = useState<string[]>([]);
+  const motionMounted = useRef(false);
+  useLayoutEffect(() => {
+    // Activity reconnects effects. A message received before hiding is now history.
+    if (motionMounted.current) setFreshMessageIds([]);
+    motionMounted.current = true;
+  }, []);
   const [motionEntry, setMotionEntry] = useState<'first' | 'return'>('first');
   const hasBeenActive = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);

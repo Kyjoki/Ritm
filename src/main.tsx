@@ -38,7 +38,10 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean
     );
   }
 }
-createRoot(document.getElementById('root')!).render(
+// Keep the dev root across module invalidation (motion hooks also export shared helpers).
+const root = import.meta.hot?.data.root ?? createRoot(document.getElementById('root')!);
+if (import.meta.hot) import.meta.hot.data.root = root;
+root.render(
   <ErrorBoundary>
     <I18nProvider>
       <App />

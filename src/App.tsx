@@ -41,6 +41,9 @@ import { LoginPage } from './features/LoginPage';
 import { GoogleEventDialog } from './components/GoogleEventDialog';
 import { useGoogleCalendar } from './lib/google-calendar';
 import { EventPreviewDialog } from './features/EventPreviewDialog';
+import './styles/visual-refresh.css';
+import './styles/motion.css';
+import { MotionControls, MotionPage, MotionPresence } from './components/Motion';
 import {
   calendarOccurrences,
   canEditGoogleEvent,
@@ -102,6 +105,8 @@ export default function App() {
   const [prompt, setPrompt] = useState<string>(),
     [clock, setClock] = useState(() => new Date());
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light');
+  const visualPreview =
+    import.meta.env.DEV && new URLSearchParams(window.location.search).has('design-preview');
   const loadGeneration = useRef(0),
     toastId = useRef(0),
     notified = useRef(new Set<string>());
@@ -621,7 +626,11 @@ export default function App() {
       />
     );
   return (
-    <div className={`app-shell sidebar-${data.settings.sidebar}`}>
+    <div className={`app-shell ritm-glass motion-v2 sidebar-${data.settings.sidebar}`}>
+      <MotionControls />
+      {visualPreview ? (
+        <div className="visual-preview-badge">{tr('Локальный preview · демоданные')}</div>
+      ) : null}
       <a
         className="skip-link"
         href="#main-content"
@@ -687,225 +696,251 @@ export default function App() {
         </div>
         <div className="page-container" data-page={page} data-visit={pageVisit}>
           <Activity mode={page === 'day' ? 'visible' : 'hidden'}>
-            <DashboardPage
-              tasks={data.tasks}
-              googleEvents={google.result?.events ?? []}
-              googleUncertain={
-                google.checkingStatus ||
-                migrationLoading ||
-                Boolean(migrationError) ||
-                Boolean(google.error) ||
-                google.status.status === 'reauth_required' ||
-                (google.status.status === 'connected' &&
-                  ((google.loading && !google.result) ||
-                    Boolean(google.error) ||
-                    !google.result ||
-                    google.result.partial))
-              }
-              googlePending={
-                google.checkingStatus ||
-                migrationLoading ||
-                (google.status.status === 'connected' && !google.result && !google.error)
-              }
-              onGoogleEdit={(event, date) => setGooglePreview({ id: event.id, date })}
-              onGoogleTaskToggle={toggleGoogleTask}
-              busyGoogleTaskIds={busyGoogleTaskIds}
-              tasksPermissionMessage={google.result?.tasks?.message}
-              onEnableGoogleTasks={google.status.tasksEnabled ? undefined : google.connectTasks}
-              onQuickAdd={quickAddTask}
-              settings={data.settings}
-              today={today}
-              now={now}
-              busyIds={busyIds}
-              onEdit={(task) => {
-                if (
-                  task.date &&
-                  task.calendarEntry !== false &&
-                  !task.completed &&
-                  !task.completedDates.length &&
-                  google.status.status === 'connected'
-                )
-                  void synchronizeTask(task.id)
-                    .then((result) => setGoogleDialog({ event: result.event }))
-                    .catch(handleError);
-                else setTaskDialog({ task });
-              }}
-              onCreate={(draft) => {
-                if (google.status.status !== 'connected') {
-                  notify(tr('Подключи Google Calendar в настройках, чтобы добавить запись.'), true);
-                  go('settings');
-                  return;
+            <MotionPage name="day">
+              <DashboardPage
+                tasks={data.tasks}
+                googleEvents={google.result?.events ?? []}
+                googleUncertain={
+                  google.checkingStatus ||
+                  migrationLoading ||
+                  Boolean(migrationError) ||
+                  Boolean(google.error) ||
+                  google.status.status === 'reauth_required' ||
+                  (google.status.status === 'connected' &&
+                    ((google.loading && !google.result) ||
+                      Boolean(google.error) ||
+                      !google.result ||
+                      google.result.partial))
                 }
-                setGoogleDialog({
-                  draft: {
-                    date: draft?.date ?? today,
-                    time: draft?.time === null ? null : (draft?.time ?? '09:00'),
-                    allDay: draft?.time === null,
-                    duration: draft?.duration ?? 30,
-                  },
-                });
-              }}
-              onToggle={(task, date, completed) => void toggleTask(task, date, completed)}
-              onAI={ai}
-              onCalendar={() => go('calendar')}
-              onHabits={() => go('habits')}
-            />
+                googlePending={
+                  google.checkingStatus ||
+                  migrationLoading ||
+                  (google.status.status === 'connected' && !google.result && !google.error)
+                }
+                onGoogleEdit={(event, date) => setGooglePreview({ id: event.id, date })}
+                onGoogleTaskToggle={toggleGoogleTask}
+                busyGoogleTaskIds={busyGoogleTaskIds}
+                tasksPermissionMessage={google.result?.tasks?.message}
+                onEnableGoogleTasks={google.status.tasksEnabled ? undefined : google.connectTasks}
+                onQuickAdd={quickAddTask}
+                settings={data.settings}
+                today={today}
+                now={now}
+                busyIds={busyIds}
+                onEdit={(task) => {
+                  if (
+                    task.date &&
+                    task.calendarEntry !== false &&
+                    !task.completed &&
+                    !task.completedDates.length &&
+                    google.status.status === 'connected'
+                  )
+                    void synchronizeTask(task.id)
+                      .then((result) => setGoogleDialog({ event: result.event }))
+                      .catch(handleError);
+                  else setTaskDialog({ task });
+                }}
+                onCreate={(draft) => {
+                  if (google.status.status !== 'connected') {
+                    notify(
+                      tr('Подключи Google Calendar в настройках, чтобы добавить запись.'),
+                      true,
+                    );
+                    go('settings');
+                    return;
+                  }
+                  setGoogleDialog({
+                    draft: {
+                      date: draft?.date ?? today,
+                      time: draft?.time === null ? null : (draft?.time ?? '09:00'),
+                      allDay: draft?.time === null,
+                      duration: draft?.duration ?? 30,
+                    },
+                  });
+                }}
+                onToggle={(task, date, completed) => void toggleTask(task, date, completed)}
+                onAI={ai}
+                onCalendar={() => go('calendar')}
+                onHabits={() => go('habits')}
+              />
+            </MotionPage>
           </Activity>
           <Activity mode={page === 'calendar' ? 'visible' : 'hidden'}>
-            <CalendarPage
-              tasks={data.tasks.filter((task) => !task.date)}
-              today={today}
-              timeZone={data.settings.timeZone}
-              onEdit={(task) => setTaskDialog({ task })}
-              onCreate={() => {
-                notify(tr('Подключи Google Calendar в настройках, чтобы добавить запись.'), true);
-                go('settings');
-              }}
-              googleStatus={google.status}
-              googleEvents={google.result?.events ?? []}
-              googleLoading={google.checkingStatus || google.loading || migrationLoading}
-              googleError={google.error || migrationError}
-              googlePartial={google.result?.partial ?? false}
-              googleFetchedAt={google.result?.fetchedAt ?? null}
-              onGoogleEdit={(event) => setGoogleDialog({ event })}
-              onGoogleMove={async (event, date, time) => {
-                try {
-                  if (
-                    !canEditGoogleEvent(event, data.settings.timeZone) ||
-                    event.taskLink ||
-                    event.googleTask ||
-                    event.allDay !== (time === null)
-                  )
-                    throw new Error(tr('Эту запись нельзя перетащить. Открой её для просмотра.'));
-                  const input = { ...googleEventDraft(event, data.settings.timeZone), date, time };
-                  const saved = await api.updateGoogleEvent(event.id, input, event.etag);
-                  google.upsertEvent(saved);
+            <MotionPage name="calendar">
+              <CalendarPage
+                tasks={data.tasks.filter(
+                  (task) => !task.date || (visualPreview && task.calendarEntry !== false),
+                )}
+                today={today}
+                timeZone={data.settings.timeZone}
+                onEdit={(task) => setTaskDialog({ task })}
+                onCreate={() => {
+                  notify(tr('Подключи Google Calendar в настройках, чтобы добавить запись.'), true);
+                  go('settings');
+                }}
+                googleStatus={google.status}
+                googleEvents={google.result?.events ?? []}
+                googleLoading={google.checkingStatus || google.loading || migrationLoading}
+                googleError={google.error || migrationError}
+                googlePartial={google.result?.partial ?? false}
+                googleFetchedAt={google.result?.fetchedAt ?? null}
+                onGoogleEdit={(event) => setGoogleDialog({ event })}
+                onGoogleMove={async (event, date, time) => {
+                  try {
+                    if (
+                      !canEditGoogleEvent(event, data.settings.timeZone) ||
+                      event.taskLink ||
+                      event.googleTask ||
+                      event.allDay !== (time === null)
+                    )
+                      throw new Error(tr('Эту запись нельзя перетащить. Открой её для просмотра.'));
+                    const input = {
+                      ...googleEventDraft(event, data.settings.timeZone),
+                      date,
+                      time,
+                    };
+                    const saved = await api.updateGoogleEvent(event.id, input, event.etag);
+                    google.upsertEvent(saved);
+                    google.refresh();
+                    notify(tr('Запись перенесена в календаре'));
+                  } catch (error) {
+                    handleError(error);
+                    google.refresh();
+                  }
+                }}
+                onGoogleTaskToggle={toggleGoogleTask}
+                busyGoogleTaskIds={busyGoogleTaskIds}
+                onEnableGoogleTasks={google.status.tasksEnabled ? undefined : google.connectTasks}
+                onGoogleCreate={(draft) => setGoogleDialog({ draft })}
+                onRangeChange={google.setRange}
+                onGoogleRefresh={() => {
+                  failedTransfers.current.clear();
+                  setMigrationError('');
+                  setMigrationRevision((value) => value + 1);
                   google.refresh();
-                  notify(tr('Запись перенесена в календаре'));
-                } catch (error) {
-                  handleError(error);
-                  google.refresh();
-                }
-              }}
-              onGoogleTaskToggle={toggleGoogleTask}
-              busyGoogleTaskIds={busyGoogleTaskIds}
-              onEnableGoogleTasks={google.status.tasksEnabled ? undefined : google.connectTasks}
-              onGoogleCreate={(draft) => setGoogleDialog({ draft })}
-              onRangeChange={google.setRange}
-              onGoogleRefresh={() => {
-                failedTransfers.current.clear();
-                setMigrationError('');
-                setMigrationRevision((value) => value + 1);
-                google.refresh();
-              }}
-              onOpenSettings={() => go('settings')}
-            />
+                }}
+                onOpenSettings={() => go('settings')}
+              />
+            </MotionPage>
           </Activity>
           <Activity mode={page === 'assistant' ? 'visible' : 'hidden'}>
-            <AssistantPage
-              active={page === 'assistant'}
-              conversations={data.conversations}
-              aiStatus={data.aiStatus}
-              onCreate={async () => {
-                const c = await api.createConversation();
-                putConversation(c);
-                return c;
-              }}
-              onDelete={async (id) => {
-                await api.deleteConversation(id);
-                setData((old) =>
-                  old
-                    ? { ...old, conversations: old.conversations.filter((c) => c.id !== id) }
-                    : old,
-                );
-              }}
-              onSend={async (id, message, requestId, mode, reviewMessageId) => {
-                try {
-                  const c = await api.chat(id, message, requestId, mode, reviewMessageId);
+            <MotionPage name="assistant">
+              <AssistantPage
+                active={page === 'assistant'}
+                conversations={data.conversations}
+                aiStatus={data.aiStatus}
+                onCreate={async () => {
+                  const c = await api.createConversation();
                   putConversation(c);
                   return c;
-                } catch (failure) {
-                  if (failure instanceof ApiError && failure.code === 'AI_DISCUSSION_STALE') {
-                    try {
-                      const fresh = await api.bootstrap();
-                      setData((old) =>
-                        old ? { ...old, conversations: fresh.conversations } : old,
-                      );
-                    } catch {
-                      // Preserve the failed reply; the user can reload if history is unavailable.
+                }}
+                onDelete={async (id) => {
+                  await api.deleteConversation(id);
+                  setData((old) =>
+                    old
+                      ? { ...old, conversations: old.conversations.filter((c) => c.id !== id) }
+                      : old,
+                  );
+                }}
+                onSend={async (id, message, requestId, mode, reviewMessageId) => {
+                  try {
+                    const c = await api.chat(id, message, requestId, mode, reviewMessageId);
+                    putConversation(c);
+                    return c;
+                  } catch (failure) {
+                    if (failure instanceof ApiError && failure.code === 'AI_DISCUSSION_STALE') {
+                      try {
+                        const fresh = await api.bootstrap();
+                        setData((old) =>
+                          old ? { ...old, conversations: fresh.conversations } : old,
+                        );
+                      } catch {
+                        // Preserve the failed reply; the user can reload if history is unavailable.
+                      }
                     }
+                    throw failure;
                   }
-                  throw failure;
-                }
-              }}
-              onApply={async (conversationId, messageId, proposalIds) => {
-                const result = await api.proposals('apply', conversationId, messageId, proposalIds);
-                setData((old) =>
-                  old
-                    ? {
-                        ...old,
-                        tasks: result.tasks,
-                        conversations: old.conversations.map((c) =>
-                          c.id === result.conversation.id ? result.conversation : c,
-                        ),
-                      }
-                    : old,
-                );
-                notify(tr('Выбранные изменения применены'));
-              }}
-              onReject={async (c, m, ids) => {
-                putConversation(await api.reject(c, m, ids));
-              }}
-              onUndo={async (c, m, ids) => {
-                const result = await api.proposals('undo', c, m, ids);
-                setData((old) =>
-                  old
-                    ? {
-                        ...old,
-                        tasks: result.tasks,
-                        conversations: old.conversations.map((v) =>
-                          v.id === result.conversation.id ? result.conversation : v,
-                        ),
-                      }
-                    : old,
-                );
-                notify(tr('Изменения расписания отменены'));
-              }}
-              onOpenSettings={() => go('settings')}
-              initialPrompt={prompt}
-              onPromptConsumed={() => setPrompt(undefined)}
-            />
+                }}
+                onApply={async (conversationId, messageId, proposalIds) => {
+                  const result = await api.proposals(
+                    'apply',
+                    conversationId,
+                    messageId,
+                    proposalIds,
+                  );
+                  setData((old) =>
+                    old
+                      ? {
+                          ...old,
+                          tasks: result.tasks,
+                          conversations: old.conversations.map((c) =>
+                            c.id === result.conversation.id ? result.conversation : c,
+                          ),
+                        }
+                      : old,
+                  );
+                  notify(tr('Выбранные изменения применены'));
+                }}
+                onReject={async (c, m, ids) => {
+                  putConversation(await api.reject(c, m, ids));
+                }}
+                onUndo={async (c, m, ids) => {
+                  const result = await api.proposals('undo', c, m, ids);
+                  setData((old) =>
+                    old
+                      ? {
+                          ...old,
+                          tasks: result.tasks,
+                          conversations: old.conversations.map((v) =>
+                            v.id === result.conversation.id ? result.conversation : v,
+                          ),
+                        }
+                      : old,
+                  );
+                  notify(tr('Изменения расписания отменены'));
+                }}
+                onOpenSettings={() => go('settings')}
+                initialPrompt={prompt}
+                onPromptConsumed={() => setPrompt(undefined)}
+              />
+            </MotionPage>
           </Activity>
           <Activity mode={page === 'finance' ? 'visible' : 'hidden'}>
-            <FinancePage active={page === 'finance'} />
+            <MotionPage name="finance">
+              <FinancePage active={page === 'finance'} />
+            </MotionPage>
           </Activity>
           <Activity mode={page === 'habits' ? 'visible' : 'hidden'}>
-            <HabitsPage active={page === 'habits'} timeZone={data.settings.timeZone} />
+            <MotionPage name="habits">
+              <HabitsPage active={page === 'habits'} timeZone={data.settings.timeZone} />
+            </MotionPage>
           </Activity>
           <Activity mode={page === 'settings' ? 'visible' : 'hidden'}>
-            <SettingsPage
-              active={page === 'settings'}
-              settings={data.settings}
-              aiStatus={data.aiStatus}
-              googleStatus={google.status}
-              onConnectGoogle={google.connect}
-              onConnectGoogleTasks={google.connectTasks}
-              googleTasksMessage={google.result?.tasks?.message}
-              onDisconnectGoogle={google.disconnect}
-              onGoogleConfigured={async () => {
-                await google.refreshStatus();
-              }}
-              onSave={saveSettings}
-              onConfigureAI={async (key, model) => {
-                const aiStatus = await api.configureAI(key, model);
-                setData((old) => (old ? { ...old, aiStatus } : old));
-              }}
-              onDisconnectAI={async () => {
-                const aiStatus = await api.disconnectAI();
-                setData((old) => (old ? { ...old, aiStatus } : old));
-              }}
-              onLogout={requiresLogin ? logout : undefined}
-            />
+            <MotionPage name="settings">
+              <SettingsPage
+                active={page === 'settings'}
+                settings={data.settings}
+                aiStatus={data.aiStatus}
+                googleStatus={google.status}
+                onConnectGoogle={google.connect}
+                onConnectGoogleTasks={google.connectTasks}
+                googleTasksMessage={google.result?.tasks?.message}
+                onDisconnectGoogle={google.disconnect}
+                onGoogleConfigured={async () => {
+                  await google.refreshStatus();
+                }}
+                onSave={saveSettings}
+                onConfigureAI={async (key, model) => {
+                  const aiStatus = await api.configureAI(key, model);
+                  setData((old) => (old ? { ...old, aiStatus } : old));
+                }}
+                onDisconnectAI={async () => {
+                  const aiStatus = await api.disconnectAI();
+                  setData((old) => (old ? { ...old, aiStatus } : old));
+                }}
+                onLogout={requiresLogin ? logout : undefined}
+              />
+            </MotionPage>
           </Activity>
         </div>
         <footer className="app-footer">
@@ -975,28 +1010,30 @@ export default function App() {
           }}
         />
       ) : null}
-      {toast ? (
-        <div
-          className={`toast${toast.error ? ' toast-error' : ''}`}
-          role={toast.error ? 'alert' : 'status'}
-        >
-          {toast.error ? <CircleAlert size={18} /> : <Check size={18} />}
-          <span>{toast.message}</span>
-          {toast.undo ? (
-            <button disabled={undoBusy} onClick={() => void runUndo()}>
-              {undoBusy ? <LoaderCircle size={15} className="spinning" /> : <Undo2 size={15} />}
-              {tr('Отменить')}{' '}
-            </button>
-          ) : null}
-          <button
-            className="toast-close"
-            onClick={() => setToast(null)}
-            aria-label={tr('Закрыть уведомление')}
+      <MotionPresence>
+        {toast ? (
+          <div
+            className={`toast${toast.error ? ' toast-error' : ''}`}
+            role={toast.error ? 'alert' : 'status'}
           >
-            <X size={16} />
-          </button>
-        </div>
-      ) : null}
+            {toast.error ? <CircleAlert size={18} /> : <Check size={18} />}
+            <span>{toast.message}</span>
+            {toast.undo ? (
+              <button disabled={undoBusy} onClick={() => void runUndo()}>
+                {undoBusy ? <LoaderCircle size={15} className="spinning" /> : <Undo2 size={15} />}
+                {tr('Отменить')}{' '}
+              </button>
+            ) : null}
+            <button
+              className="toast-close"
+              onClick={() => setToast(null)}
+              aria-label={tr('Закрыть уведомление')}
+            >
+              <X size={16} />
+            </button>
+          </div>
+        ) : null}
+      </MotionPresence>
     </div>
   );
 }

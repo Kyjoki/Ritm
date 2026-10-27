@@ -1,3 +1,4 @@
+import { MotionNumber } from './Motion';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
@@ -114,9 +115,16 @@ export function DashboardHabits({ today, onOpen }: { today: string; onOpen: () =
           <h2 id="dashboard-habits-title">
             {t('Привычки')}{' '}
             <span>
-              {todaySummary.planned
-                ? `${todaySummary.completed}/${todaySummary.planned} ${t('За сегодня').toLocaleLowerCase(language)}`
-                : t('Нет запланированных привычек')}
+              {todaySummary.planned ? (
+                <MotionNumber
+                  value={todaySummary.completed}
+                  format={(value) =>
+                    `${Math.round(value)}/${todaySummary.planned} ${t('За сегодня').toLocaleLowerCase(language)}`
+                  }
+                />
+              ) : (
+                t('Нет запланированных привычек')
+              )}
             </span>
           </h2>
         </div>
@@ -191,7 +199,7 @@ export function DashboardHabits({ today, onOpen }: { today: string; onOpen: () =
                     <span className="dashboard-habits-copy">
                       <strong title={habit.title}>{habit.title}</strong>
                       <small>
-                        {t('Серия')}: {streak}
+                        {t('Серия')}: <MotionNumber value={streak} />
                         {habit.target
                           ? ` · ${t('Прогресс {count} из {target} {unit}', { count: habitProgress(habit, today), target: habit.target, unit: habit.unit ?? '' })}`
                           : ''}
