@@ -283,4 +283,13 @@ export interface TelegramStatus {
   account?: { username?: string; firstName: string };
   pairingUrl?: string;
   pairingExpiresAt?: number;
+  reminders?: {
+    enabled: boolean;
+    leadMinutes: 0 | 5 | 10 | 15 | 30 | 60;
+    timeZone: string;
+    ready: boolean;
+    schedulerActive: boolean;
+    googleConnected: boolean;
+    lastRunAt: number | null;
+  };
 }

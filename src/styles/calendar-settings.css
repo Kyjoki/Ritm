@@ -994,6 +994,57 @@
   color: #589bc8;
   background: color-mix(in srgb, #589bc8 14%, var(--panel));
 }
+.settings-telegram-reminders {
+  margin: 0 0 16px 56px;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+}
+.settings-telegram-reminders small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+.settings-telegram-reminder-heading,
+.settings-telegram-reminder-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.settings-telegram-reminder-heading > div,
+.settings-telegram-reminder-controls label {
+  display: grid;
+  gap: 5px;
+}
+.settings-telegram-reminder-controls select {
+  min-height: 38px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--text);
+  background: var(--panel);
+  font: inherit;
+}
+.settings-telegram-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.settings-telegram-switch input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+.settings-telegram-reminders :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .settings-telegram-setup,
 .settings-telegram-pairing {
   margin: 0 0 16px 56px;
@@ -1034,6 +1085,17 @@
   margin: 0;
 }
 @media (max-width: 600px) {
+  .settings-telegram-reminders {
+    margin-left: 0;
+  }
+  .settings-telegram-reminder-controls > * {
+    width: 100%;
+  }
+  .settings-telegram-reminder-controls select,
+  .settings-telegram-reminder-controls button {
+    min-height: 44px;
+    width: 100%;
+  }
   .settings-telegram-setup,
   .settings-telegram-pairing {
     margin-left: 0;

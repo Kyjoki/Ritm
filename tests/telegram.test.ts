@@ -101,6 +101,17 @@ test('Telegram links only a private chat through a short-lived owner-issued star
   assert.equal(linked.account.firstName, 'Owner');
   assert.match(sent.at(-1)!.text, /Чат подключён/);
   assert.ok(sent.at(-1)!.reply_markup);
+  const reminderSettings = await call('/reminders', 'PATCH', { enabled: true, leadMinutes: 10 });
+  assert.equal(reminderSettings.status, 200);
+  assert.equal(reminderSettings.body.reminders.enabled, true);
+  assert.equal(reminderSettings.body.reminders.ready, false);
+  assert.equal((await call('/reminders/test', 'POST', {})).status, 200);
+  assert.match(sent.at(-1)!.text, /Тестовое уведомление/);
+  assert.equal(
+    (await call('/webhook', 'POST', update(42, 'private', '🔔 Напоминания'), header)).status,
+    200,
+  );
+  assert.match(sent.at(-1)!.text, /Предупреждение: за 10 мин/);
   assert.equal(
     (await call('/webhook', 'POST', update(42, 'private', '➕ Добавить дело'), header)).status,
     200,
@@ -277,6 +288,7 @@ test('owner voice messages create a draft and require a single confirmed save', 
       allDay: false,
     }),
     googleService: {
+      status: async () => ({ status: 'connected' }) as never,
       connectionIdentity: async () => 'google-account-1',
       createEvent: async (input: GoogleEventInput, requestId: string) => {
         createdEvents.push({ title: input.title, requestId });

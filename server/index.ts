@@ -1,5 +1,5 @@
 import express, { type ErrorRequestHandler } from 'express';
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -21,6 +21,7 @@ import type { WorkspaceRepository } from './repository.ts';
 import { SqliteRuntimeState, type RuntimeState } from './runtime-state.ts';
 import { SecretStore } from './secrets.ts';
 import { createTelegramService, TELEGRAM_WEBHOOK_PATH } from './telegram.ts';
+import { createTelegramReminderRunner } from './telegram-reminders.ts';
 import type { VoiceInterpreter } from './telegram-voice.ts';
 import { Security } from './security.ts';
 import { AppError, conflict } from './errors.ts';
@@ -154,7 +155,12 @@ export function createApp(options: AppOptions = {}) {
     origin: env.APP_ORIGIN,
     transport: options.telegramTransport,
     interpretVoice: options.telegramVoiceInterpreter,
+    schedulerState: state,
+    schedulerConfigured: Boolean(
+      env.REMINDER_SCHEDULER_SECRET && env.REMINDER_SCHEDULER_SECRET.length >= 32,
+    ),
   });
+  const runTelegramReminders = createTelegramReminderRunner({ state, telegram, store, google });
   const assistant = options.assistant ?? runAssistant;
   const transferTaskToGoogle = createTaskGoogleTransfer({ store, leases: secrets, google });
   const app = express();
@@ -214,7 +220,8 @@ export function createApp(options: AppOptions = {}) {
       (['GET', 'HEAD'].includes(req.method) && ['/api/health', '/api/session'].includes(path)) ||
       (req.method === 'POST' && path === '/api/login') ||
       (req.method === 'GET' && path === GOOGLE_CALLBACK_PATH) ||
-      (req.method === 'POST' && path === TELEGRAM_WEBHOOK_PATH);
+      (req.method === 'POST' &&
+        [TELEGRAM_WEBHOOK_PATH, '/api/integrations/telegram/reminders/run'].includes(path));
     if (publicRoute) next();
     else void security.requireAuth(req, res, next);
   });
@@ -232,6 +239,19 @@ export function createApp(options: AppOptions = {}) {
     await security.limit(req, 'telegram-webhook', 120, 60_000);
     await telegram.webhook(req.get('x-telegram-bot-api-secret-token'), req.body);
     res.json({ ok: true });
+  });
+  app.post('/api/integrations/telegram/reminders/run', async (req, res) => {
+    const expected = env.REMINDER_SCHEDULER_SECRET;
+    const supplied = req.get('x-ritm-reminder-secret') ?? '';
+    if (
+      !expected ||
+      expected.length < 32 ||
+      req.get('upstash-schedule-id') !== 'ritm-telegram-reminders' ||
+      Buffer.byteLength(supplied) !== Buffer.byteLength(expected) ||
+      !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))
+    )
+      throw new AppError(401, 'REMINDER_AUTH_REQUIRED', 'Планировщик не авторизован.');
+    res.json(await runTelegramReminders());
   });
   app.get('/api/session', async (req, res) => {
     await security.limit(req, 'public-session', 120, 60_000);
@@ -303,6 +323,27 @@ export function createApp(options: AppOptions = {}) {
   });
   app.get('/api/integrations/telegram/status', async (_req, res) => {
     res.json(await telegram.status());
+  });
+  app.patch('/api/integrations/telegram/reminders', async (req, res) => {
+    const input = z
+      .object({
+        enabled: z.boolean(),
+        leadMinutes: z.union([
+          z.literal(0),
+          z.literal(5),
+          z.literal(10),
+          z.literal(15),
+          z.literal(30),
+          z.literal(60),
+        ]),
+      })
+      .strict()
+      .parse(req.body);
+    res.json(await telegram.saveReminderSettings(input));
+  });
+  app.post('/api/integrations/telegram/reminders/test', async (_req, res) => {
+    await security.limit(_req, 'telegram-reminder-test', 3, 60_000);
+    res.json(await telegram.testReminder());
   });
   app.post('/api/integrations/telegram/configuration', async (req, res) => {
     await security.limit(req, 'telegram-configuration', 5, 60_000);

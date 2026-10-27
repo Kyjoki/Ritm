@@ -64,6 +64,20 @@ export const settingsAssistantEnglish: Record<string, string> = {
   'В твоём ритме.': 'At your own pace.',
   Подключения: 'Connections',
   'Личный чат привязан': 'Private chat linked',
+  'Напоминания в Telegram': 'Telegram reminders',
+  'Автоматическая отправка работает': 'Automatic delivery is active',
+  'Ожидание планировщика или привязки чата': 'Waiting for the scheduler or a linked chat',
+  'Автоматическая отправка выключена': 'Automatic delivery is off',
+  Включить: 'Enable',
+  Предупредить: 'Notify me',
+  'В момент начала': 'At start time',
+  'За {minutes} минут': '{minutes} minutes before',
+  'Отправить тестовое уведомление': 'Send test notification',
+  'Не удалось отправить тестовое уведомление.': 'Could not send the test notification.',
+  'Тестовое сообщение отправлено. Оно не подтверждает работу планировщика.':
+    'Test message sent. It does not confirm the scheduler is running.',
+  'Планировщик ещё не подтвердил регулярный запуск.':
+    'The scheduler has not confirmed regular runs yet.',
   'Бот настроен · чат не привязан': 'Bot configured · chat not linked',
   'Подключи своего бота, затем привяжи личный чат.':
     'Connect your bot, then link your private chat.',

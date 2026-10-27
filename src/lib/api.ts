@@ -141,6 +141,10 @@ export const api = {
     request<AiStatus>('/settings/openai', 'POST', { apiKey, model }),
   disconnectAI: () => request<AiStatus>('/settings/openai', 'DELETE'),
   telegramStatus: () => request<TelegramStatus>('/integrations/telegram/status'),
+  saveTelegramReminders: (enabled: boolean, leadMinutes: 0 | 5 | 10 | 15 | 30 | 60) =>
+    request<TelegramStatus>('/integrations/telegram/reminders', 'PATCH', { enabled, leadMinutes }),
+  testTelegramReminder: () =>
+    request<{ ok: true }>('/integrations/telegram/reminders/test', 'POST', {}),
   configureTelegram: (botToken: string) =>
     request<TelegramStatus>('/integrations/telegram/configuration', 'POST', { botToken }),
   pairTelegram: () => request<TelegramStatus>('/integrations/telegram/pairing', 'POST', {}),

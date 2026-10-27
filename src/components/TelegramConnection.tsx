@@ -11,6 +11,7 @@ export function TelegramConnection() {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [testSent, setTestSent] = useState(false);
   useEffect(() => {
     let active = true;
     void api
@@ -175,6 +176,96 @@ export function TelegramConnection() {
           </button>
         </div>
       ) : null}
+      <div className="settings-telegram-reminders">
+        <div className="settings-telegram-reminder-heading">
+          <div>
+            <strong>{t('Напоминания в Telegram')}</strong>
+            <small>
+              {status?.reminders?.ready
+                ? t('Автоматическая отправка работает')
+                : status?.reminders?.enabled
+                  ? t('Ожидание планировщика или привязки чата')
+                  : t('Автоматическая отправка выключена')}
+            </small>
+          </div>
+          <label className="settings-telegram-switch">
+            <input
+              type="checkbox"
+              checked={status?.reminders?.enabled ?? false}
+              disabled={busy || !status?.linked}
+              onChange={(event) =>
+                void action(() =>
+                  api.saveTelegramReminders(
+                    event.target.checked,
+                    status?.reminders?.leadMinutes ?? 10,
+                  ),
+                )
+              }
+            />
+            <span>{t('Включить')}</span>
+          </label>
+        </div>
+        <div className="settings-telegram-reminder-controls">
+          <label>
+            {t('Предупредить')}
+            <select
+              value={status?.reminders?.leadMinutes ?? 10}
+              disabled={busy || !status?.linked}
+              onChange={(event) =>
+                void action(() =>
+                  api.saveTelegramReminders(
+                    status?.reminders?.enabled ?? false,
+                    Number(event.target.value) as 0 | 5 | 10 | 15 | 30 | 60,
+                  ),
+                )
+              }
+            >
+              {[0, 5, 10, 15, 30, 60].map((minutes) => (
+                <option key={minutes} value={minutes}>
+                  {minutes === 0 ? t('В момент начала') : t('За {minutes} минут', { minutes })}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span>
+            {t('Часовой пояс')}: {status?.reminders?.timeZone ?? '—'}
+          </span>
+          <button
+            type="button"
+            className="button button-secondary"
+            disabled={busy || !status?.linked}
+            onClick={() =>
+              void (async () => {
+                setBusy(true);
+                setError('');
+                setTestSent(false);
+                try {
+                  await api.testTelegramReminder();
+                  setTestSent(true);
+                } catch (failure) {
+                  setError(
+                    failure instanceof Error
+                      ? failure.message
+                      : t('Не удалось отправить тестовое уведомление.'),
+                  );
+                } finally {
+                  setBusy(false);
+                }
+              })()
+            }
+          >
+            {t('Отправить тестовое уведомление')}
+          </button>
+        </div>
+        {testSent ? (
+          <small role="status">
+            {t('Тестовое сообщение отправлено. Оно не подтверждает работу планировщика.')}
+          </small>
+        ) : null}
+        {status?.reminders?.enabled && !status.reminders.schedulerActive ? (
+          <small>{t('Планировщик ещё не подтвердил регулярный запуск.')}</small>
+        ) : null}
+      </div>
       {error ? (
         <p className="settings-inline-error" role="alert">
           {t(error)}

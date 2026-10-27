@@ -15,6 +15,19 @@ import {
 
 export const TELEGRAM_WEBHOOK_PATH = '/api/integrations/telegram/webhook';
 const CONFIG_NAME = 'telegram-connection';
+const REMINDER_SETTINGS_NAME = 'telegram-reminder-settings';
+export const REMINDER_HEARTBEAT_NAME = 'telegram-reminder-heartbeat';
+export const reminderLeadSchema = z.union([
+  z.literal(0),
+  z.literal(5),
+  z.literal(10),
+  z.literal(15),
+  z.literal(30),
+  z.literal(60),
+]);
+const reminderSettingsSchema = z
+  .object({ enabled: z.boolean(), leadMinutes: reminderLeadSchema })
+  .strict();
 const PAIRING_LIFETIME_MS = 10 * 60_000;
 const VOICE_DRAFT_LIFETIME_MS = 10 * 60_000;
 const WEBHOOK_VERSION = 2;
@@ -115,15 +128,56 @@ export function createTelegramService({
   transport = fetch,
   interpretVoice = createVoiceInterpreter(secrets),
   now = Date.now,
+  schedulerState,
+  schedulerConfigured = false,
 }: {
   secrets: SecretStore;
   store: WorkspaceRepository;
-  google: Pick<GoogleCalendarService, 'createEvent' | 'connectionIdentity'>;
+  google: Pick<GoogleCalendarService, 'createEvent' | 'connectionIdentity' | 'status'>;
   origin?: string;
   transport?: typeof fetch;
   interpretVoice?: VoiceInterpreter;
   now?: () => number;
+  schedulerState?: { getServerSecret(name: string): Promise<string | null> | string | null };
+  schedulerConfigured?: boolean;
 }) {
+  async function reminderSettings() {
+    const saved = await secrets.getSecret(REMINDER_SETTINGS_NAME);
+    return saved
+      ? reminderSettingsSchema.parse(JSON.parse(saved))
+      : { enabled: false, leadMinutes: 10 as const };
+  }
+  async function reminderStatus(config: Configuration | null) {
+    const settings = await reminderSettings();
+    const timeZone = (await store.settings()).timeZone;
+    const lastRun = Number(await schedulerState?.getServerSecret(REMINDER_HEARTBEAT_NAME));
+    const lastRunAt = Number.isFinite(lastRun) && lastRun > 0 ? lastRun : null;
+    const schedulerActive = Boolean(
+      schedulerConfigured && lastRunAt && now() - lastRunAt < 5 * 60_000,
+    );
+    const googleConnected = (await google.status()).status === 'connected';
+    return {
+      ...settings,
+      timeZone,
+      schedulerActive,
+      lastRunAt,
+      googleConnected,
+      ready: Boolean(settings.enabled && config?.account && schedulerActive && googleConnected),
+    };
+  }
+  async function saveReminderSettings(input: {
+    enabled: boolean;
+    leadMinutes: 0 | 5 | 10 | 15 | 30 | 60;
+  }) {
+    const parsed = reminderSettingsSchema.parse(input);
+    await secrets.saveSecret(REMINDER_SETTINGS_NAME, JSON.stringify(parsed));
+    return status();
+  }
+  async function reminderSnapshot() {
+    const config = await read();
+    const settings = await reminderSettings();
+    return config?.account && settings.enabled ? { settings, chatId: config.account.chatId } : null;
+  }
   async function english() {
     return (await store?.settings())?.language === 'en';
   }
@@ -301,7 +355,72 @@ export function createTelegramService({
     };
   }
   async function status() {
-    return statusOf(await ensureWebhook(await read()));
+    const config = await ensureWebhook(await read());
+    return { ...statusOf(config), reminders: await reminderStatus(config) };
+  }
+  async function testReminder() {
+    const config = await read();
+    if (!config?.account)
+      throw new AppError(409, 'TELEGRAM_NOT_LINKED', 'Сначала привяжите личный чат.');
+    await send(
+      config,
+      await phrase(
+        '🔔 Тестовое уведомление Ritm. Автоматическую отправку проверяйте отдельно.',
+        '🔔 Ritm test notification. Check automatic delivery separately.',
+      ),
+    );
+    return { ok: true };
+  }
+  async function deliverReminder(text: string, chatId: number) {
+    const config = await read();
+    const settings = await reminderSettings();
+    if (!config?.account || !settings.enabled || config.account.chatId !== chatId)
+      return 'disabled' as const;
+    if (!origin?.startsWith('https://')) return 'rejected' as const;
+    // Plain text is sent without parse_mode; user titles cannot inject Telegram markup.
+    const body = {
+      chat_id: chatId,
+      text,
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: await phrase('Открыть в Ritm', 'Open in Ritm'),
+              url: origin,
+            },
+          ],
+        ],
+      },
+      link_preview_options: { is_disabled: true },
+    };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      let response: Response;
+      try {
+        response = await transport(`https://api.telegram.org/bot${config.botToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(8_000),
+        });
+      } catch {
+        return 'uncertain' as const;
+      }
+      const result = (await response.json().catch(() => null)) as {
+        ok?: boolean;
+        result?: unknown;
+        parameters?: { retry_after?: number };
+      } | null;
+      if (response.ok && result?.ok && result.result) return 'sent' as const;
+      if (response.ok) return result ? ('rejected' as const) : ('uncertain' as const);
+      if (response.status === 429 || response.status >= 500) {
+        if (attempt === 2) return 'rejected' as const;
+        const delay = Math.min(5000, Math.max(500, (result?.parameters?.retry_after ?? 1) * 1000));
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      return 'rejected' as const;
+    }
+    return 'rejected' as const;
   }
   async function configure(botToken: string): Promise<TelegramStatus> {
     const token = botTokenSchema.parse(botToken);
@@ -338,7 +457,7 @@ export function createTelegramService({
       void call<boolean>(existing.botToken, 'deleteWebhook', { drop_pending_updates: true }).catch(
         () => {},
       );
-    return statusOf(next);
+    return status();
   }
   async function createPairing(): Promise<TelegramStatus> {
     const lease = await secrets.acquireLease('telegram-pairing', 15_000);
@@ -362,7 +481,7 @@ export function createTelegramService({
         },
       };
       await write(next);
-      return statusOf(next);
+      return status();
     } finally {
       await secrets.releaseLease('telegram-pairing', lease);
     }
@@ -785,12 +904,12 @@ export function createTelegramService({
       } else if (['📋 План на сегодня', '📋 Today', '/today'].includes(text)) {
         await dayReport(config, false);
       } else if (['🔔 Напоминания', '🔔 Reminders', '/reminders'].includes(text)) {
+        const current = await reminderStatus(config);
         await send(
           config,
-          await phrase(
-            'Автоматические сообщения пока не включены. На текущем Vercel Hobby запуск бывает не чаще раза в день и может задержаться до часа. Для напоминаний перед событиями нужен отдельный планировщик.',
-            'Automatic messages are not enabled yet. Vercel Hobby runs scheduled jobs at most daily, with up to an hour of delay. Event reminders need another scheduler.',
-          ),
+          (await english())
+            ? `Reminders: ${current.ready ? 'active' : current.enabled ? 'waiting for scheduler or linked chat' : 'off'}\nLead time: ${current.leadMinutes} min\nTime zone: ${current.timeZone}\nChange settings in Ritm.`
+            : `Напоминания: ${current.ready ? 'включены' : current.enabled ? 'ожидают планировщик или привязку чата' : 'выключены'}\nПредупреждение: за ${current.leadMinutes} мин\nЧасовой пояс: ${current.timeZone}\nИзменить настройки можно в Ritm.`,
         );
       } else if (config.awaitingTask && text && !text.startsWith('/')) {
         await handleTaskText(config, text);
@@ -852,7 +971,18 @@ export function createTelegramService({
         () => {},
       );
     await secrets.removeSecret(CONFIG_NAME);
-    return { configured: false, linked: false } satisfies TelegramStatus;
+    await secrets.removeSecret(REMINDER_SETTINGS_NAME);
+    return status();
   }
-  return { status, configure, createPairing, webhook, disconnect };
+  return {
+    status,
+    configure,
+    createPairing,
+    webhook,
+    disconnect,
+    saveReminderSettings,
+    reminderSnapshot,
+    deliverReminder,
+    testReminder,
+  };
 }
