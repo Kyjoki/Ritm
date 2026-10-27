@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Habit } from '../shared/types.ts';
 import {
+  habitAnalyticsScope,
   habitBestStreak,
   habitCompleteOn,
   habitCompletionRate,
@@ -165,4 +166,68 @@ test('client and server honor historical periods, archive state, and owner dates
   });
   assert.equal(dateInZone('Asia/Qyzylorda', new Date('2026-10-26T20:30:00Z')), '2026-10-27');
   assert.equal(dateInZone('America/New_York', new Date('2026-10-26T02:30:00Z')), '2026-10-25');
+});
+
+test('active analytics excludes archived history while archive view preserves it', () => {
+  const base = {
+    createdAt: '2026-10-25T00:00:00.000Z',
+    updatedAt: '2026-10-27T00:00:00.000Z',
+    startDate: '2026-10-25',
+  };
+  const gym = {
+    ...base,
+    id: 'gym',
+    title: 'Gym',
+    weekdays: [1, 2, 6],
+    archived: false,
+    completedDates: ['2026-10-26'],
+  } as Habit;
+  const ielts = {
+    ...base,
+    id: 'ielts',
+    title: 'IELTS',
+    weekdays: [0, 2, 5, 6],
+    archived: false,
+    completedDates: ['2026-10-25'],
+  } as Habit;
+  const oldHabit = {
+    ...base,
+    id: 'old',
+    title: 'Old habit',
+    weekdays: [1],
+    archived: true,
+    completedDates: [],
+    periods: [
+      { from: '2026-10-25', weekdays: [1], archived: false },
+      { from: '2026-10-27', weekdays: [1], archived: true },
+    ],
+  } as Habit;
+  const all = [gym, ielts, oldHabit];
+  const active = habitAnalyticsScope(all, false);
+  const archived = habitAnalyticsScope(all, true);
+  assert.deepEqual(habitDaySummary(active, '2026-10-25'), {
+    planned: 1,
+    completed: 1,
+    progress: 100,
+  });
+  assert.deepEqual(habitDaySummary(active, '2026-10-26'), {
+    planned: 1,
+    completed: 1,
+    progress: 100,
+  });
+  assert.deepEqual(habitPeriodSummary(active, ['2026-10-25', '2026-10-26']), {
+    planned: 2,
+    completed: 2,
+    progress: 100,
+  });
+  assert.deepEqual(habitDaySummary(archived, '2026-10-26'), {
+    planned: 1,
+    completed: 0,
+    progress: 0,
+  });
+  assert.deepEqual(habitDaySummary(all, '2026-10-26'), {
+    planned: 2,
+    completed: 1,
+    progress: 50,
+  });
 });

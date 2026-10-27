@@ -26,6 +26,7 @@ import { useI18n } from '../lib/i18n';
 import { addDays } from './calendar-utils';
 import {
   HABIT_MILESTONES,
+  habitAnalyticsScope,
   habitBestStreak,
   habitCanMarkOn,
   habitCompleteOn,
@@ -365,8 +366,8 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
   const [introduced, setIntroduced] = useState(false);
   const [celebration, setCelebration] = useState<{ title: string; milestone: number } | null>(null);
   const [recordId, setRecordId] = useState<string | null>(null);
-  const activeHabits = habits.filter((habit) => !habit.archived);
-  const archivedHabits = habits.filter((habit) => habit.archived);
+  const activeHabits = habitAnalyticsScope(habits, false);
+  const archivedHabits = habitAnalyticsScope(habits, true);
   const visibleHabits = showArchived ? archivedHabits : activeHabits;
   const dates = useMemo(() => periodDates(today, period, offset), [today, period, offset]);
   const availableDates = dates.filter((date) => date <= today);
@@ -530,26 +531,30 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
     }
   }
 
-  const totals = habitPeriodSummary(habits, dates, today);
+  const totals = habitPeriodSummary(visibleHabits, dates, today);
   const rate = totals.progress ?? 0;
   const comparisonLength = Math.min(availableDates.length, previousDates.length);
   const comparisonCurrent = habitPeriodSummary(
-    habits,
+    visibleHabits,
     availableDates.slice(0, comparisonLength),
     today,
   );
-  const previous = habitPeriodSummary(habits, previousDates.slice(0, comparisonLength), today);
+  const previous = habitPeriodSummary(
+    visibleHabits,
+    previousDates.slice(0, comparisonLength),
+    today,
+  );
   const previousRate =
     previous.progress !== null && comparisonCurrent.progress !== null ? previous.progress : null;
   const comparisonCurrentRate = comparisonCurrent.progress ?? 0;
-  const todaySummary = habitDaySummary(habits, today, today);
-  const currentStreak = Math.max(0, ...activeHabits.map((habit) => habitStreak(habit, today)));
-  const bestStreak = Math.max(0, ...activeHabits.map((habit) => habitBestStreak(habit, today)));
+  const todaySummary = habitDaySummary(visibleHabits, today, today);
+  const currentStreak = Math.max(0, ...visibleHabits.map((habit) => habitStreak(habit, today)));
+  const bestStreak = Math.max(0, ...visibleHabits.map((habit) => habitBestStreak(habit, today)));
   const animatedRate = useCountUp(rate, !loading);
   const animatedDone = useCountUp(todaySummary.completed, !loading);
   const animatedCurrent = useCountUp(currentStreak, !loading);
   const animatedBest = useCountUp(bestStreak, !loading);
-  const daily = dates.map((day) => ({ day, ...habitDaySummary(habits, day, today) }));
+  const daily = dates.map((day) => ({ day, ...habitDaySummary(visibleHabits, day, today) }));
   const describeDay = (entry: (typeof daily)[number], label: string) =>
     entry.day > today
       ? label + '. ' + t('Будущий день')
@@ -560,7 +565,7 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
             total: entry.planned,
           })
         : label + '. ' + t('Нет запланированных привычек');
-  const stable = habits
+  const stable = visibleHabits
     .map((habit) => ({
       habit,
       ...habitCompletionRate(
@@ -643,7 +648,9 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
           <section className="habits-analytics panel" aria-labelledby="habits-analytics-title">
             <div className="habits-section-heading">
               <div>
-                <p className="card-eyebrow">{t('История привычек')}</p>
+                <p className="card-eyebrow">
+                  {t(showArchived ? 'История архивных привычек' : 'История активных привычек')}
+                </p>
                 <h2 id="habits-analytics-title">{t('Прогресс привычек')}</h2>
               </div>
               <div className="habits-period-controls">
@@ -715,7 +722,11 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
                 <div className="habits-gauge-value" aria-hidden="true">
                   <strong>{totals.progress === null ? '—' : `${animatedRate}%`}</strong>
                   <span>
-                    {t(totals.progress === null ? 'Нет запланированных привычек' : 'выполнено')}
+                    {t(
+                      totals.progress === null
+                        ? 'Нет запланированных привычек'
+                        : 'выполнено за период',
+                    )}
                   </span>
                 </div>
               </div>
@@ -910,7 +921,10 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
             <button
               className="button button-secondary"
               type="button"
-              onClick={() => setShowArchived(!showArchived)}
+              onClick={() => {
+                setShowArchived(!showArchived);
+                setSelectedDay(null);
+              }}
             >
               {showArchived ? <RotateCcw size={16} /> : <Archive size={16} />}
               {t(showArchived ? 'К активным' : 'Архив')}

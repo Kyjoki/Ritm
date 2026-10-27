@@ -101,6 +101,10 @@ export interface HabitSummary {
   progress: number | null;
 }
 
+export function habitAnalyticsScope(habits: readonly Habit[], archived: boolean): Habit[] {
+  return habits.filter((habit) => Boolean(habit.archived) === archived);
+}
+
 export function habitDaySummary(
   habits: readonly Habit[],
   date: string,
