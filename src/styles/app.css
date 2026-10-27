@@ -13,15 +13,9 @@ body {
   html {
     zoom: 0.8;
   }
-  html:has(.page-container[data-page='calendar']) {
-    zoom: 1;
-  }
   html .app-shell,
   html .startup {
     min-height: 125dvh;
-  }
-  html:has(.page-container[data-page='calendar']) .app-shell {
-    min-height: 100dvh;
   }
 }
 button,
@@ -314,7 +308,17 @@ textarea::placeholder {
   }
   .main-content:has(.page-container[data-page='calendar']) .workspace-top {
     max-width: none;
-    height: 48px;
+    height: 0;
+    position: relative;
+    z-index: 2;
+  }
+  .main-content:has(.page-container[data-page='calendar']) .workspace-top > span {
+    display: none;
+  }
+  .main-content:has(.page-container[data-page='calendar']) .workspace-top .theme-switch {
+    position: absolute;
+    right: 0;
+    top: 5px;
   }
 }
 .page-container[data-page='day'] .dashboard-page,

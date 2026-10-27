@@ -287,18 +287,20 @@ export function CalendarPage({
     const page = panel?.closest<HTMLElement>('.cal-page');
     if (!panel || !page) return;
     const fitPanel = () => {
+      const viewport = window.visualViewport;
+      const pageZoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
       page.style.setProperty(
         '--cal-visible-height',
-        `${window.visualViewport?.height ?? window.innerHeight}px`,
+        `${(viewport?.height ?? window.innerHeight) / pageZoom}px`,
       );
       page.style.setProperty(
         '--cal-panel-top',
-        `${panel.getBoundingClientRect().top + window.scrollY}px`,
+        `${(panel.getBoundingClientRect().top - (viewport?.offsetTop ?? 0)) / pageZoom}px`,
       );
     };
     fitPanel();
     const observer = new ResizeObserver(fitPanel);
-    for (const selector of ['.page-heading', '.cal-toolbar', '.cal-sync-footer']) {
+    for (const selector of ['.cal-toolbar']) {
       const control = page.querySelector(selector);
       if (control) observer.observe(control);
     }
@@ -852,23 +854,8 @@ export function CalendarPage({
 
   return (
     <div className={`cal-page ${isMobile && view === 'week' ? 'cal-mobile-week' : ''}`}>
-      <header className="page-heading">
-        <div>
-          <p className="page-eyebrow">{t('Пространство для твоих планов')}</p>
-          <h1>{t('Календарь')}</h1>
-          <p className="page-description">{t('Находи время для того, что важно.')}</p>
-        </div>
-        <button
-          type="button"
-          className="button button-primary"
-          aria-label={t('Добавить запись')}
-          onClick={() => addEntry(selectedDate)}
-        >
-          <Plus size={17} aria-hidden="true" />
-          <span>{t('Добавить запись')}</span>
-        </button>
-      </header>
       <div className="cal-toolbar">
+        <h1 className="cal-toolbar-title">{t('Календарь')}</h1>
         <div className="cal-period">
           <button
             className="cal-icon-button"
@@ -921,82 +908,90 @@ export function CalendarPage({
             </button>
           ))}
         </div>
-      </div>
-
-      {googleStatus || googleLoading || googleError ? (
-        <div
-          className={`cal-google-status cal-sync-footer ${googleError || googlePartial || googleStatus?.status === 'reauth_required' ? 'cal-google-status-warning' : ''}`}
-          role={googleError ? 'alert' : initialGoogleLoading ? 'status' : undefined}
-        >
-          {googleLoading ? (
-            <LoaderCircle size={18} className="spinning" aria-hidden="true" />
-          ) : googleError || googlePartial || googleStatus?.status === 'reauth_required' ? (
-            <AlertCircle size={18} aria-hidden="true" />
-          ) : (
-            <CalendarDays size={18} aria-hidden="true" />
-          )}
-          <div className="cal-google-status-copy">
-            <strong>
-              {initialGoogleLoading
-                ? t('Загружаем Google Calendar…')
-                : googleError
-                  ? t('Google Calendar требует внимания')
-                  : googleStatus?.status === 'reauth_required'
-                    ? t('Подключи Google Calendar заново')
-                    : googlePartial
-                      ? t('Загружена часть событий Google')
-                      : googleConnected
-                        ? t('Календарь синхронизирован')
-                        : t('Google Calendar пока не подключён')}
-            </strong>
-            <span>
-              {googleError
-                ? t('{p0} Показанные события могут быть неактуальны.', { p0: googleError })
-                : googlePartial
-                  ? t(
-                      'Часть событий не загружена. Свободное время нужно уточнить в Google Calendar.',
-                    )
-                  : initialGoogleLoading
-                    ? t('Обновляем выбранный период и синхронизируем записи.')
+        {googleStatus || googleLoading || googleError ? (
+          <div
+            className={`cal-google-status cal-sync-footer ${googleError || googlePartial || googleStatus?.status === 'reauth_required' ? 'cal-google-status-warning' : ''}`}
+            role={googleError ? 'alert' : initialGoogleLoading ? 'status' : undefined}
+          >
+            {googleLoading ? (
+              <LoaderCircle size={18} className="spinning" aria-hidden="true" />
+            ) : googleError || googlePartial || googleStatus?.status === 'reauth_required' ? (
+              <AlertCircle size={18} aria-hidden="true" />
+            ) : (
+              <CalendarDays size={18} aria-hidden="true" />
+            )}
+            <div className="cal-google-status-copy">
+              <strong>
+                {initialGoogleLoading
+                  ? t('Загружаем Google Calendar…')
+                  : googleError
+                    ? t('Google Calendar требует внимания')
                     : googleStatus?.status === 'reauth_required'
-                      ? t('Разрешение нужно обновить в настройках.')
-                      : googleConnected
-                        ? t(
-                            'Изменения сохраняются в Google Calendar. Расписание обновляется автоматически.',
-                          )
-                        : t(
-                            'Подключи Google Calendar в настройках, чтобы работать с единым расписанием.',
-                          )}
-            </span>
-            {fetchedLabel ? (
-              <small className="cal-google-updated">
-                {t('Последнее обновление:')}{' '}
-                <time dateTime={googleFetchedAt ?? undefined}>{fetchedLabel}</time>
-                {googleLoading ? t(' · Обновляем…') : ''}
-              </small>
-            ) : null}
+                      ? t('Подключи Google Calendar заново')
+                      : googlePartial
+                        ? t('Загружена часть событий Google')
+                        : googleConnected
+                          ? t('Календарь синхронизирован')
+                          : t('Google Calendar пока не подключён')}
+              </strong>
+              <span>
+                {googleError
+                  ? t('{p0} Показанные события могут быть неактуальны.', { p0: googleError })
+                  : googlePartial
+                    ? t(
+                        'Часть событий не загружена. Свободное время нужно уточнить в Google Calendar.',
+                      )
+                    : initialGoogleLoading
+                      ? t('Обновляем выбранный период и синхронизируем записи.')
+                      : googleStatus?.status === 'reauth_required'
+                        ? t('Разрешение нужно обновить в настройках.')
+                        : googleConnected
+                          ? t(
+                              'Изменения сохраняются в Google Calendar. Расписание обновляется автоматически.',
+                            )
+                          : t(
+                              'Подключи Google Calendar в настройках, чтобы работать с единым расписанием.',
+                            )}
+              </span>
+              {fetchedLabel ? (
+                <small className="cal-google-updated">
+                  {t('Последнее обновление:')}{' '}
+                  <time dateTime={googleFetchedAt ?? undefined}>{fetchedLabel}</time>
+                  {googleLoading ? t(' · Обновляем…') : ''}
+                </small>
+              ) : null}
+            </div>
+            <div className="cal-google-status-actions">
+              {onGoogleRefresh && (googleConnected || Boolean(googleError)) ? (
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  disabled={googleLoading}
+                  onClick={onGoogleRefresh}
+                >
+                  <RefreshCw size={15} aria-hidden="true" />
+                  {t('Обновить')}
+                </button>
+              ) : null}
+              {onOpenSettings && !googleConnected ? (
+                <button type="button" className="cal-google-settings" onClick={onOpenSettings}>
+                  {t('Настройки')}
+                  <ChevronRight size={15} aria-hidden="true" />
+                </button>
+              ) : null}
+            </div>
           </div>
-          <div className="cal-google-status-actions">
-            {onGoogleRefresh && (googleConnected || Boolean(googleError)) ? (
-              <button
-                type="button"
-                className="button button-secondary"
-                disabled={googleLoading}
-                onClick={onGoogleRefresh}
-              >
-                <RefreshCw size={15} aria-hidden="true" />
-                {t('Обновить')}
-              </button>
-            ) : null}
-            {onOpenSettings && !googleConnected ? (
-              <button type="button" className="cal-google-settings" onClick={onOpenSettings}>
-                {t('Настройки')}
-                <ChevronRight size={15} aria-hidden="true" />
-              </button>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+        ) : null}
+        <button
+          type="button"
+          className="button button-primary cal-toolbar-add"
+          aria-label={t('Добавить запись')}
+          onClick={() => addEntry(selectedDate)}
+        >
+          <Plus size={17} aria-hidden="true" />
+          <span>{t('Добавить запись')}</span>
+        </button>
+      </div>
 
       {view === 'month' ? (
         <section
@@ -1400,10 +1395,6 @@ export function CalendarPage({
               ))}
             </div>
           </div>
-          <footer className="cal-calendar-foot">
-            <span>{t('Одно расписание · Google Calendar')}</span>
-            <span>{t('Выбери свободный интервал, чтобы добавить запись')}</span>
-          </footer>
         </section>
       )}
 
