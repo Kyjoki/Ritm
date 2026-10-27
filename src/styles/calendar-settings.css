@@ -2487,7 +2487,16 @@
   }
   .cal-page .cal-segment {
     grid-column: 1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    min-width: 0;
     width: 100%;
+  }
+  .cal-page .cal-segment button {
+    min-width: 0;
+    width: 100%;
+    padding-inline: 4px;
+    white-space: nowrap;
   }
   .cal-page .cal-sync-footer {
     grid-column: 2;
