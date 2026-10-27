@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { GoogleCalendarResult, Task } from '../shared/types.ts';
-import { REMINDER_HEARTBEAT_NAME } from './telegram.ts';
+import { REMINDER_FAILURE_NAME, REMINDER_HEARTBEAT_NAME } from './telegram.ts';
 
 const MAX_LATE_MS = 5 * 60_000;
 const CURSOR_NAME = 'telegram-reminder-cursor';
@@ -169,14 +169,15 @@ export function createTelegramReminderRunner(options: {
 }) {
   const { state, telegram, store, google } = options;
   const clock = options.now ?? Date.now;
-  return async function run() {
+  return async function run(verifiedSchedule = true) {
     const lease = await state.acquireLease(LEASE_NAME, 45_000);
     if (!lease) return { busy: true, sent: 0 };
+    let failureCode = 'internal_error';
     try {
       const current = clock();
       const snapshot = await telegram.reminderSnapshot();
       if (!snapshot) {
-        await state.setServerSecret(REMINDER_HEARTBEAT_NAME, String(current));
+        if (verifiedSchedule) await state.setServerSecret(REMINDER_HEARTBEAT_NAME, String(current));
         return { busy: false, sent: 0 };
       }
       const settings = await store.settings();
@@ -194,6 +195,7 @@ export function createTelegramReminderRunner(options: {
       ];
       const local = localReminders(await store.tasks(), dates, settings.timeZone);
       let remote: Reminder[] = [];
+      failureCode = 'google_error';
       if ((await google.status()).status === 'connected') {
         const fromDate = localDateAt(current - 86_400_000, settings.timeZone);
         const toDate = localDateAt(current + 2 * 86_400_000, settings.timeZone);
@@ -206,6 +208,7 @@ export function createTelegramReminderRunner(options: {
         remote = googleReminders(result);
       }
       let sent = 0;
+      let deliveryProblem: string | null = null;
       for (const reminder of [...local, ...remote]) {
         const due = reminder.start - snapshot.settings.leadMinutes * 60_000;
         if (due <= from || due > current || current - due > MAX_LATE_MS) continue;
@@ -222,6 +225,7 @@ export function createTelegramReminderRunner(options: {
           if (await state.getServerSecret(key)) continue;
           // Persist before the network call. A crash/timeout is treated as uncertain, not retried blindly.
           await state.setServerSecret(key, 'uncertain');
+          failureCode = 'telegram_error';
           const result = await telegram.deliverReminder(
             reminderText(
               reminder,
@@ -234,13 +238,25 @@ export function createTelegramReminderRunner(options: {
           );
           await state.setServerSecret(key, result);
           if (result === 'sent') sent++;
+          if (result === 'rejected') deliveryProblem = 'telegram_rejected';
+          if (result === 'uncertain') deliveryProblem = 'telegram_uncertain';
         } finally {
           await state.releaseLease(key, claim);
         }
       }
       await state.setServerSecret(CURSOR_NAME, String(current));
-      await state.setServerSecret(REMINDER_HEARTBEAT_NAME, String(current));
+      if (verifiedSchedule) await state.setServerSecret(REMINDER_HEARTBEAT_NAME, String(current));
+      await state.setServerSecret(
+        REMINDER_FAILURE_NAME,
+        deliveryProblem ? JSON.stringify({ at: current, code: deliveryProblem }) : '',
+      );
       return { busy: false, sent };
+    } catch (error) {
+      await state.setServerSecret(
+        REMINDER_FAILURE_NAME,
+        JSON.stringify({ at: clock(), code: failureCode }),
+      );
+      throw error;
     } finally {
       await state.releaseLease(LEASE_NAME, lease);
     }

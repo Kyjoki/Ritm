@@ -78,6 +78,18 @@ export const settingsAssistantEnglish: Record<string, string> = {
     'Test message sent. It does not confirm the scheduler is running.',
   'Планировщик ещё не подтвердил регулярный запуск.':
     'The scheduler has not confirmed regular runs yet.',
+  'Личный чат Telegram не привязан.': 'The private Telegram chat is not linked.',
+  'Серверные ключи планировщика не настроены.': 'The scheduler server keys are not configured.',
+  'Ожидается первый автоматический запуск планировщика.':
+    'Waiting for the first automatic scheduler run.',
+  'Планировщик не запускался более пяти минут.': 'The scheduler has not run for over five minutes.',
+  'Google Calendar не подключён.': 'Google Calendar is not connected.',
+  'Не удалось проверить Google Calendar.': 'Could not check Google Calendar.',
+  'Ошибка отправки в Telegram.': 'Could not send the Telegram notification.',
+  'Telegram отклонил уведомление.': 'Telegram rejected the notification.',
+  'Результат отправки в Telegram неизвестен.': 'Telegram delivery status is unknown.',
+  'Ошибка проверки напоминаний на сервере.': 'The server could not check reminders.',
+  'Последняя успешная проверка': 'Last successful check',
   'Бот настроен · чат не привязан': 'Bot configured · chat not linked',
   'Подключи своего бота, затем привяжи личный чат.':
     'Connect your bot, then link your private chat.',

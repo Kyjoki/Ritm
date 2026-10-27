@@ -7,11 +7,10 @@ if (
   !origin?.startsWith('https://') ||
   !qstashUrl?.startsWith('https://') ||
   !token ||
-  !secret ||
-  secret.length < 32
+  (secret && secret.length < 32)
 ) {
   console.error(
-    'Set APP_ORIGIN, QSTASH_URL, QSTASH_TOKEN and REMINDER_SCHEDULER_SECRET in your private environment.',
+    'Set APP_ORIGIN, QSTASH_URL and QSTASH_TOKEN in your private environment; optional REMINDER_SCHEDULER_SECRET must be at least 32 characters.',
   );
   process.exitCode = 1;
 } else {
@@ -26,7 +25,7 @@ if (
         'Upstash-Schedule-Id': 'ritm-telegram-reminders',
         'Upstash-Method': 'POST',
         'Upstash-Retries': '0',
-        'Upstash-Forward-X-Ritm-Reminder-Secret': secret,
+        ...(secret ? { 'Upstash-Forward-X-Ritm-Reminder-Secret': secret } : {}),
         'Content-Type': 'application/json',
       },
       body: '{}',

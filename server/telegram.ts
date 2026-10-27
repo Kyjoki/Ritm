@@ -17,6 +17,7 @@ export const TELEGRAM_WEBHOOK_PATH = '/api/integrations/telegram/webhook';
 const CONFIG_NAME = 'telegram-connection';
 const REMINDER_SETTINGS_NAME = 'telegram-reminder-settings';
 export const REMINDER_HEARTBEAT_NAME = 'telegram-reminder-heartbeat';
+export const REMINDER_FAILURE_NAME = 'telegram-reminder-failure';
 export const reminderLeadSchema = z.union([
   z.literal(0),
   z.literal(5),
@@ -156,13 +157,38 @@ export function createTelegramService({
       schedulerConfigured && lastRunAt && now() - lastRunAt < 5 * 60_000,
     );
     const googleConnected = (await google.status()).status === 'connected';
+    const failureRaw = await schedulerState?.getServerSecret(REMINDER_FAILURE_NAME);
+    let failure: { at: number; code: string } | null = null;
+    try {
+      if (failureRaw) failure = JSON.parse(failureRaw);
+    } catch {
+      // Old or incomplete status must not prevent settings from loading.
+    }
+    const lastFailure =
+      failure && Number.isFinite(failure.at) && failure.at >= (lastRunAt ?? 0)
+        ? failure.code
+        : null;
+    const problem = !settings.enabled
+      ? 'disabled'
+      : !config?.account
+        ? 'chat_unlinked'
+        : !schedulerConfigured
+          ? 'scheduler_unconfigured'
+          : !lastRunAt
+            ? 'scheduler_waiting'
+            : !schedulerActive
+              ? 'scheduler_stale'
+              : !googleConnected
+                ? 'google_disconnected'
+                : (lastFailure ?? null);
     return {
       ...settings,
       timeZone,
       schedulerActive,
       lastRunAt,
       googleConnected,
-      ready: Boolean(settings.enabled && config?.account && schedulerActive && googleConnected),
+      problem,
+      ready: problem === null,
     };
   }
   async function saveReminderSettings(input: {

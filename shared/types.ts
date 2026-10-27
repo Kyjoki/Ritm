@@ -291,5 +291,6 @@ export interface TelegramStatus {
     schedulerActive: boolean;
     googleConnected: boolean;
     lastRunAt: number | null;
+    problem: string | null;
   };
 }

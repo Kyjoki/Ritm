@@ -15,6 +15,9 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createApp } from '../server/index.ts';
 import { SqliteRuntimeState } from '../server/runtime-state.ts';
+import { verifyQstashSignature } from '../server/qstash-signature.ts';
+import { SignJWT } from 'jose';
+import { createHash } from 'node:crypto';
 
 const zone = 'Asia/Qyzylorda';
 const instant = Date.parse('2026-10-27T05:50:00Z'); // 10:50 local
@@ -244,6 +247,8 @@ test('scheduler endpoint rejects missing/wrong secret and accepts server secret'
       APP_ORIGIN: 'https://ritm.example.com',
       SECRET_ENCRYPTION_KEY: Buffer.alloc(32, 4).toString('base64'),
       REMINDER_SCHEDULER_SECRET: secret,
+      QSTASH_CURRENT_SIGNING_KEY: 'current-key-for-test',
+      QSTASH_NEXT_SIGNING_KEY: 'next-key-for-test',
     },
   });
   const server = instance.app.listen(0, '127.0.0.1');
@@ -268,6 +273,49 @@ test('scheduler endpoint rejects missing/wrong secret and accepts server secret'
   assert.equal((await call()).status, 401);
   assert.equal((await call('x'.repeat(40))).status, 401);
   assert.equal((await call(secret)).status, 200);
+  const signed = await new SignJWT({
+    body: createHash('sha256').update('{}').digest('base64url'),
+  })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuer('Upstash')
+    .setSubject('https://ritm.example.com/api/integrations/telegram/reminders/run')
+    .setIssuedAt()
+    .setExpirationTime('5m')
+    .sign(new TextEncoder().encode('current-key-for-test'));
+  assert.equal(
+    (
+      await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Upstash-Schedule-Id': 'ritm-telegram-reminders',
+          'Upstash-Signature': signed,
+        },
+        body: '{}',
+      })
+    ).status,
+    200,
+  );
+});
+
+test('QStash signature verifies destination and raw body, including next key', async () => {
+  const body = Buffer.from('{}');
+  const url = 'https://ritm.example.com/api/integrations/telegram/reminders/run';
+  const key = 'next-signing-key';
+  const signature = await new SignJWT({
+    body: createHash('sha256').update(body).digest('base64url'),
+  })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuer('Upstash')
+    .setSubject(url)
+    .setIssuedAt()
+    .setNotBefore('0s')
+    .setExpirationTime('5m')
+    .sign(new TextEncoder().encode(key));
+  const base = { signature, body, url, currentKey: 'old-signing-key', nextKey: key };
+  assert.equal(await verifyQstashSignature(base), true);
+  assert.equal(await verifyQstashSignature({ ...base, body: Buffer.from('{ }') }), false);
+  assert.equal(await verifyQstashSignature({ ...base, url: 'https://other.example.com' }), false);
 });
 
 test('reminder cursor and delivery claims survive a runtime restart', () => {

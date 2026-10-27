@@ -4,8 +4,22 @@ import type { TelegramStatus } from '../../shared/types';
 import { api } from '../lib/api';
 import { useI18n } from '../lib/i18n';
 
+const reminderProblems: Record<string, string> = {
+  disabled: 'Автоматическая отправка выключена',
+  chat_unlinked: 'Личный чат Telegram не привязан.',
+  scheduler_unconfigured: 'Серверные ключи планировщика не настроены.',
+  scheduler_waiting: 'Ожидается первый автоматический запуск планировщика.',
+  scheduler_stale: 'Планировщик не запускался более пяти минут.',
+  google_disconnected: 'Google Calendar не подключён.',
+  google_error: 'Не удалось проверить Google Calendar.',
+  telegram_error: 'Ошибка отправки в Telegram.',
+  telegram_rejected: 'Telegram отклонил уведомление.',
+  telegram_uncertain: 'Результат отправки в Telegram неизвестен.',
+  internal_error: 'Ошибка проверки напоминаний на сервере.',
+};
+
 export function TelegramConnection() {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const [status, setStatus] = useState<TelegramStatus | null>(null);
   const [token, setToken] = useState('');
   const [editing, setEditing] = useState(false);
@@ -39,6 +53,16 @@ export function TelegramConnection() {
     }, 4_000);
     return () => window.clearInterval(timer);
   }, [status?.pairingUrl, status?.linked]);
+  useEffect(() => {
+    if (!status?.reminders?.enabled) return;
+    const timer = window.setInterval(() => {
+      void api
+        .telegramStatus()
+        .then(setStatus)
+        .catch(() => {});
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [status?.reminders?.enabled]);
   async function action(operation: () => Promise<TelegramStatus>) {
     setBusy(true);
     setError('');
@@ -183,9 +207,10 @@ export function TelegramConnection() {
             <small>
               {status?.reminders?.ready
                 ? t('Автоматическая отправка работает')
-                : status?.reminders?.enabled
-                  ? t('Ожидание планировщика или привязки чата')
-                  : t('Автоматическая отправка выключена')}
+                : t(
+                    reminderProblems[status?.reminders?.problem ?? ''] ??
+                      'Ожидание планировщика или привязки чата',
+                  )}
             </small>
           </div>
           <label className="settings-telegram-switch">
@@ -262,8 +287,15 @@ export function TelegramConnection() {
             {t('Тестовое сообщение отправлено. Оно не подтверждает работу планировщика.')}
           </small>
         ) : null}
-        {status?.reminders?.enabled && !status.reminders.schedulerActive ? (
-          <small>{t('Планировщик ещё не подтвердил регулярный запуск.')}</small>
+        {status?.reminders?.lastRunAt ? (
+          <small>
+            {t('Последняя успешная проверка')}:{' '}
+            {new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'ru-RU', {
+              dateStyle: 'medium',
+              timeStyle: 'short',
+              timeZone: status.reminders.timeZone,
+            }).format(new Date(status.reminders.lastRunAt))}
+          </small>
         ) : null}
       </div>
       {error ? (

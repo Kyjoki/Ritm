@@ -22,6 +22,7 @@ import { SqliteRuntimeState, type RuntimeState } from './runtime-state.ts';
 import { SecretStore } from './secrets.ts';
 import { createTelegramService, TELEGRAM_WEBHOOK_PATH } from './telegram.ts';
 import { createTelegramReminderRunner } from './telegram-reminders.ts';
+import { verifyQstashSignature } from './qstash-signature.ts';
 import type { VoiceInterpreter } from './telegram-voice.ts';
 import { Security } from './security.ts';
 import { AppError, conflict } from './errors.ts';
@@ -157,7 +158,8 @@ export function createApp(options: AppOptions = {}) {
     interpretVoice: options.telegramVoiceInterpreter,
     schedulerState: state,
     schedulerConfigured: Boolean(
-      env.REMINDER_SCHEDULER_SECRET && env.REMINDER_SCHEDULER_SECRET.length >= 32,
+      (env.QSTASH_CURRENT_SIGNING_KEY && env.QSTASH_NEXT_SIGNING_KEY) ||
+      (env.REMINDER_SCHEDULER_SECRET && env.REMINDER_SCHEDULER_SECRET.length >= 32),
     ),
   });
   const runTelegramReminders = createTelegramReminderRunner({ state, telegram, store, google });
@@ -226,7 +228,14 @@ export function createApp(options: AppOptions = {}) {
     else void security.requireAuth(req, res, next);
   });
   const loginJson = express.json({ limit: '4kb', inflate: false });
-  const apiJson = express.json({ limit: '128kb', inflate: false });
+  const apiJson = express.json({
+    limit: '128kb',
+    inflate: false,
+    verify: (req, _res, body) => {
+      if (req.url?.split('?')[0] === '/integrations/telegram/reminders/run')
+        (req as typeof req & { rawBody?: Buffer }).rawBody = Buffer.from(body);
+    },
+  });
   app.use('/api', (req, res, next) => {
     const parser =
       req.method === 'POST' && req.originalUrl.split('?')[0] === '/api/login' ? loginJson : apiJson;
@@ -243,15 +252,25 @@ export function createApp(options: AppOptions = {}) {
   app.post('/api/integrations/telegram/reminders/run', async (req, res) => {
     const expected = env.REMINDER_SCHEDULER_SECRET;
     const supplied = req.get('x-ritm-reminder-secret') ?? '';
+    const sharedSecretValid = Boolean(
+      expected &&
+      expected.length >= 32 &&
+      Buffer.byteLength(supplied) === Buffer.byteLength(expected) &&
+      timingSafeEqual(Buffer.from(supplied), Buffer.from(expected)),
+    );
+    const signatureValid = await verifyQstashSignature({
+      signature: req.get('upstash-signature') ?? '',
+      body: (req as typeof req & { rawBody?: Buffer }).rawBody ?? Buffer.alloc(0),
+      url: `${env.APP_ORIGIN?.replace(/\/$/, '')}/api/integrations/telegram/reminders/run`,
+      currentKey: env.QSTASH_CURRENT_SIGNING_KEY,
+      nextKey: env.QSTASH_NEXT_SIGNING_KEY,
+    });
     if (
-      !expected ||
-      expected.length < 32 ||
       req.get('upstash-schedule-id') !== 'ritm-telegram-reminders' ||
-      Buffer.byteLength(supplied) !== Buffer.byteLength(expected) ||
-      !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))
+      (!sharedSecretValid && !signatureValid)
     )
       throw new AppError(401, 'REMINDER_AUTH_REQUIRED', 'Планировщик не авторизован.');
-    res.json(await runTelegramReminders());
+    res.json(await runTelegramReminders(signatureValid));
   });
   app.get('/api/session', async (req, res) => {
     await security.limit(req, 'public-session', 120, 60_000);
