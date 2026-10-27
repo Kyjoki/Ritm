@@ -1,4 +1,4 @@
-/** Create/update the one-minute QStash schedule without printing credentials. */
+/** Create/update the free-tier two-minute QStash schedule without printing credentials. */
 const origin = process.env.APP_ORIGIN;
 const qstashUrl = process.env.QSTASH_URL;
 const token = process.env.QSTASH_TOKEN;
@@ -22,10 +22,10 @@ if (
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
-        'Upstash-Cron': '* * * * *',
+        'Upstash-Cron': '*/2 * * * *',
         'Upstash-Schedule-Id': 'ritm-telegram-reminders',
         'Upstash-Method': 'POST',
-        'Upstash-Retries': '2',
+        'Upstash-Retries': '0',
         'Upstash-Forward-X-Ritm-Reminder-Secret': secret,
         'Content-Type': 'application/json',
       },
