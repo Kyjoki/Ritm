@@ -2131,14 +2131,15 @@
   padding-block: 8px;
 }
 .cal-page .cal-toolbar {
-  margin: 0 0 5px;
-  gap: 7px 10px;
+  margin: 0 0 12px;
+  gap: 10px;
   min-height: 48px;
+  padding-top: 14px;
   padding-right: 43px;
   justify-content: flex-start;
 }
 .cal-page .cal-toolbar-title {
-  margin: 0 12px 0 0;
+  margin: 0 4px 0 0;
   color: var(--text);
   font-size: 23px;
   font-weight: 650;
@@ -2149,62 +2150,79 @@
   gap: 5px;
 }
 .cal-page .cal-icon-button {
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
+}
+.cal-page .cal-icon-button svg {
+  width: 20px;
+  height: 20px;
 }
 .cal-page .cal-today,
 .cal-page .cal-now {
-  min-height: 34px;
-  padding: 5px 9px;
+  min-height: 44px;
+  padding: 7px 12px;
   margin-left: 2px;
-  font-size: 12px;
+  font-size: 14px;
+}
+.cal-page .cal-now svg {
+  width: 18px;
+  height: 18px;
 }
 .cal-page .cal-segment {
   padding: 2px;
 }
 .cal-page .cal-segment button {
-  padding: 7px 10px;
-  font-size: 12px;
+  min-height: 44px;
+  padding: 8px 13px;
+  font-size: 14px;
 }
 .cal-page .cal-toolbar-add {
-  min-height: 35px;
-  padding: 6px 10px;
-  font-size: 12px;
+  min-height: 44px;
+  padding: 8px 14px;
+  font-size: 14px;
   white-space: nowrap;
+}
+.cal-page .cal-toolbar-add svg {
+  width: 19px;
+  height: 19px;
 }
 .cal-page .cal-period h2 {
   min-width: 155px;
-  font-size: 15px;
+  font-size: 16px;
 }
 .cal-page .cal-sync-footer {
   align-items: center;
   gap: 5px;
   margin: 0;
   padding: 0 2px;
-  min-height: 35px;
+  min-height: 44px;
   border: 0;
   background: transparent;
   flex: none;
 }
 .cal-page .cal-sync-footer > svg {
-  width: 14px;
-  height: 14px;
+  width: 17px;
+  height: 17px;
   margin: 0;
 }
 .cal-page .cal-sync-footer .cal-google-status-copy {
   flex: none;
 }
 .cal-page .cal-sync-footer .cal-google-status-copy strong {
-  font-size: 11px;
+  font-size: 13px;
   white-space: nowrap;
 }
 .cal-page .cal-sync-footer .cal-google-status-actions {
   margin: 0;
 }
 .cal-page .cal-sync-footer .cal-google-status-actions .button {
-  min-height: 34px;
-  padding: 5px 7px;
-  font-size: 11px;
+  min-height: 44px;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+.cal-page .cal-sync-footer .cal-google-status-actions .button svg {
+  width: 18px;
+  height: 18px;
 }
 .cal-page .cal-sync-footer.cal-google-status-warning {
   flex-basis: 100%;
@@ -2386,9 +2404,10 @@
   .cal-page .cal-toolbar {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    margin-bottom: 5px;
-    gap: 4px 6px;
+    margin-bottom: 10px;
+    gap: 6px 8px;
     padding-right: 0;
+    padding-top: 10px;
   }
   .cal-page .cal-toolbar-title {
     grid-column: 1;
@@ -2397,7 +2416,7 @@
   .cal-page .cal-toolbar-add {
     grid-column: 2;
     grid-row: 1;
-    min-height: 38px;
+    min-height: 44px;
   }
   .cal-page .cal-period {
     grid-column: 1 / -1;
@@ -2419,7 +2438,14 @@
     display: none;
   }
   .cal-page .cal-sync-footer .cal-google-status-actions .button {
-    min-height: 40px;
+    min-height: 44px;
+  }
+  .cal-page .cal-sync-footer:not(.cal-google-status-warning) .cal-google-status-actions .button {
+    width: 44px;
+    padding: 0;
+    gap: 0;
+    justify-content: center;
+    font-size: 0;
   }
   .cal-page .cal-period h2 {
     font-size: 13px;
@@ -2429,16 +2455,16 @@
     white-space: nowrap;
   }
   .cal-page .cal-icon-button {
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
   }
   .cal-page .cal-today,
   .cal-page .cal-now {
-    min-height: 40px;
+    min-height: 44px;
     margin-left: 0;
   }
   .cal-page.cal-mobile-week .cal-now {
-    width: 40px;
+    width: 44px;
     padding: 0;
     gap: 0;
     font-size: 0;

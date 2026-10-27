@@ -304,7 +304,7 @@ textarea::placeholder {
 }
 @media (min-width: 761px) {
   .main-content:has(.page-container[data-page='calendar']) {
-    padding-inline: 24px;
+    padding-inline: 30px;
   }
   .main-content:has(.page-container[data-page='calendar']) .workspace-top {
     max-width: none;
@@ -318,7 +318,7 @@ textarea::placeholder {
   .main-content:has(.page-container[data-page='calendar']) .workspace-top .theme-switch {
     position: absolute;
     right: 0;
-    top: 5px;
+    top: 14px;
   }
 }
 .page-container[data-page='day'] .dashboard-page,
