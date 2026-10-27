@@ -1,4 +1,34 @@
 export const financeEnglish: Record<string, string> = {
+  'Запланировано: пока не влияет на остатки': 'Scheduled: not yet included in balances',
+  Перевод: 'Transfer',
+  Пополнить: 'Top up',
+  Снять: 'Withdraw',
+  Откуда: 'From',
+  Куда: 'To',
+  'Выберите счёт': 'Choose an account',
+  'Счёт недоступен': 'Account unavailable',
+  'Выберите два разных счёта в одной валюте.':
+    'Choose two different accounts in the same currency.',
+  'Перевод — запись в учёте: деньги в банке не перемещаются. Доходы и расходы не меняются.':
+    'A transfer is a bookkeeping entry: it does not move money at your bank. Income and expenses stay unchanged.',
+  'Дата перевода не раньше {date} — начала учёта обоих счетов.':
+    'The transfer date must be on or after {date}, when tracking has started for both accounts.',
+  'Добавьте основной счёт и депозит или два депозита в одной валюте.':
+    'Add a main account and a deposit, or two deposits in the same currency.',
+  'Переводы между основным счётом и депозитами меняют оба остатка, но не доходы и расходы.':
+    'Transfers between your main account and deposits change both balances, but not income or expenses.',
+  'Стартовый остаток депозита плюс пополнения и снятия.':
+    'The deposit opening balance plus top-ups and withdrawals.',
+  'С {date} учтены поступления, расходы и переводы.':
+    'Income, expenses, and transfers since {date} are included.',
+  'Остаток депозитов': 'Deposit balance',
+  'Укажите остаток на начало выбранного дня. Поступления, расходы и переводы с этого дня меняют расчётный баланс.':
+    'Enter the balance at the start of the selected day. Income, expenses, and transfers from that day change the calculated balance.',
+  'Укажите остаток на начало выбранного дня, до переводов за этот день. Пополнения и снятия записывайте как переводы.':
+    'Enter the balance at the start of the selected day, before any transfers that day. Record top-ups and withdrawals as transfers.',
+  'Отрицательные остатки учтены в итогах, но не в круговой диаграмме.':
+    'Negative balances are included in totals, but not in the donut chart.',
+
   Финансы: 'Finances',
   'RITM · ЛИЧНЫЕ ФИНАНСЫ': 'RITM · PERSONAL FINANCES',
   'Поступления, расходы и активы — в одной ясной картине.':

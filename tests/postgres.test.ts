@@ -643,3 +643,64 @@ test('pg-mem serial rollback fixture: a storage failure rolls back partial propo
     ['pending', 'pending'],
   );
 });
+
+test('pg-mem: transfer ledger is atomic, versioned and protects account references', async (t) => {
+  const { store, injectFailure } = await fixture(t);
+  const opening = { valueMinor: 100000, currency: 'KZT' as const, asOf: '2026-10-14', note: '' };
+  const account = await store.createFinanceEntry({ ...opening, type: 'account' });
+  const deposit = await store.createFinanceEntry({ ...opening, type: 'deposit', name: 'Savings' });
+  const input = {
+    type: 'transfer' as const,
+    amountMinor: 12345,
+    currency: 'KZT' as const,
+    date: opening.asOf,
+    fromAccountId: account.id,
+    toAccountId: deposit.id,
+    note: '',
+  };
+  await assert.rejects(
+    store.createFinanceEntry({ ...input, toAccountId: randomUUID() }),
+    (error: unknown) => error instanceof AppError && error.code === 'FINANCE_TRANSFER_ACCOUNT',
+  );
+  assert.equal((await store.financeEntries()).length, 2);
+  injectFailure((sql) => sql.startsWith('INSERT INTO ritm_finance_entries'));
+  await assert.rejects(store.createFinanceEntry(input), /Injected storage failure/);
+  injectFailure();
+  assert.equal((await store.financeEntries()).length, 2);
+  const transfer = await store.createFinanceEntry(input);
+  const { calculateAccountBalance, calculateDepositBalance } = await import('../shared/finance.ts');
+  assert.equal(calculateAccountBalance(await store.financeEntries(), 'KZT', opening.asOf), 87655);
+  assert.equal(
+    calculateDepositBalance(await store.financeEntries(), deposit.id, opening.asOf),
+    112345,
+  );
+  await assert.rejects(
+    store.deleteFinanceEntry(deposit.id, deposit.updatedAt),
+    (error: unknown) => error instanceof AppError && error.code === 'FINANCE_ACCOUNT_HAS_TRANSFERS',
+  );
+  await assert.rejects(
+    store.updateFinanceEntry(
+      deposit.id,
+      { ...opening, type: 'deposit', name: 'Savings', asOf: '2026-10-15' },
+      deposit.updatedAt,
+    ),
+    (error: unknown) => error instanceof AppError && error.code === 'FINANCE_TRANSFER_DATE',
+  );
+  const revised = await store.updateFinanceEntry(
+    transfer.id,
+    { ...input, amountMinor: 10000, fromAccountId: deposit.id, toAccountId: account.id },
+    transfer.updatedAt,
+  );
+  await assert.rejects(
+    store.deleteFinanceEntry(transfer.id, transfer.updatedAt),
+    (error: unknown) => error instanceof AppError && error.status === 409,
+  );
+  assert.equal(calculateAccountBalance(await store.financeEntries(), 'KZT', opening.asOf), 110000);
+  assert.equal(
+    calculateDepositBalance(await store.financeEntries(), deposit.id, opening.asOf),
+    90000,
+  );
+  await store.deleteFinanceEntry(revised.id, revised.updatedAt);
+  await store.deleteFinanceEntry(deposit.id, deposit.updatedAt);
+  assert.equal(calculateAccountBalance(await store.financeEntries(), 'KZT', opening.asOf), 100000);
+});

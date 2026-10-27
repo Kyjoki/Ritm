@@ -34,6 +34,15 @@ export interface Habit extends HabitInput {
 export type FinanceCurrency = 'KZT' | 'USD' | 'EUR' | 'RUB';
 export type FinanceEntryInput =
   | {
+      type: 'transfer';
+      amountMinor: number;
+      currency: FinanceCurrency;
+      date: string;
+      fromAccountId: string;
+      toAccountId: string;
+      note: string;
+    }
+  | {
       type: 'account';
       valueMinor: number;
       currency: FinanceCurrency;

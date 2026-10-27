@@ -27,7 +27,10 @@ export function activateDialogViewport(dialog: HTMLDialogElement): () => void {
     document.documentElement.style.overflow = 'hidden';
   }
 
+  let frame = 0;
+  let previous = '';
   const update = () => {
+    frame = 0;
     const viewport = window.visualViewport;
     const top = Math.max(0, viewport?.offsetTop ?? 0);
     const left = Math.max(0, viewport?.offsetLeft ?? 0);
@@ -35,6 +38,11 @@ export function activateDialogViewport(dialog: HTMLDialogElement): () => void {
     const height = viewport?.height ?? window.innerHeight;
     // The desktop app uses CSS zoom; top-layer dialog coordinates inherit that zoom.
     const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+    const signature = [top, left, width, height, window.innerWidth, window.innerHeight, zoom].join(
+      ',',
+    );
+    if (signature === previous) return;
+    previous = signature;
     dialog.style.setProperty('--dialog-vv-top', `${top / zoom}px`);
     dialog.style.setProperty('--dialog-vv-left', `${left / zoom}px`);
     dialog.style.setProperty(
@@ -48,18 +56,23 @@ export function activateDialogViewport(dialog: HTMLDialogElement): () => void {
     dialog.style.setProperty('--dialog-vv-width', `${width / zoom}px`);
     dialog.style.setProperty('--dialog-vv-height', `${height / zoom}px`);
   };
+  const schedule = () => {
+    if (!frame) frame = window.requestAnimationFrame(update);
+  };
+  // Initial top-layer geometry is synchronous; keyboard/scroll event bursts share one frame.
   update();
-  window.visualViewport?.addEventListener('resize', update);
-  window.visualViewport?.addEventListener('scroll', update);
-  window.addEventListener('resize', update);
+  window.visualViewport?.addEventListener('resize', schedule);
+  window.visualViewport?.addEventListener('scroll', schedule);
+  window.addEventListener('resize', schedule);
 
   let released = false;
   return () => {
     if (released) return;
     released = true;
-    window.visualViewport?.removeEventListener('resize', update);
-    window.visualViewport?.removeEventListener('scroll', update);
-    window.removeEventListener('resize', update);
+    window.cancelAnimationFrame(frame);
+    window.visualViewport?.removeEventListener('resize', schedule);
+    window.visualViewport?.removeEventListener('scroll', schedule);
+    window.removeEventListener('resize', schedule);
     if (--openDialogs === 0 && bodyState) {
       const state = bodyState;
       bodyState = null;

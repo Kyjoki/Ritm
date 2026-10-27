@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   Activity,
   Archive,
@@ -22,6 +22,7 @@ import type { Habit, HabitInput } from '../../shared/types';
 import { MotionArc, MotionBar, MotionList, MotionNumber } from '../components/Motion';
 import { Dialog } from '../components/Dialog';
 import { api } from '../lib/api';
+import { LatestRead, RefreshGate } from '../lib/latest-read';
 import { dateInZone, formatDate } from '../lib/date';
 import { useI18n } from '../lib/i18n';
 import { addDays } from './calendar-utils';
@@ -324,10 +325,21 @@ function HabitProgressEditor({
   );
 }
 
-export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: string }) {
+export const HabitsPage = memo(function HabitsPage({
+  active,
+  timeZone,
+  today = dateInZone(timeZone),
+}: {
+  active: boolean;
+  timeZone: string;
+  today?: string;
+}) {
   const { t, language } = useI18n();
-  const today = dateInZone(timeZone);
   const [habits, setHabits] = useState<Habit[]>([]);
+  const read = useRef(new LatestRead());
+  const hasLoaded = useRef(false);
+  const refreshGate = useRef(new RefreshGate());
+  const preserveRefreshError = useRef(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -341,40 +353,75 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
   const [introduced, setIntroduced] = useState(false);
   const [celebration, setCelebration] = useState<{ title: string; milestone: number } | null>(null);
   const [recordId, setRecordId] = useState<string | null>(null);
-  const activeHabits = habitAnalyticsScope(habits, false);
-  const archivedHabits = habitAnalyticsScope(habits, true);
+  const activeHabits = useMemo(() => habitAnalyticsScope(habits, false), [habits]);
+  const archivedHabits = useMemo(() => habitAnalyticsScope(habits, true), [habits]);
   const visibleHabits = showArchived ? archivedHabits : activeHabits;
   const dates = useMemo(() => periodDates(today, period, offset), [today, period, offset]);
-  const availableDates = dates.filter((date) => date <= today);
-  const previousDates = periodDates(addDays(dates[0], -1), period, 0);
-  const weekDays = habitWeek(addDays(today, offset * 7));
+  const availableDates = useMemo(() => dates.filter((date) => date <= today), [dates, today]);
+  const previousDates = useMemo(
+    () => periodDates(addDays(dates[0], -1), period, 0),
+    [dates, period],
+  );
+  const weekDays = useMemo(() => habitWeek(addDays(today, offset * 7)), [today, offset]);
+  const streaks = useMemo(
+    () =>
+      new Map(
+        visibleHabits.map((habit) => [
+          habit.id,
+          {
+            current: habitStreak(habit, today),
+            best: habitBestStreak(habit, today),
+          },
+        ]),
+      ),
+    [visibleHabits, today],
+  );
   const selected = selectedDay && dates.includes(selectedDay) ? selectedDay : null;
 
   const refresh = useCallback(
     async (preserveError = false) => {
+      preserveRefreshError.current ||= preserveError;
+      if (!refreshGate.current.request()) return;
+      const keepError = preserveRefreshError.current;
+      preserveRefreshError.current = false;
+      const signal = read.current.start();
       try {
-        const result = await api.habits();
+        const result = await api.habits(signal);
+        if (!read.current.isCurrent(signal)) return;
         setHabits(result.habits);
-        if (!preserveError) setError('');
+        hasLoaded.current = true;
+        if (!keepError) setError('');
       } catch (failure) {
-        setError(failure instanceof Error ? failure.message : t('Не удалось загрузить привычки.'));
+        if (read.current.isCurrent(signal))
+          setError(
+            failure instanceof Error ? failure.message : t('Не удалось загрузить привычки.'),
+          );
       } finally {
-        setLoading(false);
+        if (read.current.isCurrent(signal)) setLoading(false);
       }
     },
     [t],
   );
   useEffect(() => {
     if (!active) return;
+    refreshGate.current.activate();
     void refresh();
-    const onFocus = () => void refresh();
+    const onFocus = () => {
+      if (!document.hidden && !refreshGate.current.writing) void refresh();
+    };
     const onChange = (event: Event) => {
-      if ((event as CustomEvent<{ source?: string }>).detail?.source !== 'habits-page')
+      if (
+        !document.hidden &&
+        !refreshGate.current.writing &&
+        (event as CustomEvent<{ source?: string }>).detail?.source !== 'habits-page'
+      )
         void refresh();
     };
     window.addEventListener('focus', onFocus);
     window.addEventListener('ritm:habits-changed', onChange);
     return () => {
+      refreshGate.current.deactivate();
+      read.current.cancel();
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('ritm:habits-changed', onChange);
     };
@@ -401,7 +448,10 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
   }
   async function save(input: HabitInput) {
     const old = editing === 'create' ? null : editing;
-    if (!editing || busyId) return;
+    if (!editing || busyId || refreshGate.current.writing) return;
+    read.current.cancel();
+    refreshGate.current.beginWrite(!hasLoaded.current);
+    setLoading(false);
     setBusyId(old?.id ?? 'create');
     setError('');
     try {
@@ -416,11 +466,15 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
       setError(failure instanceof Error ? failure.message : t('Не удалось сохранить привычку.'));
       void refresh(true);
     } finally {
+      if (refreshGate.current.endWrite()) void refresh();
       setBusyId(null);
     }
   }
   async function updateArchive(habit: Habit, archived: boolean) {
-    if (busyId) return;
+    if (busyId || refreshGate.current.writing) return;
+    read.current.cancel();
+    refreshGate.current.beginWrite(!hasLoaded.current);
+    setLoading(false);
     setBusyId(habit.id);
     try {
       replaceHabit(
@@ -444,11 +498,15 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
       setError(failure instanceof Error ? failure.message : t('Не удалось сохранить привычку.'));
       void refresh(true);
     } finally {
+      if (refreshGate.current.endWrite()) void refresh();
       setBusyId(null);
     }
   }
   async function remove() {
-    if (!deleting || busyId) return;
+    if (!deleting || busyId || refreshGate.current.writing) return;
+    read.current.cancel();
+    refreshGate.current.beginWrite(!hasLoaded.current);
+    setLoading(false);
     setBusyId(deleting.id);
     try {
       await api.deleteHabit(deleting.id, deleting.updatedAt);
@@ -459,11 +517,15 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
       setError(failure instanceof Error ? failure.message : t('Не удалось удалить привычку.'));
       void refresh(true);
     } finally {
+      if (refreshGate.current.endWrite()) void refresh();
       setBusyId(null);
     }
   }
   async function setProgress(habit: Habit, day: string, count: number) {
-    if (busyId || !habitCanMarkOn(habit, day, today)) return;
+    if (busyId || refreshGate.current.writing || !habitCanMarkOn(habit, day, today)) return;
+    read.current.cancel();
+    refreshGate.current.beginWrite(!hasLoaded.current);
+    setLoading(false);
     const target = habitTarget(habit);
     const nextCount = Math.max(0, Math.min(target, count));
     const wasComplete = habitCompleteOn(habit, day);
@@ -502,30 +564,52 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
       setError(failure instanceof Error ? failure.message : t('Не удалось изменить отметку.'));
       void refresh(true);
     } finally {
+      if (refreshGate.current.endWrite()) void refresh();
       setBusyId(null);
     }
   }
 
-  const totals = habitPeriodSummary(visibleHabits, dates, today);
-  const rate = totals.progress ?? 0;
-  const comparisonLength = Math.min(availableDates.length, previousDates.length);
-  const comparisonCurrent = habitPeriodSummary(
-    visibleHabits,
-    availableDates.slice(0, comparisonLength),
-    today,
-  );
-  const previous = habitPeriodSummary(
-    visibleHabits,
-    previousDates.slice(0, comparisonLength),
-    today,
-  );
-  const previousRate =
-    previous.progress !== null && comparisonCurrent.progress !== null ? previous.progress : null;
-  const comparisonCurrentRate = comparisonCurrent.progress ?? 0;
-  const todaySummary = habitDaySummary(visibleHabits, today, today);
-  const currentStreak = Math.max(0, ...visibleHabits.map((habit) => habitStreak(habit, today)));
-  const bestStreak = Math.max(0, ...visibleHabits.map((habit) => habitBestStreak(habit, today)));
-  const daily = dates.map((day) => ({ day, ...habitDaySummary(visibleHabits, day, today) }));
+  const {
+    totals,
+    rate,
+    previousRate,
+    comparisonCurrentRate,
+    todaySummary,
+    currentStreak,
+    bestStreak,
+    daily,
+  } = useMemo(() => {
+    const totals = habitPeriodSummary(visibleHabits, dates, today);
+    const rate = totals.progress ?? 0;
+    const comparisonLength = Math.min(availableDates.length, previousDates.length);
+    const comparisonCurrent = habitPeriodSummary(
+      visibleHabits,
+      availableDates.slice(0, comparisonLength),
+      today,
+    );
+    const previous = habitPeriodSummary(
+      visibleHabits,
+      previousDates.slice(0, comparisonLength),
+      today,
+    );
+    const previousRate =
+      previous.progress !== null && comparisonCurrent.progress !== null ? previous.progress : null;
+    const comparisonCurrentRate = comparisonCurrent.progress ?? 0;
+    const todaySummary = habitDaySummary(visibleHabits, today, today);
+    const currentStreak = Math.max(0, ...Array.from(streaks.values(), (value) => value.current));
+    const bestStreak = Math.max(0, ...Array.from(streaks.values(), (value) => value.best));
+    const daily = dates.map((day) => ({ day, ...habitDaySummary(visibleHabits, day, today) }));
+    return {
+      totals,
+      rate,
+      previousRate,
+      comparisonCurrentRate,
+      todaySummary,
+      currentStreak,
+      bestStreak,
+      daily,
+    };
+  }, [visibleHabits, dates, today, availableDates, previousDates, streaks]);
   const describeDay = (entry: (typeof daily)[number], label: string) =>
     entry.day > today
       ? label + '. ' + t('Будущий день')
@@ -918,8 +1002,8 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
           ) : (
             <MotionList className="habits-list">
               {visibleHabits.map((habit) => {
-                const streak = habitStreak(habit, today);
-                const best = habitBestStreak(habit, today);
+                const streak = streaks.get(habit.id)?.current ?? 0;
+                const best = streaks.get(habit.id)?.best ?? 0;
                 const awards =
                   habit.achievements ?? HABIT_MILESTONES.filter((milestone) => best >= milestone);
                 const nextMilestone = HABIT_MILESTONES.find(
@@ -1198,4 +1282,4 @@ export function HabitsPage({ active, timeZone }: { active: boolean; timeZone: st
       )}
     </section>
   );
-}
+});

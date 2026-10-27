@@ -30,6 +30,7 @@ import {
 import {
   assertWorkspaceStorage,
   assertFinanceStorage,
+  assertFinanceAccountDeletion,
   assertHabitStorage,
   assertTransferTask,
   assertTransferSnapshot,
@@ -383,6 +384,7 @@ export class Store {
       const current = JSON.parse(String(row.json)) as FinanceEntry;
       if (current.updatedAt !== expectedUpdatedAt)
         throw conflict('Финансовая запись изменилась. Обновите данные и повторите действие.');
+      assertFinanceAccountDeletion(this.financeEntries(), id);
       this.db.prepare('DELETE FROM finance_entries WHERE id=?').run(id);
     });
   }

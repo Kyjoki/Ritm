@@ -1,5 +1,6 @@
+import { dateTimeFormatter } from './intl-formatters';
 export function dateInZone(timeZone: string, date = new Date()): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
+  const parts = dateTimeFormatter('en-CA', {
     timeZone,
     year: 'numeric',
     month: '2-digit',
@@ -9,7 +10,7 @@ export function dateInZone(timeZone: string, date = new Date()): string {
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
 export function minutesInZone(timeZone: string, date = new Date()): number {
-  const parts = new Intl.DateTimeFormat('en-GB', {
+  const parts = dateTimeFormatter('en-GB', {
     timeZone,
     hour: '2-digit',
     minute: '2-digit',
@@ -28,9 +29,7 @@ export function formatDate(
   options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'long' },
   language: 'ru' | 'en' = 'ru',
 ): string {
-  return new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'ru-RU', options).format(
-    localDate(date),
-  );
+  return dateTimeFormatter(language === 'en' ? 'en-US' : 'ru-RU', options).format(localDate(date));
 }
 export function formatTime(value: number | string, options: { compact?: boolean } = {}): string {
   let minutes: number;

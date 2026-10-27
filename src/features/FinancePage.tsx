@@ -5,9 +5,18 @@ import {
   useMotionValues,
   useMotionNumber,
 } from '../components/Motion';
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+} from 'react';
 import {
   ArrowDownLeft,
+  ArrowRightLeft,
   ArrowUpRight,
   Banknote,
   ChartNoAxesCombined,
@@ -22,9 +31,11 @@ import {
   Wallet,
 } from 'lucide-react';
 import type { FinanceEntry, FinanceEntryInput } from '../../shared/types';
-import { calculateAccountBalance } from '../../shared/finance';
+import { calculateAccountBalance, calculateDepositBalance } from '../../shared/finance';
 import { Dialog } from '../components/Dialog';
 import { api } from '../lib/api';
+import { LatestRead, RefreshGate } from '../lib/latest-read';
+import { dateTimeFormatter, numberFormatter } from '../lib/intl-formatters';
 import { useI18n } from '../lib/i18n';
 import '../styles/finance.css';
 
@@ -44,6 +55,8 @@ type FormState = {
   quantity: string;
   unitPrice: string;
   purchasePrice: string;
+  fromAccountId: string;
+  toAccountId: string;
 };
 
 const currencies: Currency[] = ['KZT', 'USD', 'EUR', 'RUB'];
@@ -68,6 +81,8 @@ function emptyForm(currency: Currency, type: Kind = 'expense'): FormState {
     quantity: '',
     unitPrice: '',
     purchasePrice: '',
+    fromAccountId: '',
+    toAccountId: '',
   };
 }
 
@@ -177,10 +192,18 @@ function Donut({
   );
 }
 
-export function FinancePage({ active = true }: { active?: boolean }) {
+export const FinancePage = memo(function FinancePage({
+  active = true,
+  today = localDate(),
+}: {
+  active?: boolean;
+  today?: string;
+}) {
   const { locale, t } = useI18n();
   const [entries, setEntries] = useState<FinanceEntry[]>([]);
   const hasLoaded = useRef(false);
+  const read = useRef(new LatestRead());
+  const refreshGate = useRef(new RefreshGate());
   const [currency, setCurrency] = useState<Currency>('KZT');
   const [view, setView] = useState<FinanceView>('account');
   const [selectedDepositId, setSelectedDepositId] = useState<string | null>(null);
@@ -201,25 +224,37 @@ export function FinancePage({ active = true }: { active?: boolean }) {
   const [firstEntrance, setFirstEntrance] = useState(true);
 
   async function reload(initial = false) {
+    if (!refreshGate.current.request()) return;
+    const signal = read.current.start();
     if (initial) setLoading(true);
     else setRefreshing(true);
     setError('');
     try {
-      const result = await api.finance();
+      const result = await api.finance(signal);
+      if (!read.current.isCurrent(signal)) return;
       setEntries(result.entries);
       hasLoaded.current = true;
     } catch (failure) {
-      setError(
-        failure instanceof Error ? failure.message : t('Не удалось загрузить финансовые данные.'),
-      );
+      if (read.current.isCurrent(signal))
+        setError(
+          failure instanceof Error ? failure.message : t('Не удалось загрузить финансовые данные.'),
+        );
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (read.current.isCurrent(signal)) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }
 
   useEffect(() => {
-    if (active) void reload(!hasLoaded.current);
+    if (!active) return;
+    refreshGate.current.activate();
+    void reload(!hasLoaded.current);
+    return () => {
+      refreshGate.current.deactivate();
+      read.current.cancel();
+    };
   }, [active]);
   useEffect(() => {
     if (!active || loading || !firstEntrance) return;
@@ -228,128 +263,181 @@ export function FinancePage({ active = true }: { active?: boolean }) {
   }, [active, loading, firstEntrance]);
 
   const money = (minor: number) =>
-    new Intl.NumberFormat(locale, {
+    numberFormatter(locale, {
       style: 'currency',
       currency,
       minimumFractionDigits: minor % 100 ? 2 : 0,
       maximumFractionDigits: 2,
     }).format(minor / 100);
   const formMoney = (minor: number) =>
-    new Intl.NumberFormat(locale, {
+    numberFormatter(locale, {
       style: 'currency',
       currency: form?.currency ?? currency,
       minimumFractionDigits: minor % 100 ? 2 : 0,
       maximumFractionDigits: 2,
     }).format(minor / 100);
   const dateLabel = (value: string) =>
-    new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short', year: 'numeric' }).format(
+    dateTimeFormatter(locale, { day: 'numeric', month: 'short', year: 'numeric' }).format(
       new Date(`${value}T12:00:00`),
     );
-  const categoryLabel = (value: string) => t(value);
 
   const visible = useMemo(
     () => entries.filter((entry) => entry.currency === currency),
     [entries, currency],
   );
-  const transactions = visible.filter(
-    (entry) => entry.type === 'income' || entry.type === 'expense',
-  );
-  const assets = visible.filter((entry) => entry.type === 'deposit' || entry.type === 'stock');
-  const depositEntries = visible.filter((entry) => entry.type === 'deposit');
-  const selectedDeposit = depositEntries.find((entry) => entry.id === selectedDepositId);
-  const account = visible.find((entry) => entry.type === 'account');
-  const accountBalance = calculateAccountBalance(visible, currency, localDate());
-  const currentMonth = monthKey(localDate());
-  const monthTransactions = transactions.filter((entry) => monthKey(entry.date) === currentMonth);
-  const income = monthTransactions
-    .filter((entry) => entry.type === 'income')
-    .reduce((sum, entry) => sum + entry.amountMinor, 0);
-  const expense = monthTransactions
-    .filter((entry) => entry.type === 'expense')
-    .reduce((sum, entry) => sum + entry.amountMinor, 0);
-  const deposits = assets
-    .filter((entry) => entry.type === 'deposit')
-    .reduce((sum, entry) => sum + entry.valueMinor, 0);
-  const stocks = assets
-    .filter((entry) => entry.type === 'stock')
-    .reduce((sum, entry) => sum + entry.valueMinor, 0);
-  const stockEntries = visible.filter(
-    (entry): entry is Extract<FinanceEntry, { type: 'stock' }> => entry.type === 'stock',
-  );
-  const stocksWithBasis = stockEntries.filter(
-    (entry) => entry.quantity && entry.purchasePriceMinor !== undefined,
-  );
-  const stockInvested = stocksWithBasis.reduce(
-    (sum, entry) => sum + entry.quantity! * entry.purchasePriceMinor!,
-    0,
-  );
-  const stockCurrentWithBasis = stocksWithBasis.reduce((sum, entry) => sum + entry.valueMinor, 0);
-  const stockGain = stockCurrentWithBasis - stockInvested;
-  const assetTotal = deposits + stocks;
-  const combinedTotal = accountBalance === null ? null : accountBalance + assetTotal;
-  const sectionTotal =
-    view === 'account'
-      ? accountBalance
-      : view === 'deposits'
-        ? (selectedDeposit?.valueMinor ?? deposits)
-        : view === 'stocks'
-          ? stocks
-          : combinedTotal;
-  const sectionCount =
-    view === 'account'
-      ? transactions.length
-      : view === 'deposits'
-        ? selectedDeposit
-          ? 1
-          : depositEntries.length
-        : view === 'stocks'
-          ? assets.filter((entry) => entry.type === 'stock').length
-          : visible.length;
-  const expenseGroups = Object.entries(
-    monthTransactions
+  const {
+    transactions,
+    assets,
+    depositEntries,
+    depositBalances,
+    selectedDeposit,
+    account,
+    accountBalance,
+    currentMonth,
+    monthTransactions,
+    income,
+    expense,
+    deposits,
+    stocks,
+    stockEntries,
+    stocksWithBasis,
+    stockInvested,
+    stockCurrentWithBasis,
+    stockGain,
+    assetTotal,
+    combinedTotal,
+    sectionTotal,
+    sectionCount,
+    expenseGroups,
+    expenseSlices,
+    sectionAssets,
+    sortedAssets,
+    sectionAssetSlices,
+    sectionSlices,
+    monthly,
+    chartMax,
+    history,
+    records,
+  } = useMemo(() => {
+    const transactions = visible.filter(
+      (entry) => entry.type === 'income' || entry.type === 'expense',
+    );
+    const assets = visible.filter((entry) => entry.type === 'deposit' || entry.type === 'stock');
+    const depositEntries = visible.filter((entry) => entry.type === 'deposit');
+    const depositBalances = new Map(
+      depositEntries.map((entry) => [entry.id, calculateDepositBalance(visible, entry.id, today)]),
+    );
+    const selectedDeposit = depositEntries.find((entry) => entry.id === selectedDepositId);
+    const account = visible.find((entry) => entry.type === 'account');
+    const accountBalance = calculateAccountBalance(visible, currency, today);
+    const currentMonth = monthKey(today);
+    const monthTransactions = transactions.filter((entry) => monthKey(entry.date) === currentMonth);
+    const income = monthTransactions
+      .filter((entry) => entry.type === 'income')
+      .reduce((sum, entry) => sum + entry.amountMinor, 0);
+    const expense = monthTransactions
       .filter((entry) => entry.type === 'expense')
-      .reduce<Record<string, number>>((acc, entry) => {
-        const category = categoryLabel(entry.category);
-        acc[category] = (acc[category] ?? 0) + entry.amountMinor;
-        return acc;
-      }, {}),
-  ).sort((a, b) => b[1] - a[1]);
-  const expenseSlices = [
-    ...expenseGroups.slice(0, 5).map(([label, value]) => ({ label, value })),
-    ...(expenseGroups.length > 5
-      ? [
-          {
-            label: t('Другое'),
-            value: expenseGroups.slice(5).reduce((sum, [, value]) => sum + value, 0),
-          },
-        ]
-      : []),
-  ];
-  const sectionAssets = assets.filter((entry) =>
-    view === 'deposits' ? entry.type === 'deposit' : entry.type === 'stock',
-  );
-  const sortedAssets = [...sectionAssets].sort((a, b) => b.valueMinor - a.valueMinor);
-  const sectionAssetSlices = [
-    ...sortedAssets.slice(0, 5).map((entry) => ({ label: entry.name, value: entry.valueMinor })),
-    ...(sortedAssets.length > 5
-      ? [
-          {
-            label: t('Другое'),
-            value: sortedAssets.slice(5).reduce((sum, entry) => sum + entry.valueMinor, 0),
-          },
-        ]
-      : []),
-  ];
-  const sectionSlices =
-    view === 'all'
-      ? [
-          { label: t('Основной счёт'), value: Math.max(0, accountBalance ?? 0) },
-          { label: t('Депозиты'), value: deposits },
-          { label: t('Акции'), value: stocks },
-        ].filter((item) => item.value > 0)
-      : sectionAssetSlices;
-  const monthly = Array.from({ length: 6 }, (_, index) => monthOffset(new Date(), index - 5)).map(
-    (month) => ({
+      .reduce((sum, entry) => sum + entry.amountMinor, 0);
+    const deposits = assets
+      .filter((entry) => entry.type === 'deposit')
+      .reduce((sum, entry) => sum + (depositBalances.get(entry.id) ?? 0), 0);
+    const stocks = assets
+      .filter((entry) => entry.type === 'stock')
+      .reduce((sum, entry) => sum + entry.valueMinor, 0);
+    const stockEntries = visible.filter(
+      (entry): entry is Extract<FinanceEntry, { type: 'stock' }> => entry.type === 'stock',
+    );
+    const stocksWithBasis = stockEntries.filter(
+      (entry) => entry.quantity && entry.purchasePriceMinor !== undefined,
+    );
+    const stockInvested = stocksWithBasis.reduce(
+      (sum, entry) => sum + entry.quantity! * entry.purchasePriceMinor!,
+      0,
+    );
+    const stockCurrentWithBasis = stocksWithBasis.reduce((sum, entry) => sum + entry.valueMinor, 0);
+    const stockGain = stockCurrentWithBasis - stockInvested;
+    const assetTotal = deposits + stocks;
+    const combinedTotal = accountBalance === null ? null : accountBalance + assetTotal;
+    const sectionTotal =
+      view === 'account'
+        ? accountBalance
+        : view === 'deposits'
+          ? selectedDeposit
+            ? (depositBalances.get(selectedDeposit.id) ?? null)
+            : deposits
+          : view === 'stocks'
+            ? stocks
+            : combinedTotal;
+    const sectionCount =
+      view === 'account'
+        ? transactions.length
+        : view === 'deposits'
+          ? selectedDeposit
+            ? 1
+            : depositEntries.length
+          : view === 'stocks'
+            ? assets.filter((entry) => entry.type === 'stock').length
+            : visible.length;
+    const expenseGroups = Object.entries(
+      monthTransactions
+        .filter((entry) => entry.type === 'expense')
+        .reduce<Record<string, number>>((acc, entry) => {
+          const category = t(entry.category);
+          acc[category] = (acc[category] ?? 0) + entry.amountMinor;
+          return acc;
+        }, {}),
+    ).sort((a, b) => b[1] - a[1]);
+    const expenseSlices = [
+      ...expenseGroups.slice(0, 5).map(([label, value]) => ({ label, value })),
+      ...(expenseGroups.length > 5
+        ? [
+            {
+              label: t('Другое'),
+              value: expenseGroups.slice(5).reduce((sum, [, value]) => sum + value, 0),
+            },
+          ]
+        : []),
+    ];
+    const sectionAssets = assets.filter((entry) =>
+      view === 'deposits' ? entry.type === 'deposit' : entry.type === 'stock',
+    );
+    const sortedAssets = sectionAssets
+      .map((entry) => ({
+        ...entry,
+        valueMinor:
+          entry.type === 'deposit'
+            ? Math.max(0, depositBalances.get(entry.id) ?? 0)
+            : entry.valueMinor,
+      }))
+      .sort((a, b) => b.valueMinor - a.valueMinor);
+    const sectionAssetSlices = [
+      ...sortedAssets.slice(0, 5).map((entry) => ({ label: entry.name, value: entry.valueMinor })),
+      ...(sortedAssets.length > 5
+        ? [
+            {
+              label: t('Другое'),
+              value: sortedAssets.slice(5).reduce((sum, entry) => sum + entry.valueMinor, 0),
+            },
+          ]
+        : []),
+    ];
+    const sectionSlices =
+      view === 'all'
+        ? [
+            { label: t('Основной счёт'), value: Math.max(0, accountBalance ?? 0) },
+            {
+              label: t('Депозиты'),
+              value: depositEntries.reduce(
+                (sum, entry) => sum + Math.max(0, depositBalances.get(entry.id) ?? 0),
+                0,
+              ),
+            },
+            { label: t('Акции'), value: stocks },
+          ].filter((item) => item.value > 0)
+        : sectionAssetSlices;
+    const monthly = Array.from({ length: 6 }, (_, index) =>
+      monthOffset(new Date(`${today}T12:00:00`), index - 5),
+    ).map((month) => ({
       ...month,
       income: transactions
         .filter((entry) => entry.type === 'income' && monthKey(entry.date) === month.key)
@@ -357,33 +445,116 @@ export function FinancePage({ active = true }: { active?: boolean }) {
       expense: transactions
         .filter((entry) => entry.type === 'expense' && monthKey(entry.date) === month.key)
         .reduce((sum, entry) => sum + entry.amountMinor, 0),
-    }),
+    }));
+    const chartMax = Math.max(1, ...monthly.flatMap((month) => [month.income, month.expense]));
+    const history = [...visible].sort(
+      (a, b) =>
+        (('date' in b ? b.date : b.asOf) || '').localeCompare(
+          ('date' in a ? a.date : a.asOf) || '',
+        ) || b.createdAt.localeCompare(a.createdAt),
+    );
+    const records = history.filter(
+      (entry) =>
+        view === 'all' ||
+        (view === 'account' &&
+          (entry.type === 'account' ||
+            (entry.type === 'transfer' &&
+              (entry.fromAccountId === account?.id || entry.toAccountId === account?.id)) ||
+            ((entry.type === 'income' || entry.type === 'expense') &&
+              (!account || (entry.date >= account.asOf && entry.date <= today))))) ||
+        (view === 'deposits' &&
+          ((entry.type === 'deposit' && (!selectedDeposit || entry.id === selectedDeposit.id)) ||
+            (entry.type === 'transfer' &&
+              (!selectedDeposit ||
+                entry.fromAccountId === selectedDeposit.id ||
+                entry.toAccountId === selectedDeposit.id)))) ||
+        (view === 'stocks' && entry.type === 'stock'),
+    );
+    return {
+      transactions,
+      assets,
+      depositEntries,
+      depositBalances,
+      selectedDeposit,
+      account,
+      accountBalance,
+      currentMonth,
+      monthTransactions,
+      income,
+      expense,
+      deposits,
+      stocks,
+      stockEntries,
+      stocksWithBasis,
+      stockInvested,
+      stockCurrentWithBasis,
+      stockGain,
+      assetTotal,
+      combinedTotal,
+      sectionTotal,
+      sectionCount,
+      expenseGroups,
+      expenseSlices,
+      sectionAssets,
+      sortedAssets,
+      sectionAssetSlices,
+      sectionSlices,
+      monthly,
+      chartMax,
+      history,
+      records,
+    };
+  }, [visible, currency, view, selectedDepositId, today, t]);
+
+  const transferCurrency = form?.currency ?? currency;
+  const transferAccounts = useMemo(
+    () =>
+      entries.filter(
+        (entry): entry is Extract<FinanceEntry, { type: 'account' | 'deposit' }> =>
+          (entry.type === 'account' || entry.type === 'deposit') &&
+          entry.currency === transferCurrency,
+      ),
+    [entries, transferCurrency],
   );
-  const chartMax = Math.max(1, ...monthly.flatMap((month) => [month.income, month.expense]));
-  const history = [...visible].sort(
-    (a, b) =>
-      ((b.type === 'income' || b.type === 'expense' ? b.date : b.asOf) || '').localeCompare(
-        (a.type === 'income' || a.type === 'expense' ? a.date : a.asOf) || '',
-      ) || b.createdAt.localeCompare(a.createdAt),
+  const accountNames = useMemo(
+    () =>
+      new Map(
+        entries.flatMap((entry) =>
+          entry.type === 'account' || entry.type === 'deposit'
+            ? [[entry.id, entry.type === 'account' ? t('Основной счёт') : entry.name] as const]
+            : [],
+        ),
+      ),
+    [entries, t],
   );
-  const records = history.filter(
-    (entry) =>
-      view === 'all' ||
-      (view === 'account' &&
-        (entry.type === 'account' ||
-          ((entry.type === 'income' || entry.type === 'expense') &&
-            (!account || (entry.date >= account.asOf && entry.date <= localDate()))))) ||
-      (view === 'deposits' &&
-        entry.type === 'deposit' &&
-        (!selectedDeposit || entry.id === selectedDeposit.id)) ||
-      (view === 'stocks' && entry.type === 'stock'),
-  );
+  const accountName = (id: string) => accountNames.get(id) ?? t('Счёт недоступен');
+  const transferMinDate =
+    form?.type === 'transfer'
+      ? transferAccounts
+          .filter((entry) => entry.id === form.fromAccountId || entry.id === form.toAccountId)
+          .map((entry) => entry.asOf)
+          .sort()
+          .at(-1)
+      : undefined;
+
+  function openTransfer(
+    fromAccountId = account?.id ?? '',
+    toAccountId = selectedDeposit?.id ?? depositEntries[0]?.id ?? '',
+  ) {
+    setEditing(null);
+    setForm({ ...emptyForm(currency, 'transfer'), date: today, fromAccountId, toAccountId });
+    setFormError('');
+  }
 
   function openNew(
     type: Kind = view === 'deposits' ? 'deposit' : view === 'stocks' ? 'stock' : 'expense',
   ) {
+    if (type === 'transfer') {
+      openTransfer();
+      return;
+    }
     setEditing(null);
-    setForm(emptyForm(currency, type));
+    setForm({ ...emptyForm(currency, type), date: today });
     setFormError('');
   }
 
@@ -391,6 +562,8 @@ export function FinancePage({ active = true }: { active?: boolean }) {
     setEditing(entry);
     setForm({
       type: entry.type,
+      fromAccountId: entry.type === 'transfer' ? entry.fromAccountId : '',
+      toAccountId: entry.type === 'transfer' ? entry.toAccountId : '',
       amount: String(
         (entry.type === 'account' || entry.type === 'deposit' || entry.type === 'stock'
           ? entry.valueMinor
@@ -421,7 +594,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!form || saving) return;
+    if (!form || saving || refreshGate.current.writing) return;
     const isStockWithPrice = form.type === 'stock' && form.quantity.trim() !== '';
     const quantity = isStockWithPrice ? Number(form.quantity) : null;
     const unitPriceMinor = isStockWithPrice ? parseMinor(form.unitPrice) : null;
@@ -435,11 +608,12 @@ export function FinancePage({ active = true }: { active?: boolean }) {
       minor === null ||
       !Number.isSafeInteger(minor) ||
       minor > 1_000_000_000_000 ||
-      ((form.type === 'income' || form.type === 'expense') && minor === 0)
+      ((form.type === 'income' || form.type === 'expense' || form.type === 'transfer') &&
+        minor === 0)
     ) {
       setFormError(
         t(
-          form.type === 'income' || form.type === 'expense'
+          form.type === 'income' || form.type === 'expense' || form.type === 'transfer'
             ? 'Введите сумму больше нуля, максимум с двумя знаками после запятой.'
             : 'Введите стоимость от нуля, максимум с двумя знаками после запятой.',
         ),
@@ -479,40 +653,64 @@ export function FinancePage({ active = true }: { active?: boolean }) {
         return;
       }
     }
+    if (
+      form.type === 'transfer' &&
+      (!form.fromAccountId ||
+        !form.toAccountId ||
+        form.fromAccountId === form.toAccountId ||
+        !transferAccounts.some((entry) => entry.id === form.fromAccountId) ||
+        !transferAccounts.some((entry) => entry.id === form.toAccountId))
+    ) {
+      setFormError(t('Выберите два разных счёта в одной валюте.'));
+      return;
+    }
     const common = { currency: form.currency, note: form.note.trim() };
     const input: FinanceEntryInput =
-      form.type === 'income' || form.type === 'expense'
+      form.type === 'transfer'
         ? {
-            type: form.type,
+            type: 'transfer',
             amountMinor: minor,
             date: form.date,
-            category: form.category.trim(),
+            fromAccountId: form.fromAccountId,
+            toAccountId: form.toAccountId,
             ...common,
           }
-        : form.type === 'account'
-          ? { type: 'account', valueMinor: minor, asOf: form.date, ...common }
-          : form.type === 'stock'
-            ? {
-                type: 'stock',
-                valueMinor: minor,
-                asOf: form.date,
-                name: form.name.trim(),
-                ...(form.ticker.trim()
-                  ? { exchange: form.exchange, ticker: form.ticker.trim().toUpperCase() }
-                  : {}),
-                ...(isStockWithPrice
-                  ? { quantity: quantity!, unitPriceMinor: unitPriceMinor! }
-                  : {}),
-                ...(purchasePriceMinor !== null ? { purchasePriceMinor } : {}),
-                ...common,
-              }
-            : {
-                type: form.type,
-                valueMinor: minor,
-                asOf: form.date,
-                name: form.name.trim(),
-                ...common,
-              };
+        : form.type === 'income' || form.type === 'expense'
+          ? {
+              type: form.type,
+              amountMinor: minor,
+              date: form.date,
+              category: form.category.trim(),
+              ...common,
+            }
+          : form.type === 'account'
+            ? { type: 'account', valueMinor: minor, asOf: form.date, ...common }
+            : form.type === 'stock'
+              ? {
+                  type: 'stock',
+                  valueMinor: minor,
+                  asOf: form.date,
+                  name: form.name.trim(),
+                  ...(form.ticker.trim()
+                    ? { exchange: form.exchange, ticker: form.ticker.trim().toUpperCase() }
+                    : {}),
+                  ...(isStockWithPrice
+                    ? { quantity: quantity!, unitPriceMinor: unitPriceMinor! }
+                    : {}),
+                  ...(purchasePriceMinor !== null ? { purchasePriceMinor } : {}),
+                  ...common,
+                }
+              : {
+                  type: form.type,
+                  valueMinor: minor,
+                  asOf: form.date,
+                  name: form.name.trim(),
+                  ...common,
+                };
+    read.current.cancel();
+    refreshGate.current.beginWrite(!hasLoaded.current);
+    setLoading(false);
+    setRefreshing(false);
     setSaving(true);
     setFormError('');
     try {
@@ -534,13 +732,14 @@ export function FinancePage({ active = true }: { active?: boolean }) {
     } catch (failure) {
       setFormError(failure instanceof Error ? failure.message : t('Не удалось сохранить запись.'));
     } finally {
+      if (refreshGate.current.endWrite()) void reload();
       setSaving(false);
     }
   }
 
   async function savePrice(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!priceUpdate || saving || !priceUpdate.quantity) return;
+    if (!priceUpdate || saving || refreshGate.current.writing || !priceUpdate.quantity) return;
     const unitPriceMinor = parseMinor(priceInput);
     const valueMinor = unitPriceMinor === null ? null : unitPriceMinor * priceUpdate.quantity;
     if (
@@ -551,6 +750,10 @@ export function FinancePage({ active = true }: { active?: boolean }) {
       setFormError(t('Введите цену с точностью до двух знаков.'));
       return;
     }
+    read.current.cancel();
+    refreshGate.current.beginWrite(!hasLoaded.current);
+    setLoading(false);
+    setRefreshing(false);
     setSaving(true);
     setFormError('');
     try {
@@ -565,11 +768,17 @@ export function FinancePage({ active = true }: { active?: boolean }) {
     } catch (failure) {
       setFormError(failure instanceof Error ? failure.message : t('Не удалось сохранить запись.'));
     } finally {
+      if (refreshGate.current.endWrite()) void reload();
       setSaving(false);
     }
   }
 
   async function remove(entry: FinanceEntry) {
+    if (refreshGate.current.writing) return;
+    read.current.cancel();
+    refreshGate.current.beginWrite(!hasLoaded.current);
+    setLoading(false);
+    setRefreshing(false);
     setDeleting(entry.id);
     setError('');
     try {
@@ -580,6 +789,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : t('Не удалось удалить запись.'));
     } finally {
+      if (refreshGate.current.endWrite()) void reload();
       setDeleting(null);
     }
   }
@@ -614,6 +824,9 @@ export function FinancePage({ active = true }: { active?: boolean }) {
               ))}
             </select>
           </label>
+          <button className="button button-secondary" type="button" onClick={() => openTransfer()}>
+            <ArrowRightLeft size={17} /> {t('Перевод')}
+          </button>
           <button className="button button-primary" type="button" onClick={() => openNew()}>
             <CirclePlus size={17} /> {t('Добавить запись')}
           </button>
@@ -628,7 +841,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
         <div className="finance-info-note">
           <Wallet size={15} />
           {t(
-            'Баланс счёта и оценки активов ведутся отдельно. Учитывайте переводы между ними вручную.',
+            'Переводы между основным счётом и депозитами меняют оба остатка, но не доходы и расходы.',
           )}
         </div>
       )}
@@ -678,7 +891,11 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                 onClick={() => setSelectedDepositId(entry.id)}
               >
                 <strong>{entry.name}</strong>
-                <span>{money(entry.valueMinor)}</span>
+                <span>
+                  {depositBalances.get(entry.id) === null
+                    ? '—'
+                    : money(depositBalances.get(entry.id) ?? 0)}
+                </span>
               </button>
             ))}
             <button
@@ -755,13 +972,15 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                     ? 'Стартовый остаток плюс внесённые операции с выбранной даты.'
                     : view === 'all'
                       ? 'Счёт, депозиты и акции в выбранной валюте.'
-                      : 'Стоимость по вашей последней ручной оценке.',
+                      : view === 'deposits'
+                        ? 'Стартовый остаток депозита плюс пополнения и снятия.'
+                        : 'Стоимость по вашей последней ручной оценке.',
                 )}
               </p>
               <div className="finance-hero-split">
                 {view === 'account' && account ? (
                   <span>
-                    {t('С {date} учтены все поступления и расходы.', {
+                    {t('С {date} учтены поступления, расходы и переводы.', {
                       date: dateLabel(account.asOf),
                     })}
                   </span>
@@ -793,6 +1012,35 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                     <Pencil size={15} /> {t('Изменить депозит')}
                   </button>
                 ) : null}
+                {view === 'deposits' && selectedDeposit && (
+                  <>
+                    <button
+                      type="button"
+                      className="finance-hero-action"
+                      onClick={() => openTransfer(account?.id ?? '', selectedDeposit.id)}
+                    >
+                      <ArrowDownLeft size={16} />
+                      {t('Пополнить')}
+                    </button>
+                    <button
+                      type="button"
+                      className="finance-hero-action"
+                      onClick={() => openTransfer(selectedDeposit.id, account?.id ?? '')}
+                    >
+                      <ArrowUpRight size={16} />
+                      {t('Снять')}
+                    </button>
+                    {!account && (
+                      <button
+                        type="button"
+                        className="finance-hero-action"
+                        onClick={() => openNew('account')}
+                      >
+                        {t('Задать стартовый остаток')}
+                      </button>
+                    )}
+                  </>
+                )}
                 {view === 'deposits' || view === 'stocks' ? (
                   <span>{t('Записей: {count}', { count: sectionCount })}</span>
                 ) : null}
@@ -844,7 +1092,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                         ? 'Депозиты'
                         : view === 'stocks'
                           ? 'Вложено в акции'
-                          : 'Сумма оценок',
+                          : 'Остаток депозитов',
                   )}
                 </span>
                 <strong>
@@ -859,7 +1107,9 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                             : view === 'all'
                               ? deposits
                               : view === 'deposits'
-                                ? (selectedDeposit?.valueMinor ?? deposits)
+                                ? selectedDeposit
+                                  ? (depositBalances.get(selectedDeposit.id) ?? 0)
+                                  : deposits
                                 : stockInvested
                         }
                         format={money}
@@ -919,7 +1169,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                 </strong>
                 {view === 'stocks' && stocksWithBasis.length > 0 && stockInvested > 0 && (
                   <small className="finance-gain-percent">
-                    {new Intl.NumberFormat(locale, {
+                    {numberFormatter(locale, {
                       maximumFractionDigits: 1,
                       signDisplay: 'always',
                     }).format((stockGain / stockInvested) * 100)}
@@ -951,7 +1201,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                   aria-label={monthly
                     .map(
                       (month) =>
-                        `${new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(month.date)}: ${t('Поступления')} ${money(month.income)}, ${t('Расходы')} ${money(month.expense)}`,
+                        `${dateTimeFormatter(locale, { month: 'long', year: 'numeric' }).format(month.date)}: ${t('Поступления')} ${money(month.income)}, ${t('Расходы')} ${money(month.expense)}`,
                     )
                     .join('; ')}
                 >
@@ -972,7 +1222,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                         />
                       </div>
                       <span className="finance-month-label">
-                        {new Intl.DateTimeFormat(locale, { month: 'short' }).format(month.date)}
+                        {dateTimeFormatter(locale, { month: 'short' }).format(month.date)}
                       </span>
                     </div>
                   ))}
@@ -1022,13 +1272,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                 </div>
                 <Donut
                   items={sectionSlices}
-                  center={money(
-                    view === 'all'
-                      ? Math.max(0, accountBalance ?? 0) + assetTotal
-                      : view === 'deposits'
-                        ? deposits
-                        : (sectionTotal ?? 0),
-                  )}
+                  center={money(sectionSlices.reduce((sum, item) => sum + item.value, 0))}
                   caption={t(view === 'deposits' ? 'всего в депозитах' : 'в активах')}
                   empty={t(
                     view === 'all'
@@ -1039,11 +1283,13 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                   )}
                   format={money}
                 />
-                {view === 'all' && accountBalance !== null && accountBalance < 0 && (
+                {((view === 'all' && accountBalance !== null && accountBalance < 0) ||
+                  ((view === 'all' || view === 'deposits') &&
+                    [...depositBalances.values()].some(
+                      (balance) => balance !== null && balance < 0,
+                    ))) && (
                   <p className="finance-chart-empty">
-                    {t(
-                      'Отрицательный остаток счёта показан в общем итоге, но не в круговой диаграмме.',
-                    )}
+                    {t('Отрицательные остатки учтены в итогах, но не в круговой диаграмме.')}
                   </p>
                 )}
               </div>
@@ -1084,24 +1330,33 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                       entry.type === 'account' ||
                       entry.type === 'deposit' ||
                       entry.type === 'stock';
-                    const amount = isAsset ? entry.valueMinor : entry.amountMinor;
+                    const amount =
+                      entry.type === 'deposit'
+                        ? (depositBalances.get(entry.id) ?? 0)
+                        : isAsset
+                          ? entry.valueMinor
+                          : entry.amountMinor;
                     const label =
                       entry.type === 'account'
                         ? t('Стартовый остаток')
                         : entry.type === 'deposit' || entry.type === 'stock'
                           ? entry.name
-                          : categoryLabel(entry.category);
+                          : entry.type === 'transfer'
+                            ? `${accountName(entry.fromAccountId)} → ${accountName(entry.toAccountId)}`
+                            : t(entry.category);
                     const date = isAsset ? entry.asOf : entry.date;
                     const Icon =
-                      entry.type === 'income'
-                        ? ArrowDownLeft
-                        : entry.type === 'expense'
-                          ? ArrowUpRight
-                          : entry.type === 'account'
-                            ? Wallet
-                            : entry.type === 'deposit'
-                              ? Landmark
-                              : ChartNoAxesCombined;
+                      entry.type === 'transfer'
+                        ? ArrowRightLeft
+                        : entry.type === 'income'
+                          ? ArrowDownLeft
+                          : entry.type === 'expense'
+                            ? ArrowUpRight
+                            : entry.type === 'account'
+                              ? Wallet
+                              : entry.type === 'deposit'
+                                ? Landmark
+                                : ChartNoAxesCombined;
                     const purchaseValue =
                       entry.type === 'stock' &&
                       entry.quantity &&
@@ -1121,19 +1376,29 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                           <strong>{label}</strong>
                           <span>
                             {t(
-                              entry.type === 'income'
-                                ? 'Поступление'
-                                : entry.type === 'expense'
-                                  ? 'Расход'
-                                  : entry.type === 'account'
-                                    ? 'Основной счёт'
-                                    : entry.type === 'deposit'
-                                      ? 'Депозит'
-                                      : 'Акции',
+                              entry.type === 'transfer'
+                                ? 'Перевод'
+                                : entry.type === 'income'
+                                  ? 'Поступление'
+                                  : entry.type === 'expense'
+                                    ? 'Расход'
+                                    : entry.type === 'account'
+                                      ? 'Основной счёт'
+                                      : entry.type === 'deposit'
+                                        ? 'Депозит'
+                                        : 'Акции',
                             )}{' '}
                             · {dateLabel(date)}
                             {entry.note ? ` · ${entry.note}` : ''}
                           </span>
+                          {entry.type === 'deposit' && (
+                            <span>
+                              {t('Стартовый остаток')}: {money(entry.valueMinor)}
+                            </span>
+                          )}
+                          {entry.type === 'transfer' && entry.date > today && (
+                            <span>{t('Запланировано: пока не влияет на остатки')}</span>
+                          )}
                           {entry.type === 'stock' && (
                             <span className="finance-stock-details">
                               {entry.quantity && entry.unitPriceMinor !== undefined
@@ -1159,13 +1424,15 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                             >
                               {purchaseValue === null
                                 ? t('Добавьте цену покупки для расчёта прибыли')
-                                : `${t('Куплено за')} ${money(purchaseValue)} · ${t('Плюс / минус')} ${gain! > 0 ? '+' : ''}${money(gain!)}${purchaseValue > 0 ? ` (${new Intl.NumberFormat(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format((gain! / purchaseValue) * 100)}%)` : ''}`}
+                                : `${t('Куплено за')} ${money(purchaseValue)} · ${t('Плюс / минус')} ${gain! > 0 ? '+' : ''}${money(gain!)}${purchaseValue > 0 ? ` (${numberFormatter(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format((gain! / purchaseValue) * 100)}%)` : ''}`}
                             </span>
                           )}
                         </span>
                         <strong className={`finance-record-money ${entry.type}`}>
                           {entry.type === 'income' ? '+' : entry.type === 'expense' ? '−' : ''}
-                          {money(amount)}
+                          {entry.type === 'deposit' && depositBalances.get(entry.id) === null
+                            ? '—'
+                            : money(amount)}
                         </strong>
                         <span className="finance-record-actions">
                           {confirmDelete === entry.id ? (
@@ -1281,33 +1548,47 @@ export function FinancePage({ active = true }: { active?: boolean }) {
           <form onSubmit={(event) => void save(event)} className="finance-form">
             <fieldset className="finance-type-switch" disabled={Boolean(editing) || saving}>
               <legend>{t('Тип записи')}</legend>
-              {(['expense', 'income', 'account', 'deposit', 'stock'] as Kind[]).map((kind) => (
-                <button
-                  key={kind}
-                  type="button"
-                  aria-pressed={form.type === kind}
-                  disabled={
-                    !editing &&
-                    kind === 'account' &&
-                    entries.some(
-                      (entry) => entry.type === 'account' && entry.currency === form.currency,
-                    )
-                  }
-                  onClick={() => setForm({ ...form, type: kind, category: '', name: '' })}
-                >
-                  {t(
-                    kind === 'expense'
-                      ? 'Расход'
-                      : kind === 'income'
-                        ? 'Поступление'
-                        : kind === 'account'
-                          ? 'Основной счёт'
-                          : kind === 'deposit'
-                            ? 'Депозит'
-                            : 'Акции',
-                  )}
-                </button>
-              ))}
+              {(['expense', 'income', 'transfer', 'account', 'deposit', 'stock'] as Kind[]).map(
+                (kind) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    aria-pressed={form.type === kind}
+                    disabled={
+                      !editing &&
+                      kind === 'account' &&
+                      entries.some(
+                        (entry) => entry.type === 'account' && entry.currency === form.currency,
+                      )
+                    }
+                    onClick={() => {
+                      setForm({
+                        ...form,
+                        type: kind,
+                        category: '',
+                        name: '',
+                        fromAccountId: '',
+                        toAccountId: '',
+                      });
+                      setFormError('');
+                    }}
+                  >
+                    {t(
+                      kind === 'transfer'
+                        ? 'Перевод'
+                        : kind === 'expense'
+                          ? 'Расход'
+                          : kind === 'income'
+                            ? 'Поступление'
+                            : kind === 'account'
+                              ? 'Основной счёт'
+                              : kind === 'deposit'
+                                ? 'Депозит'
+                                : 'Акции',
+                    )}
+                  </button>
+                ),
+              )}
             </fieldset>
             <div className="form-grid">
               {form.type !== 'stock' && (
@@ -1316,9 +1597,13 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                     {t(
                       form.type === 'account'
                         ? 'Стартовый остаток'
-                        : form.type === 'income' || form.type === 'expense'
+                        : form.type === 'income' ||
+                            form.type === 'expense' ||
+                            form.type === 'transfer'
                           ? 'Сумма'
-                          : 'Текущая стоимость',
+                          : form.type === 'deposit'
+                            ? 'Стартовый остаток'
+                            : 'Текущая стоимость',
                     )}
                   </span>
                   <input
@@ -1337,7 +1622,12 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                 <select
                   value={form.currency}
                   onChange={(event) =>
-                    setForm({ ...form, currency: event.target.value as Currency })
+                    setForm({
+                      ...form,
+                      currency: event.target.value as Currency,
+                      fromAccountId: '',
+                      toAccountId: '',
+                    })
                   }
                   disabled={saving || (Boolean(editing) && form.type === 'account')}
                 >
@@ -1370,10 +1660,57 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                   ))}
                 </datalist>
               </label>
+            ) : form.type === 'transfer' ? (
+              <div className="finance-transfer-fields">
+                <div className="form-grid">
+                  {(['fromAccountId', 'toAccountId'] as const).map((field) => (
+                    <label className="field" key={field}>
+                      <span>{t(field === 'fromAccountId' ? 'Откуда' : 'Куда')}</span>
+                      <select
+                        required
+                        value={form[field]}
+                        disabled={saving}
+                        onChange={(event) => setForm({ ...form, [field]: event.target.value })}
+                      >
+                        <option value="">{t('Выберите счёт')}</option>
+                        {transferAccounts.map((entry) => (
+                          <option
+                            key={entry.id}
+                            value={entry.id}
+                            disabled={
+                              entry.id ===
+                              form[field === 'fromAccountId' ? 'toAccountId' : 'fromAccountId']
+                            }
+                          >
+                            {accountName(entry.id)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+                <p className="finance-account-help">
+                  {t(
+                    'Перевод — запись в учёте: деньги в банке не перемещаются. Доходы и расходы не меняются.',
+                  )}
+                </p>
+                {transferMinDate && (
+                  <p className="finance-account-help">
+                    {t('Дата перевода не раньше {date} — начала учёта обоих счетов.', {
+                      date: dateLabel(transferMinDate),
+                    })}
+                  </p>
+                )}
+                {transferAccounts.length < 2 && (
+                  <p className="finance-form-error">
+                    {t('Добавьте основной счёт и депозит или два депозита в одной валюте.')}
+                  </p>
+                )}
+              </div>
             ) : form.type === 'account' ? (
               <p className="finance-account-help">
                 {t(
-                  'Укажите остаток на начало выбранного дня. Все внесённые поступления и расходы с этого дня меняют расчётный баланс.',
+                  'Укажите остаток на начало выбранного дня. Поступления, расходы и переводы с этого дня меняют расчётный баланс.',
                 )}
               </p>
             ) : (
@@ -1390,6 +1727,13 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                   disabled={saving}
                 />
               </label>
+            )}
+            {form.type === 'deposit' && (
+              <p className="finance-account-help">
+                {t(
+                  'Укажите остаток на начало выбранного дня, до переводов за этот день. Пополнения и снятия записывайте как переводы.',
+                )}
+              </p>
             )}
             {form.type === 'stock' && (
               <div className="finance-stock-form">
@@ -1466,7 +1810,7 @@ export function FinancePage({ active = true }: { active?: boolean }) {
                   Number(form.quantity) > 0 && (
                     <p className="finance-stock-total">
                       {t('Стоимость позиции')}:{' '}
-                      {new Intl.NumberFormat(locale, {
+                      {numberFormatter(locale, {
                         style: 'currency',
                         currency: form.currency,
                       }).format((Number(form.quantity) * parseMinor(form.unitPrice)!) / 100)}
@@ -1524,15 +1868,20 @@ export function FinancePage({ active = true }: { active?: boolean }) {
             )}
             <label className="field">
               <span>
-                {form.type === 'income' || form.type === 'expense'
+                {form.type === 'income' || form.type === 'expense' || form.type === 'transfer'
                   ? t('Дата операции')
-                  : t(form.type === 'account' ? 'Дата начала учёта' : 'Дата оценки')}
+                  : t(
+                      form.type === 'account' || form.type === 'deposit'
+                        ? 'Дата начала учёта'
+                        : 'Дата оценки',
+                    )}
               </span>
               <input
                 required
                 type="date"
                 value={form.date}
-                max={form.type === 'account' ? localDate() : undefined}
+                max={form.type === 'account' ? today : undefined}
+                min={transferMinDate}
                 onChange={(event) => setForm({ ...form, date: event.target.value })}
                 disabled={saving}
               />
@@ -1564,7 +1913,11 @@ export function FinancePage({ active = true }: { active?: boolean }) {
               >
                 {t('Отмена')}
               </button>
-              <button type="submit" className="button button-primary" disabled={saving}>
+              <button
+                type="submit"
+                className="button button-primary"
+                disabled={saving || (form.type === 'transfer' && transferAccounts.length < 2)}
+              >
                 {saving && <LoaderCircle size={16} className="spinning" />}
                 {editing ? t('Сохранить изменения') : t('Добавить запись')}
               </button>
@@ -1645,4 +1998,4 @@ export function FinancePage({ active = true }: { active?: boolean }) {
       )}
     </div>
   );
-}
+});

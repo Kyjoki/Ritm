@@ -260,4 +260,47 @@ test('finance API requires owner session and supports create, edit and delete', 
   const persisted = (await (await call('/finance')).json()).entries[0];
   assert.equal(persisted.purchasePriceMinor, 35000);
   assert.equal(persisted.valueMinor, 80000);
+  const opening = { valueMinor: 100000, currency: 'KZT', asOf: '2026-10-14', note: '' };
+  const accountResponse = await call('/finance', 'POST', { ...opening, type: 'account' });
+  const account = (await accountResponse.json()).entry;
+  const depositResponse = await call('/finance', 'POST', {
+    ...opening,
+    type: 'deposit',
+    name: 'Savings',
+  });
+  const deposit = (await depositResponse.json()).entry;
+  const transferInput = {
+    type: 'transfer',
+    amountMinor: 10000,
+    currency: 'KZT',
+    date: '2026-10-14',
+    fromAccountId: account.id,
+    toAccountId: deposit.id,
+    note: '',
+  };
+  const transferResponse = await call('/finance', 'POST', transferInput);
+  assert.equal(transferResponse.status, 201);
+  const transfer = (await transferResponse.json()).entry;
+  assert.equal(
+    (await call('/finance/' + deposit.id, 'DELETE', { expectedUpdatedAt: deposit.updatedAt }))
+      .status,
+    409,
+  );
+  const reversed = await call('/finance/' + transfer.id, 'PATCH', {
+    entry: { ...transferInput, fromAccountId: deposit.id, toAccountId: account.id },
+    expectedUpdatedAt: transfer.updatedAt,
+  });
+  assert.equal(reversed.status, 200);
+  const reversal = (await reversed.json()).entry;
+  const ledger = (await (await call('/finance')).json()).entries;
+  assert.equal(calculateAccountBalance(ledger, 'KZT', '2026-10-14'), 110000);
+  assert.equal(
+    (await call('/finance/' + transfer.id, 'DELETE', { expectedUpdatedAt: reversal.updatedAt }))
+      .status,
+    200,
+  );
+  assert.equal(
+    calculateAccountBalance((await (await call('/finance')).json()).entries, 'KZT', '2026-10-14'),
+    100000,
+  );
 });

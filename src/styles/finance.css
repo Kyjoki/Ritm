@@ -798,7 +798,7 @@
 }
 .finance-type-switch {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   padding: 4px;
   border: 1px solid var(--line);
@@ -992,5 +992,34 @@
   .finance-donut-surface.has-data {
     animation: none;
     transition: none;
+  }
+}
+
+.finance-transfer-fields {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.finance-transfer-fields select {
+  width: 100%;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+.finance-record-icon.transfer {
+  color: var(--accent);
+  background: var(--ring-track);
+}
+@media (max-width: 520px) {
+  .finance-toolbar .button {
+    min-height: 44px;
+  }
+  .finance-type-switch button {
+    min-height: 44px;
+  }
+  .finance-hero-action {
+    min-height: 44px;
+  }
+  .finance-transfer-fields .form-grid {
+    grid-template-columns: 1fr;
   }
 }

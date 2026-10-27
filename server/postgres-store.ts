@@ -35,6 +35,7 @@ import type {
 import {
   assertWorkspaceStorage,
   assertFinanceStorage,
+  assertFinanceAccountDeletion,
   assertHabitStorage,
   assertTransferTask,
   assertTransferSnapshot,
@@ -426,6 +427,7 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
         throw new AppError(404, 'NOT_FOUND', 'Финансовая запись не найдена. Обновите страницу.');
       if (current.updatedAt !== expectedUpdatedAt)
         throw conflict('Финансовая запись изменилась. Обновите данные и повторите действие.');
+      assertFinanceAccountDeletion(await this.listFinanceEntries(client), id);
       await client.query('DELETE FROM ritm_finance_entries WHERE id = $1', [id]);
     });
   }

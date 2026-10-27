@@ -102,6 +102,17 @@ const financeAmountSchema = z.number().int().safe().min(0).max(1_000_000_000_000
 export const financeEntryInputSchema = z.discriminatedUnion('type', [
   z
     .object({
+      type: z.literal('transfer'),
+      amountMinor: financeAmountSchema.positive(),
+      currency: financeCurrencySchema,
+      date: dateValue,
+      fromAccountId: idSchema,
+      toAccountId: idSchema,
+      note: z.string().trim().max(1000),
+    })
+    .strict(),
+  z
+    .object({
       type: z.literal('account'),
       valueMinor: financeAmountSchema,
       currency: financeCurrencySchema,

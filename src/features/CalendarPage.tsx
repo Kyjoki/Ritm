@@ -471,6 +471,16 @@ export function CalendarPage({
       )
       ?.focus();
   }
+  const slotDateLabels = useMemo(
+    () =>
+      new Map(
+        periodDays.map((date) => [
+          date,
+          formatDate(date, { day: 'numeric', month: 'long' }, language),
+        ]),
+      ),
+    [periodDays, language],
+  );
   const occurrencesByDay = useMemo(
     () =>
       periodDays.map((date) => ({
@@ -494,6 +504,7 @@ export function CalendarPage({
     [occurrencesByDay],
   );
   const monthDays = useMemo(() => {
+    if (view !== 'month') return [];
     const month = parseDate(selectedDate);
     month.setUTCDate(1);
     const first = startOfWeek(dateKey(month));
@@ -505,7 +516,7 @@ export function CalendarPage({
         currentMonth: date.slice(0, 7) === selectedDate.slice(0, 7),
       };
     });
-  }, [tasks, googleEvents, selectedDate, timeZone, language]);
+  }, [tasks, googleEvents, selectedDate, timeZone, language, view]);
   const gridHeight = HOURS.length * hourHeight;
   useEffect(() => {
     if ((isMobile && view === 'day') || view === 'month') {
@@ -1164,7 +1175,7 @@ export function CalendarPage({
                   setView('day');
                 }}
                 aria-label={t('Показать {p0}', {
-                  p0: formatDate(date, { day: 'numeric', month: 'long' }, language),
+                  p0: slotDateLabels.get(date)!,
                 })}
               >
                 <span>{formatDate(date, { weekday: 'short' }, language)}</span>
@@ -1195,7 +1206,7 @@ export function CalendarPage({
                     }
                     aria-haspopup="dialog"
                     aria-label={t('{p0}: {p1} {p2} с пересечением. Выбрать событие', {
-                      p0: formatDate(date, { day: 'numeric', month: 'long' }, language),
+                      p0: slotDateLabels.get(date)!,
                       p1: entries.length,
                       p2: recordWord(entries.length, language),
                     })}
@@ -1326,7 +1337,7 @@ export function CalendarPage({
                           height: hourHeight / 2,
                         }}
                         aria-label={t('Добавить запись: {p0}, {p1}', {
-                          p0: formatDate(date, { day: 'numeric', month: 'long' }, language),
+                          p0: slotDateLabels.get(date)!,
                           p1: formatTime(hour * 60 + minute),
                         })}
                         aria-description={

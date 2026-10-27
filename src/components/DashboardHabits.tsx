@@ -23,6 +23,7 @@ import {
   habitWeek,
 } from '../features/habit-utils';
 import { api } from '../lib/api';
+import { LatestRead, RefreshGate } from '../lib/latest-read';
 import { formatDate } from '../lib/date';
 import { useI18n } from '../lib/i18n';
 import { addDays } from '../features/calendar-utils';
@@ -45,28 +46,48 @@ export function DashboardHabits({ today, onOpen }: { today: string; onOpen: () =
   const [busyId, setBusyId] = useState<string | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
   const inFlight = useRef(new Set<string>());
+  const read = useRef(new LatestRead());
+  const refreshGate = useRef(new RefreshGate());
   const days = useMemo(() => habitWeek(addDays(today, weekOffset * 7)), [today, weekOffset]);
-  const activeHabits = habits.filter((habit) => !habit.archived);
-  const todaySummary = habitDaySummary(habits, today, today);
+  const activeHabits = useMemo(() => habits.filter((habit) => !habit.archived), [habits]);
+  const todaySummary = useMemo(() => habitDaySummary(habits, today, today), [habits, today]);
+  const streaks = useMemo(
+    () => new Map(activeHabits.map((habit) => [habit.id, habitStreak(habit, today)])),
+    [activeHabits, today],
+  );
 
   const refresh = useCallback(async () => {
+    if (!refreshGate.current.request()) return;
+    const signal = read.current.start();
     try {
-      const response = await api.habits();
+      const response = await api.habits(signal);
+      if (!read.current.isCurrent(signal)) return;
       setHabits(response.habits);
       setError('');
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : t('Не удалось загрузить привычки.'));
+      if (read.current.isCurrent(signal))
+        setError(failure instanceof Error ? failure.message : t('Не удалось загрузить привычки.'));
     } finally {
-      setLoading(false);
+      if (read.current.isCurrent(signal)) setLoading(false);
     }
   }, [t]);
 
   useEffect(() => {
+    refreshGate.current.activate();
     void refresh();
-    const onChange = () => void refresh();
+    const onChange = (event: Event) => {
+      if (
+        !document.hidden &&
+        !inFlight.current.size &&
+        (event as CustomEvent<{ source?: string }>).detail?.source !== 'dashboard-habits'
+      )
+        void refresh();
+    };
     window.addEventListener('focus', onChange);
     window.addEventListener('ritm:habits-changed', onChange);
     return () => {
+      refreshGate.current.deactivate();
+      read.current.cancel();
       window.removeEventListener('focus', onChange);
       window.removeEventListener('ritm:habits-changed', onChange);
     };
@@ -76,6 +97,8 @@ export function DashboardHabits({ today, onOpen }: { today: string; onOpen: () =
     if (inFlight.current.has(habit.id)) return;
     const done = habitCompleteOn(habit, date);
     const count = done ? 0 : habitTarget(habit);
+    read.current.cancel();
+    refreshGate.current.beginWrite();
     inFlight.current.add(habit.id);
     setBusyId(habit.id);
     setError('');
@@ -96,7 +119,9 @@ export function DashboardHabits({ today, onOpen }: { today: string; onOpen: () =
     try {
       const response = await api.setHabitProgress(habit.id, date, count, habit.updatedAt);
       setHabits((current) => current.map((item) => (item.id === habit.id ? response.habit : item)));
-      window.dispatchEvent(new Event('ritm:habits-changed'));
+      window.dispatchEvent(
+        new CustomEvent('ritm:habits-changed', { detail: { source: 'dashboard-habits' } }),
+      );
     } catch (failure) {
       setHabits((current) => current.map((item) => (item.id === habit.id ? habit : item)));
       setError(failure instanceof Error ? failure.message : t('Не удалось изменить отметку.'));
@@ -104,6 +129,7 @@ export function DashboardHabits({ today, onOpen }: { today: string; onOpen: () =
     } finally {
       inFlight.current.delete(habit.id);
       setBusyId(null);
+      if (refreshGate.current.endWrite()) void refresh();
     }
   }
 
@@ -189,7 +215,7 @@ export function DashboardHabits({ today, onOpen }: { today: string; onOpen: () =
             ))}
             {activeHabits.map((habit) => {
               const Icon = icons[habit.icon ?? 'sparkles'];
-              const streak = habitStreak(habit, today);
+              const streak = streaks.get(habit.id) ?? 0;
               return (
                 <div className="dashboard-habits-row" key={habit.id}>
                   <div className="dashboard-habits-name">

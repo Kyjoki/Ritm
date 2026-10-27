@@ -34,6 +34,15 @@ const messages: Record<string, string> = {
     'Check the amount, currency, date and details of the finance entry.',
   'Финансовая запись не найдена. Обновите страницу.': 'Finance entry not found. Refresh the page.',
   'Тип финансовой записи нельзя изменить.': 'The finance entry type cannot be changed.',
+  'Счёт перевода не найден. Обновите данные.':
+    'A transfer account was not found. Refresh your data.',
+  'Выберите разные счета для перевода.': 'Choose different accounts for the transfer.',
+  'Перевод возможен только между счетами в одной валюте.':
+    'Transfers require accounts in the same currency.',
+  'Дата перевода не может быть раньше начального остатка любого из счетов.':
+    'The transfer date cannot precede either account opening balance.',
+  'У этого счёта есть переводы. Сначала удалите или измените связанные переводы.':
+    'This account has transfers. Delete or edit the linked transfers first.',
   'Финансовая запись изменилась. Обновите данные и повторите действие.':
     'This finance entry has changed. Refresh your data and try again.',
   'Достигнут предел финансовых записей. Удалите ненужные записи.':

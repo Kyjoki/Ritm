@@ -23,7 +23,61 @@ export function assertHabitStorage(habits: Habit[]) {
   if (Buffer.byteLength(JSON.stringify(habits), 'utf8') > MAX_HABITS_BYTES)
     throw new AppError(400, 'HABIT_STORAGE_LIMIT', 'Хранилище привычек заполнено.');
 }
+/** Validate the prospective ledger while holding the store transaction lock. */
+export function assertFinanceReferences(entries: FinanceEntry[]) {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  for (const entry of entries) {
+    if (entry.type !== 'transfer') continue;
+    const from = byId.get(entry.fromAccountId);
+    const to = byId.get(entry.toAccountId);
+    if (
+      !from ||
+      !to ||
+      !['account', 'deposit'].includes(from.type) ||
+      !['account', 'deposit'].includes(to.type)
+    )
+      throw new AppError(
+        409,
+        'FINANCE_TRANSFER_ACCOUNT',
+        'Счёт перевода не найден. Обновите данные.',
+      );
+    if (from.id === to.id)
+      throw new AppError(
+        400,
+        'FINANCE_TRANSFER_SAME_ACCOUNT',
+        'Выберите разные счета для перевода.',
+      );
+    if (from.currency !== entry.currency || to.currency !== entry.currency)
+      throw new AppError(
+        400,
+        'FINANCE_TRANSFER_CURRENCY',
+        'Перевод возможен только между счетами в одной валюте.',
+      );
+    if (('asOf' in from && entry.date < from.asOf) || ('asOf' in to && entry.date < to.asOf))
+      throw new AppError(
+        400,
+        'FINANCE_TRANSFER_DATE',
+        'Дата перевода не может быть раньше начального остатка любого из счетов.',
+      );
+  }
+}
+
+export function assertFinanceAccountDeletion(entries: FinanceEntry[], id: string) {
+  if (
+    entries.some(
+      (entry) =>
+        entry.type === 'transfer' && (entry.fromAccountId === id || entry.toAccountId === id),
+    )
+  )
+    throw new AppError(
+      409,
+      'FINANCE_ACCOUNT_HAS_TRANSFERS',
+      'У этого счёта есть переводы. Сначала удалите или измените связанные переводы.',
+    );
+}
+
 export function assertFinanceStorage(entries: FinanceEntry[]) {
+  assertFinanceReferences(entries);
   if (Buffer.byteLength(JSON.stringify(entries), 'utf8') > MAX_FINANCE_BYTES)
     throw new AppError(
       400,

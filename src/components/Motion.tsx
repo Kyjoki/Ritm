@@ -49,24 +49,35 @@ export function useMotionValues(values: number[], enabled = true, fromZero = tru
       finish();
       return;
     }
+    // Counters/SVG values need at most 30 updates/s on mobile, including high-refresh iPhones.
+    const sampleInterval = compact() ? 1000 / 30 : 1000 / 60;
+    let lastSample = -Infinity;
     const tick = (now: number) => {
       if (document.hidden) {
         finish();
         return;
       }
       const progress = Math.max(0, Math.min(1, (now - begun) / time));
-      presented.current = interpolateValues(start, target, progress);
-      setShown(presented.current);
+      if (progress === 1 || (progress > 0 && now - lastSample >= sampleInterval)) {
+        lastSample = now;
+        presented.current = interpolateValues(start, target, progress);
+        setShown(presented.current);
+      }
       if (progress < 1) frame = requestAnimationFrame(tick);
     };
     const onPreference = () => {
       if (preference.matches) finish();
     };
+    const onVisibility = () => {
+      if (document.hidden) finish();
+    };
     preference.addEventListener('change', onPreference);
+    document.addEventListener('visibilitychange', onVisibility);
     frame = requestAnimationFrame(tick);
     return () => {
       cancelAnimationFrame(frame);
       preference.removeEventListener('change', onPreference);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [signature, enabled, delay]);
   return shown;
@@ -113,15 +124,64 @@ export function MotionBar({
   className: string;
   title?: string;
 }) {
-  const shown = useMotionValues([value], true, true, Math.min(index, 5) * motion.stagger)[0];
+  const ref = useRef<HTMLSpanElement>(null);
+  const presented = useRef(0);
+  const introduced = useRef(false);
+  const target = Math.max(0, Math.min(100, value)) / 100;
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const first = !introduced.current;
+    introduced.current = true;
+    const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (preference.matches || document.hidden || presented.current === target) {
+      presented.current = target;
+      return;
+    }
+    // The layout stays fixed. WAAPI interpolates the fill without React renders or height layout.
+    const animation = element.animate(
+      [{ transform: `scaleY(${presented.current})` }, { transform: `scaleY(${target})` }],
+      {
+        duration: duration(first ? motion.chart : motion.update),
+        delay: first ? duration(Math.min(index, compact() ? 2 : 5) * motion.stagger) : 0,
+        easing: motion.ease,
+        fill: 'backwards',
+      },
+    );
+    const finish = () => {
+      presented.current = target;
+      animation.cancel();
+    };
+    const preferenceChanged = () => {
+      if (preference.matches) finish();
+    };
+    const visibilityChanged = () => {
+      if (document.hidden) finish();
+    };
+    animation.onfinish = finish;
+    preference.addEventListener('change', preferenceChanged);
+    document.addEventListener('visibilitychange', visibilityChanged);
+    return () => {
+      // An interrupted update or Activity hide resumes at the value actually on screen.
+      if (animation.playState === 'running' || animation.pending) {
+        const matrix = new DOMMatrixReadOnly(getComputedStyle(element).transform);
+        presented.current = matrix.d;
+      }
+      animation.cancel();
+      preference.removeEventListener('change', preferenceChanged);
+      document.removeEventListener('visibilitychange', visibilityChanged);
+    };
+  }, [target, index]);
   return (
     <span
+      ref={ref}
       className={className + ' motion-bar'}
-      style={{ height: `${shown ?? value}%` }}
+      style={{ height: '100%', transform: `scaleY(${target})`, transformOrigin: 'bottom' }}
       title={title}
     />
   );
 }
+
 export function MotionRing({ value, children }: { value: number; children: ReactNode }) {
   const shown = useMotionNumber(value);
   return (
@@ -160,9 +220,23 @@ export function MotionLine({ values }: { values: number[] }) {
       fill: 'backwards',
       easing: motion.ease,
     });
-    return () => {
+    const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const cancel = () => {
       draw?.cancel();
       fill?.cancel();
+    };
+    const onPreference = () => {
+      if (preference.matches) cancel();
+    };
+    const onVisibility = () => {
+      if (document.hidden) cancel();
+    };
+    preference.addEventListener('change', onPreference);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      cancel();
+      preference.removeEventListener('change', onPreference);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
   const points = shown
@@ -197,9 +271,11 @@ export function MotionPage({ name, children }: { name: string; children: ReactNo
       '.day-work-grid > .panel, .habits-analytics-graphs, .finance-chart-card, .assistant-history, .assistant-chat, .settings-card',
       '.dashboard-habits, .dashboard-bottom, .finance-records, .habits-list-heading',
     ];
-    const reveal = (returning = false) => {
+    const reveal = (returning = false, scope: Element = root) => {
       stages.forEach((selector, stage) => {
-        root.querySelectorAll<HTMLElement>(selector).forEach((element, index) => {
+        const elements = [...scope.querySelectorAll<HTMLElement>(selector)];
+        if (scope.matches(selector)) elements.unshift(scope as HTMLElement);
+        elements.forEach((element, index) => {
           if (seen.current.has(element) && !returning) return;
           seen.current.add(element);
           if (reduced()) return;
@@ -228,9 +304,37 @@ export function MotionPage({ name, children }: { name: string; children: ReactNo
       });
     };
     reveal(!first);
+    // Decorative loops stop below the fold as well as when Activity disconnects this scope.
+    const decorations = new Set<Element>();
+    const intersection = new IntersectionObserver((entries) => {
+      for (const entry of entries)
+        (entry.target as HTMLElement).dataset.motionOffscreen = String(!entry.isIntersecting);
+    });
+    const trackDecorations = (node: Element, add: boolean) => {
+      const selector = '.ritm-orb, .assistant-orb';
+      const elements = [...node.querySelectorAll(selector)];
+      if (node.matches(selector)) elements.push(node);
+      for (const element of elements) {
+        if (add && !decorations.has(element)) {
+          decorations.add(element);
+          intersection.observe(element);
+        } else if (!add) {
+          decorations.delete(element);
+          intersection.unobserve(element);
+        }
+      }
+    };
+    trackDecorations(root, true);
     const observer = new MutationObserver((records) => {
-      if (records.some((record) => [...record.addedNodes].some((node) => node instanceof Element)))
-        reveal();
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (!(node instanceof Element)) continue;
+          trackDecorations(node, true);
+          reveal(false, node);
+        }
+        for (const node of record.removedNodes)
+          if (node instanceof Element) trackDecorations(node, false);
+      }
     });
     observer.observe(root, { childList: true, subtree: true });
     const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -242,6 +346,8 @@ export function MotionPage({ name, children }: { name: string; children: ReactNo
     return () => {
       root.dataset.active = 'false';
       observer.disconnect();
+      intersection.disconnect();
+      decorations.clear();
       cancel();
       preference.removeEventListener('change', cancel);
     };
@@ -272,7 +378,77 @@ export function MotionList({
   );
   const animations = useRef(new Set<Animation>());
   const ghosts = useRef(new Set<HTMLElement>());
+  const observer = useRef<MutationObserver | null>(null);
+  const dirty = useRef(new Set<Element>());
+  const changed = useRef(true);
+  const collect = useRef<(records: MutationRecord[]) => void>(() => {});
   useLayoutEffect(() => {
+    const root = ref.current!;
+    changed.current = true;
+    collect.current = (records) => {
+      for (const record of records) {
+        const target =
+          record.target instanceof Element ? record.target : record.target.parentElement;
+        const row = target?.closest<HTMLElement>('[data-motion-key]');
+        if (row?.parentElement === root) {
+          dirty.current.add(row);
+          changed.current = true;
+        }
+        // Ignore our exiting ghosts: they deliberately have no data-motion-key.
+        if (record.target === root && record.type === 'childList') {
+          for (const node of [...record.addedNodes, ...record.removedNodes])
+            if (node instanceof HTMLElement && node.dataset.motionKey) changed.current = true;
+          for (const node of record.removedNodes) {
+            if (!(node instanceof HTMLElement) || !node.dataset.motionKey) continue;
+            const snapshot = previous.current.get(node.dataset.motionKey);
+            if (snapshot) snapshot.clone = node.cloneNode(true) as HTMLElement;
+          }
+        }
+      }
+    };
+    observer.current = new MutationObserver((records) => collect.current(records));
+    observer.current.observe(root, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+    });
+    const invalidate = () => {
+      previous.current.clear();
+      changed.current = true;
+    };
+    let lastWidth: number | undefined;
+    const resize = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (width === undefined) return;
+      if (lastWidth !== undefined && width !== lastWidth) invalidate();
+      lastWidth = width;
+    });
+    resize.observe(root);
+    window.addEventListener('resize', invalidate);
+    return () => {
+      resize.disconnect();
+      window.removeEventListener('resize', invalidate);
+      observer.current?.disconnect();
+      observer.current = null;
+      animations.current.forEach((a) => a.cancel());
+      animations.current.clear();
+      ghosts.current.forEach((el) => el.remove());
+      ghosts.current.clear();
+      previous.current.clear();
+      dirty.current.clear();
+    };
+  }, []);
+  useLayoutEffect(() => {
+    collect.current(observer.current?.takeRecords() ?? []);
+    if (reduced()) {
+      previous.current.clear();
+      dirty.current.clear();
+      return;
+    }
+    // Parent input, clock and network updates need no list measurement or DOM copies.
+    if (!changed.current) return;
+    changed.current = false;
     const root = ref.current!;
     const bounds = root.getBoundingClientRect();
     const scale = bounds.width / root.offsetWidth || 1;
@@ -280,6 +456,38 @@ export function MotionList({
       string,
       { top: number; left: number; width: number; height: number; clone: HTMLElement }
     >();
+    const moves: { element: HTMLElement; frames: Keyframe[] }[] = [];
+    // Complete all geometry reads before starting animations or inserting exit clones.
+    for (const node of root.children) {
+      const element = node as HTMLElement;
+      const key = element.dataset.motionKey;
+      if (!key) continue;
+      const rect = element.getBoundingClientRect();
+      const old = previous.current.get(key);
+      const snapshot = {
+        top: (rect.top - bounds.top) / scale,
+        left: (rect.left - bounds.left) / scale,
+        width: rect.width / scale,
+        height: rect.height / scale,
+        clone:
+          old && !dirty.current.has(element) ? old.clone : (element.cloneNode(true) as HTMLElement),
+      };
+      next.set(key, snapshot);
+      if (old && Math.abs(old.top - snapshot.top) > 1)
+        moves.push({
+          element,
+          frames: [{ translate: `0 ${old.top - snapshot.top}px` }, { translate: '0 0' }],
+        });
+      else if (!old && previous.current.size)
+        moves.push({
+          element,
+          frames: [
+            { opacity: 0, translate: `0 ${compact() ? 4 : 10}px` },
+            { opacity: 1, translate: '0 0' },
+          ],
+        });
+    }
+    dirty.current.clear();
     const animate = (element: HTMLElement, frames: Keyframe[], done?: () => void) => {
       const animation = element.animate(frames, { duration: duration(330), easing: motion.ease });
       animations.current.add(animation);
@@ -289,67 +497,34 @@ export function MotionList({
         done?.();
       };
     };
-    [...root.children].forEach((node) => {
-      const element = node as HTMLElement;
-      const key = element.dataset.motionKey;
-      if (!key) return;
-      const rect = element.getBoundingClientRect();
-      const snapshot = {
-        top: (rect.top - bounds.top) / scale,
-        left: (rect.left - bounds.left) / scale,
-        width: rect.width / scale,
-        height: rect.height / scale,
-        clone: element.cloneNode(true) as HTMLElement,
-      };
-      next.set(key, snapshot);
-      if (reduced()) return;
-      const old = previous.current.get(key);
-      if (old && Math.abs(old.top - snapshot.top) > 1)
-        animate(element, [{ translate: `0 ${old.top - snapshot.top}px` }, { translate: '0 0' }]);
-      else if (!old && previous.current.size)
-        animate(element, [
-          { opacity: 0, translate: `0 ${compact() ? 4 : 10}px` },
-          { opacity: 1, translate: '0 0' },
-        ]);
-    });
-    if (!reduced())
-      previous.current.forEach((old, key) => {
-        if (next.has(key)) return;
-        const ghost = old.clone;
-        ghost.removeAttribute('data-motion-key');
-        ghost.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
-        ghost.removeAttribute('id');
-        ghost.inert = true;
-        ghost.setAttribute('aria-hidden', 'true');
-        Object.assign(ghost.style, {
-          position: 'absolute',
-          top: old.top + 'px',
-          left: old.left + 'px',
-          width: old.width + 'px',
-          height: old.height + 'px',
-          pointerEvents: 'none',
-          margin: '0',
-          zIndex: '1',
-        });
-        root.append(ghost);
-        ghosts.current.add(ghost);
-        animate(ghost, [{ opacity: 0.7 }, { opacity: 0, translate: '0 -6px' }], () => {
-          ghost.remove();
-          ghosts.current.delete(ghost);
-        });
+    moves.forEach(({ element, frames }) => animate(element, frames));
+    previous.current.forEach((old, key) => {
+      if (next.has(key)) return;
+      const ghost = old.clone;
+      ghost.removeAttribute('data-motion-key');
+      ghost.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
+      ghost.removeAttribute('id');
+      ghost.inert = true;
+      ghost.setAttribute('aria-hidden', 'true');
+      Object.assign(ghost.style, {
+        position: 'absolute',
+        top: old.top + 'px',
+        left: old.left + 'px',
+        width: old.width + 'px',
+        height: old.height + 'px',
+        pointerEvents: 'none',
+        margin: '0',
+        zIndex: '1',
       });
+      root.append(ghost);
+      ghosts.current.add(ghost);
+      animate(ghost, [{ opacity: 0.7 }, { opacity: 0, translate: '0 -6px' }], () => {
+        ghost.remove();
+        ghosts.current.delete(ghost);
+      });
+    });
     previous.current = next;
   });
-  useLayoutEffect(
-    () => () => {
-      animations.current.forEach((a) => a.cancel());
-      animations.current.clear();
-      ghosts.current.forEach((el) => el.remove());
-      ghosts.current.clear();
-      previous.current.clear();
-    },
-    [],
-  );
   const Tag = as;
   return (
     <Tag ref={ref} className={className + ' motion-list'}>
@@ -400,37 +575,84 @@ export function MotionControls() {
     const selector =
       '.sidebar-nav, .mobile-nav, .cal-segment, .habits-segmented, .finance-views, .dashboard-task-days, .assistant-mode-switch';
     let frame = 0;
+    const pending = new Set<HTMLElement>();
+    const observed = new Set<HTMLElement>();
     const sync = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() =>
-        document.querySelectorAll<HTMLElement>(selector).forEach((group) => {
-          if (!group.getClientRects().length) return;
+      if (frame || document.hidden || !pending.size) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const measurements: { group: HTMLElement; values: Record<string, string> }[] = [];
+        for (const group of pending) {
+          if (!group.isConnected || !group.getClientRects().length) continue;
           const active = group.querySelector<HTMLElement>(
             ':scope > .is-active, :scope > [aria-pressed="true"], :scope > [aria-current="page"]',
           );
-          if (!active) return;
+          if (!active) continue;
           const box = group.getBoundingClientRect(),
             target = active.getBoundingClientRect();
           const scale = box.width / group.offsetWidth || 1;
-          group.style.setProperty('--indicator-x', (target.left - box.left) / scale + 'px');
-          group.style.setProperty('--indicator-y', (target.top - box.top) / scale + 'px');
-          group.style.setProperty('--indicator-width', target.width / scale + 'px');
-          group.style.setProperty('--indicator-height', target.height / scale + 'px');
-          group.dataset.motionIndicator = 'true';
-        }),
-      );
+          measurements.push({
+            group,
+            values: {
+              '--indicator-x': (target.left - box.left) / scale + 'px',
+              '--indicator-y': (target.top - box.top) / scale + 'px',
+              '--indicator-width': target.width / scale + 'px',
+              '--indicator-height': target.height / scale + 'px',
+            },
+          });
+        }
+        pending.clear();
+        for (const { group, values } of measurements) {
+          for (const [property, value] of Object.entries(values))
+            if (group.style.getPropertyValue(property) !== value)
+              group.style.setProperty(property, value);
+          if (group.dataset.motionIndicator !== 'true') group.dataset.motionIndicator = 'true';
+        }
+      });
     };
-    sync();
+    const resize = new ResizeObserver((entries) => {
+      for (const entry of entries) pending.add(entry.target as HTMLElement);
+      sync();
+    });
+    const register = (root: Element) => {
+      const groups = [...root.querySelectorAll<HTMLElement>(selector)];
+      if (root.matches(selector)) groups.push(root as HTMLElement);
+      for (const group of groups) {
+        pending.add(group);
+        if (!observed.has(group)) {
+          observed.add(group);
+          resize.observe(group);
+        }
+      }
+    };
+    const syncAll = () => {
+      register(shell);
+      sync();
+    };
+    syncAll();
     const observer = new MutationObserver((records) => {
-      if (
-        records.some(
-          (r) => r.type === 'attributes' || [...r.addedNodes].some((n) => n instanceof Element),
-        )
-      )
-        sync();
+      for (const record of records) {
+        if (record.type === 'attributes' && record.attributeName === 'data-page') register(shell);
+        const target =
+          record.target instanceof Element ? record.target : record.target.parentElement;
+        const group = target?.closest<HTMLElement>(selector);
+        if (group) pending.add(group);
+        for (const node of record.addedNodes) if (node instanceof Element) register(node);
+      }
+      for (const group of observed)
+        if (!group.isConnected) {
+          resize.unobserve(group);
+          observed.delete(group);
+          pending.delete(group);
+        }
+      sync();
     });
     const visibility = () => {
       shell.dataset.documentHidden = String(document.hidden);
+      if (document.hidden) {
+        cancelAnimationFrame(frame);
+        frame = 0;
+      } else syncAll();
     };
     visibility();
     document.addEventListener('visibilitychange', visibility);
@@ -440,8 +662,6 @@ export function MotionControls() {
       attributes: true,
       attributeFilter: ['aria-current', 'aria-pressed', 'class', 'data-page'],
     });
-    const resize = new ResizeObserver(sync);
-    resize.observe(shell);
     const disclosureAnimations = new Map<HTMLDetailsElement, Animation>();
     const disclose = (event: MouseEvent) => {
       const summary = (event.target as Element).closest('summary');
@@ -471,15 +691,20 @@ export function MotionControls() {
       };
     };
     shell.addEventListener('click', disclose as EventListener);
-    window.addEventListener('resize', sync);
+    window.addEventListener('resize', syncAll);
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
       resize.disconnect();
       document.removeEventListener('visibilitychange', visibility);
-      window.removeEventListener('resize', sync);
+      window.removeEventListener('resize', syncAll);
       shell.removeEventListener('click', disclose as EventListener);
-      disclosureAnimations.forEach((a) => a.cancel());
+      disclosureAnimations.forEach((animation, details) => {
+        animation.cancel();
+        details.open = details.dataset.closing !== 'true';
+        details.style.removeProperty('overflow');
+        delete details.dataset.closing;
+      });
     };
   }, []);
   return <span ref={anchor} hidden aria-hidden="true" />;

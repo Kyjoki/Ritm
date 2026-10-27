@@ -93,7 +93,8 @@ export const api = {
   login: (login: string, password: string) => request('/login', 'POST', { login, password }),
   logout: () => request('/logout', 'POST'),
   bootstrap: () => request<Bootstrap>('/bootstrap'),
-  habits: () => request<{ habits: Habit[] }>('/habits'),
+  habits: (signal?: AbortSignal) =>
+    request<{ habits: Habit[] }>('/habits', 'GET', undefined, signal),
   createHabit: (habit: HabitInput) => request<{ habit: Habit }>('/habits', 'POST', habit),
   updateHabit: (id: string, habit: HabitInput, expectedUpdatedAt: string) =>
     request<{ habit: Habit }>(`/habits/${encodeURIComponent(id)}`, 'PATCH', {
@@ -116,7 +117,8 @@ export const api = {
     request<{ deleted: true }>(`/habits/${encodeURIComponent(id)}`, 'DELETE', {
       expectedUpdatedAt,
     }),
-  finance: () => request<{ entries: FinanceEntry[] }>('/finance'),
+  finance: (signal?: AbortSignal) =>
+    request<{ entries: FinanceEntry[] }>('/finance', 'GET', undefined, signal),
   createFinanceEntry: (entry: FinanceEntryInput) =>
     request<{ entry: FinanceEntry }>('/finance', 'POST', entry),
   updateFinanceEntry: (id: string, entry: FinanceEntryInput, expectedUpdatedAt: string) =>

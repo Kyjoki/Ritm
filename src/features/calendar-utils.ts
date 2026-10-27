@@ -1,3 +1,4 @@
+import { dateTimeFormatter } from '../lib/intl-formatters';
 import type { Language } from '../lib/i18n';
 import type { Task } from '../../shared/types';
 
@@ -67,7 +68,7 @@ export function formatDate(
   options: Intl.DateTimeFormatOptions,
   language: Language = 'ru',
 ): string {
-  return new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'ru-RU', {
+  return dateTimeFormatter(language === 'en' ? 'en-US' : 'ru-RU', {
     ...options,
     timeZone: 'UTC',
   }).format(parseDate(date));

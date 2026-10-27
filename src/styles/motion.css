@@ -295,3 +295,10 @@
     animation: none !important;
   }
 }
+
+/* A visible Activity can contain decorative loops below the fold. */
+.motion-v2 [data-motion-offscreen='true'],
+.motion-v2 [data-motion-offscreen='true']::before,
+.motion-v2 [data-motion-offscreen='true']::after {
+  animation-play-state: paused !important;
+}
