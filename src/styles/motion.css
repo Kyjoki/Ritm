@@ -94,6 +94,7 @@
 [data-motion-indicator='true']::before {
   content: '';
   position: absolute;
+  box-sizing: border-box;
   pointer-events: none;
   left: 0;
   top: 0;
@@ -115,30 +116,6 @@
   border-color: transparent !important;
   box-shadow: none !important;
   animation: none !important;
-}
-.motion-v2 .sidebar-nav[data-motion-indicator='true']::before {
-  background: linear-gradient(115deg, #ac7dea4d, #7f5bb224);
-  border-color: #e0beff45;
-  box-shadow: inset 0 1px #ffffff18;
-}
-.motion-v2.sidebar-light .sidebar-nav[data-motion-indicator='true']::before,
-.motion-v2 .mobile-nav[data-motion-indicator='true']::before {
-  background: var(--soft);
-  border-color: var(--line);
-}
-.motion-v2.ritm-glass .sidebar-nav[data-motion-indicator='true']::before,
-.motion-v2.ritm-glass .mobile-nav[data-motion-indicator='true']::before {
-  background: var(--glass-nav-active, var(--soft));
-  border-color: var(--glass-nav-edge, var(--line));
-  box-shadow:
-    inset 0 1px rgba(255, 255, 255, 0.38),
-    0 6px 18px rgba(97, 59, 148, 0.12);
-}
-.motion-v2.ritm-glass .sidebar-nav[data-motion-indicator='true']::before {
-  border-radius: 22px;
-}
-.motion-v2.ritm-glass .mobile-nav[data-motion-indicator='true']::before {
-  border-radius: 16px;
 }
 .motion-v2
   :is(.button, .icon-button, .text-button, .habit-day, .dashboard-habits-cell, .check-target) {

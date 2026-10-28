@@ -2,6 +2,16 @@
   margin-top: 17px;
   padding: 22px 24px 18px;
 }
+/* One opaque lavender base keeps the sticky names seamless with the card and
+   masks day cells scrolling underneath. The light stays above the matrix. */
+.ritm-glass .panel.dashboard-habits {
+  --dashboard-habits-surface: color-mix(in srgb, var(--panel) 94%, var(--accent));
+  background:
+    radial-gradient(ellipse 70% 30px at 50% 0, var(--glass-wash), transparent),
+    var(--dashboard-habits-surface);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
 .dashboard-habits-head,
 .dashboard-habits-actions {
   display: flex;
@@ -68,7 +78,7 @@
   min-height: 52px;
   padding: 6px 10px 6px 0;
   border-top: 1px solid var(--line);
-  background: var(--panel);
+  background: var(--dashboard-habits-surface, var(--panel));
 }
 .dashboard-habits-label {
   min-height: 38px;

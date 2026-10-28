@@ -10,6 +10,7 @@ import './styles/calendar-settings.css';
 import './styles/assistant.css';
 import './styles/finance.css';
 import App from './App';
+import './styles/dashboard-layout.css';
 import { I18nProvider, getLanguage, translate } from './lib/i18n';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {

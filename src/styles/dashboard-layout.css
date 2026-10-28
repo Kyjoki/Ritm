@@ -1,0 +1,53 @@
+/* Day owns its available width; other pages retain their existing containers. */
+@media (min-width: 761px) {
+  .ritm-glass .main-content:has(> .page-container[data-page='day']) {
+    /* The navigation margin already contributes --nav-gap. */
+    padding-left: calc(24px - var(--nav-gap));
+    padding-right: 28px;
+  }
+
+  .ritm-glass .main-content:has(> .page-container[data-page='day']) > .workspace-top,
+  .ritm-glass .page-container[data-page='day'] {
+    max-width: none;
+    margin-inline: 0;
+  }
+
+  .ritm-glass .dashboard-page .overview-grid {
+    grid-template-columns: minmax(0, 1.7fr) repeat(2, minmax(0, 1fr));
+  }
+
+  .ritm-glass .dashboard-page .day-work-grid {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  }
+
+  .ritm-glass .dashboard-page :is(.overview-grid, .day-work-grid) > * {
+    min-width: 0;
+  }
+
+  .ritm-glass .dashboard-page .schedule-row {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .ritm-glass .dashboard-page .schedule-event {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* Preserve the existing 80% interface scale: these become 24px and 28px on screen. */
+@media (min-width: 1200px) {
+  .ritm-glass .main-content:has(> .page-container[data-page='day']) {
+    padding-left: calc(30px - var(--nav-gap));
+    padding-right: 35px;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 1000px) {
+  .ritm-glass .dashboard-page .overview-grid {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  }
+
+  .ritm-glass .dashboard-page .day-work-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -597,7 +597,11 @@ export function MotionControls() {
           }
           const box = group.getBoundingClientRect(),
             target = active.getBoundingClientRect();
-          const scale = box.width / group.offsetWidth || 1;
+          // Computed border-box sizes retain fractional layout widths. offsetWidth
+          // rounds them and introduces drift between the first and last cell.
+          const style = getComputedStyle(group);
+          const layoutWidth = parseFloat(style.width) || group.offsetWidth;
+          const scale = box.width / layoutWidth || 1;
           const isNav = group.matches('.sidebar-nav, .mobile-nav');
           const isMobileNav = group.matches('.mobile-nav');
           const horizontalInset = isNav && !isMobileNav ? 2 : 0;
@@ -608,9 +612,15 @@ export function MotionControls() {
             group,
             values: {
               '--indicator-x':
-                (target.left - box.left) / scale - group.clientLeft + horizontalInset + 'px',
+                (target.left - box.left) / scale -
+                (parseFloat(style.borderLeftWidth) || 0) +
+                horizontalInset +
+                'px',
               '--indicator-y':
-                (target.top - box.top) / scale - group.clientTop + verticalInset + 'px',
+                (target.top - box.top) / scale -
+                (parseFloat(style.borderTopWidth) || 0) +
+                verticalInset +
+                'px',
               '--indicator-width': Math.max(0, width) + 'px',
               '--indicator-height': Math.max(0, height) + 'px',
             },

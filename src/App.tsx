@@ -728,8 +728,10 @@ export default function App() {
                 data-tooltip={tr(label)}
                 aria-label={tr(label)}
               >
-                <Icon size={18} />
-                <span>{tr(label)}</span>
+                <span className="nav-button-content">
+                  <Icon size={18} aria-hidden="true" />
+                  <span className="nav-label">{tr(label)}</span>
+                </span>
                 {page === id ? <span className="nav-dot" /> : null}
               </button>
             ))}
@@ -1151,8 +1153,10 @@ function MobileNavigation({ page, onNavigate }: { page: Page; onNavigate: (page:
             className={page === id ? 'is-active' : ''}
             aria-current={page === id ? 'page' : undefined}
           >
-            <Icon size={21} aria-hidden="true" />
-            <span>{tr(label)}</span>
+            <span className="nav-button-content">
+              <Icon size={21} aria-hidden="true" />
+              <span className="nav-label">{tr(label)}</span>
+            </span>
           </button>
         ))}
         <button
@@ -1167,8 +1171,10 @@ function MobileNavigation({ page, onNavigate }: { page: Page; onNavigate: (page:
           }
           onClick={() => setMoreOpen(true)}
         >
-          <MoreHorizontal size={21} aria-hidden="true" />
-          <span>{tr(currentOverflow?.label ?? 'Ещё')}</span>
+          <span className="nav-button-content">
+            <MoreHorizontal size={21} aria-hidden="true" />
+            <span className="nav-label">{tr(currentOverflow?.label ?? 'Ещё')}</span>
+          </span>
         </button>
       </nav>
       {moreOpen ? (

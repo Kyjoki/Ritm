@@ -6,6 +6,7 @@
   --nav-control: 48px;
   --nav-icon: 21px;
   --nav-surface: linear-gradient(150deg, rgba(255, 252, 255, 0.82), rgba(225, 211, 244, 0.65));
+  --nav-light: linear-gradient(175deg, rgba(255, 255, 255, 0.16), transparent 42%);
   --nav-ink: #645275;
   --nav-active-ink: #643b96;
   --nav-edge: rgba(255, 255, 255, 0.76);
@@ -35,13 +36,10 @@
   flex-direction: column;
   align-items: stretch;
   color: var(--nav-ink);
-  background: var(--nav-surface);
+  background: var(--nav-light), var(--nav-surface);
   border: 1px solid var(--nav-edge);
   border-radius: 999px;
-  box-shadow:
-    inset 1px 1px rgba(255, 255, 255, 0.24),
-    inset -1px -1px rgba(191, 154, 234, 0.14),
-    0 14px 38px rgba(47, 26, 76, 0.16);
+  box-shadow: 0 14px 38px rgba(47, 26, 76, 0.16);
   backdrop-filter: blur(14px) saturate(1.2);
   -webkit-backdrop-filter: blur(14px) saturate(1.2);
 }
@@ -95,11 +93,11 @@
   background: transparent;
   box-shadow: none;
 }
-.ritm-glass .sidebar-nav > button > svg {
+.ritm-glass .sidebar-nav .nav-button-content > svg {
   width: var(--nav-icon);
   height: var(--nav-icon);
 }
-.ritm-glass .sidebar-nav > button > span,
+.ritm-glass .sidebar-nav .nav-label,
 .ritm-glass .profile-button > span:nth-child(2),
 .ritm-glass .profile-button > svg {
   position: absolute;
@@ -206,19 +204,35 @@
     color 150ms ease,
     scale 120ms var(--motion-ease);
 }
-.ritm-glass
-  :is(.sidebar-nav > button, .profile-button, .brand-button, .mobile-nav > button):active {
+.ritm-glass :is(.profile-button, .brand-button):active {
   scale: 0.95;
+}
+/* Keep the measured hit area still during presses. Only its content compresses. */
+.ritm-glass :is(.sidebar-nav, .mobile-nav) > button,
+.ritm-glass :is(.sidebar-nav, .mobile-nav) > button:active:not(:disabled) {
+  transform: none;
+  scale: 1;
+}
+.ritm-glass .nav-button-content {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-width: 0;
+  pointer-events: none;
+  transition: transform 120ms var(--motion-ease);
+}
+.ritm-glass :is(.sidebar-nav, .mobile-nav) > button:active:not(:disabled) .nav-button-content {
+  transform: scale(0.95);
+}
+.ritm-glass :is(.sidebar-nav, .mobile-nav) > button.is-active .nav-button-content > svg {
+  animation: ritm-nav-settle var(--motion-fast) var(--motion-ease) both;
 }
 .ritm-glass :is(.sidebar-nav, .mobile-nav)[data-motion-indicator='true']::before {
   z-index: 0;
   border: 1px solid var(--glass-nav-edge);
   border-radius: 18px;
-  background: var(--glass-nav-active);
-  box-shadow:
-    inset 0 1px rgba(255, 255, 255, 0.35),
-    inset 0 -1px rgba(154, 113, 207, 0.12),
-    0 4px 12px rgba(85, 48, 134, 0.12);
+  background: var(--nav-light), var(--glass-nav-active);
+  box-shadow: 0 4px 12px rgba(85, 48, 134, 0.12);
 }
 @media (hover: hover) and (pointer: fine) {
   .ritm-glass .sidebar-nav > button:hover,
@@ -275,11 +289,8 @@
     border: 1px solid var(--nav-edge);
     border-radius: 999px;
     color: var(--nav-ink);
-    background: var(--nav-surface);
-    box-shadow:
-      inset 1px 1px rgba(255, 255, 255, 0.26),
-      inset -1px -1px rgba(191, 154, 234, 0.12),
-      0 12px 30px rgba(44, 24, 72, 0.2);
+    background: var(--nav-light), var(--nav-surface);
+    box-shadow: 0 12px 30px rgba(44, 24, 72, 0.2);
     backdrop-filter: blur(10px) saturate(1.12);
     -webkit-backdrop-filter: blur(10px) saturate(1.12);
   }
@@ -287,8 +298,6 @@
     position: relative;
     z-index: 1;
     display: grid;
-    grid-template-rows: 22px 22px;
-    gap: 3px;
     justify-items: center;
     align-content: center;
     min-width: 44px;
@@ -302,7 +311,11 @@
     font-size: 10px;
     letter-spacing: 0;
   }
-  .ritm-glass .mobile-nav > button > span {
+  .ritm-glass .mobile-nav .nav-button-content {
+    grid-template-rows: 22px 22px;
+    gap: 3px;
+  }
+  .ritm-glass .mobile-nav .nav-label {
     display: grid;
     align-items: center;
     justify-items: center;
@@ -402,7 +415,11 @@
 @media (prefers-reduced-motion: reduce) {
   .ritm-glass :is(.sidebar-nav, .mobile-nav)::before,
   .ritm-glass :is(.sidebar-nav > button, .mobile-nav > button, .profile-button, .brand-button),
+  .ritm-glass .nav-button-content,
   .ritm-glass [data-tooltip]::after {
     transition: none;
+  }
+  .ritm-glass :is(.sidebar-nav, .mobile-nav) > button.is-active .nav-button-content > svg {
+    animation: none;
   }
 }
