@@ -38,6 +38,15 @@ struct FinanceView: View {
   private func depositBalance(_ id: String) -> Int? {
     FinanceLedger.depositBalance(entries: visible, depositId: id, today: store.today)
   }
+  /// Same amount rule as the web record list: deposits show their balance, other assets
+  /// their entered value, operations their amount.
+  private func recordAmount(_ entry: FinanceEntry) -> Int {
+    switch entry.type {
+    case .deposit: depositBalance(entry.id) ?? 0
+    case .account, .stock: entry.valueMinor ?? 0
+    default: entry.amountMinor ?? 0
+    }
+  }
   private var total: Int? {
     switch section {
     case .account: return accountBalance
@@ -378,7 +387,15 @@ struct FinanceView: View {
                 Image(systemName: "ellipsis").frame(width: 44, height: 44)
               }.disabled(!store.canWrite)
             }
-            Text(money(entry.amountMinor ?? entry.valueMinor ?? 0)).font(.title3.weight(.semibold))
+            Text(money(recordAmount(entry))).font(.title3.weight(.semibold))
+            if entry.type == .deposit {
+              // The row shows the live balance; the opening value stays visible below (FinancePage).
+              Text(
+                store.text("Стартовый остаток", "Opening balance") + ": "
+                  + money(entry.valueMinor ?? 0)
+              )
+              .font(.subheadline).foregroundStyle(RitmTheme.muted)
+            }
             if entry.type == .transfer {
               Text(accountName(entry.fromAccountId) + " → " + accountName(entry.toAccountId)).font(
                 .subheadline)

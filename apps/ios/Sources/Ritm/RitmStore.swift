@@ -20,6 +20,8 @@ final class RitmStore {
   private(set) var uncertainWrite = false
   private(set) var now = Date()
   private(set) var pendingTheme: Theme?
+  /// When a feature-specific limit (for example the idea review) allows the next retry.
+  private(set) var featureRetryAt: Date?
 
   @ObservationIgnored private let client: APIClient?
   @ObservationIgnored private let vault = SessionVault()
@@ -197,6 +199,7 @@ final class RitmStore {
       isSignedIn = true
       isOffline = false
       nextAllowedRead = .distantPast
+      featureRetryAt = nil
     } catch {
       await client.clearCredential()
       try? vault.delete()
@@ -414,7 +417,15 @@ final class RitmStore {
         connectionErrorShown = true
       }
       if let delay = failure.retryAfterSeconds {
-        nextAllowedRead = Date().addingTimeInterval(Double(delay))
+        let until = Date().addingTimeInterval(Double(delay))
+        // Only the shared read/mutation budget (server/security.ts) pauses every request.
+        // A feature's own limit (idea review, AI provider, Google) only delays that feature's
+        // retry, as on the web; it must not freeze the rest of the app.
+        if failure.code == "RATE_LIMIT" {
+          nextAllowedRead = until
+        } else {
+          featureRetryAt = until
+        }
       }
       errorMessage =
         failure.code == "NETWORK"

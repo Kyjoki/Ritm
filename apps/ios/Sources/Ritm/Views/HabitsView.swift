@@ -858,11 +858,11 @@ struct HabitProgressEditor: View {
     let latest = current
     let result = await store.write {
       try await $0.setHabitProgress(
-        id: latest.id, date: date, count: value, expectedUpdatedAt: habit.updatedAt)
+        id: latest.id, date: date, count: value, expectedUpdatedAt: latest.updatedAt)
     }
     if let result {
       announceHabitAchievement(
-        previous: habit, updated: result, store: store, navigation: navigation)
+        previous: latest, updated: result, store: store, navigation: navigation)
       dismiss()
     }
   }

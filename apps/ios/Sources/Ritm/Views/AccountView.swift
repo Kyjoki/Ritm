@@ -382,7 +382,7 @@ struct AccountView: View {
             Text(
               status.ready && status.schedulerActive
                 ? store.text("Серверный планировщик готов", "Server scheduler is ready")
-                : status.problem
+                : status.problem.flatMap(reminderProblemText)
                   ?? store.text(
                     "Планировщик пока не готов. Проверьте Google и серверную настройку.",
                     "Scheduler is not ready. Check Google and server configuration.")
@@ -473,6 +473,43 @@ struct AccountView: View {
   }
   private var appVersion: String {
     "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"))"
+  }
+  /// Reminder problem codes as TelegramConnection.tsx words them; unknown codes fall back.
+  private func reminderProblemText(_ code: String) -> String? {
+    switch code {
+    case "disabled": store.text("Автоматическая отправка выключена", "Automatic delivery is off")
+    case "chat_unlinked":
+      store.text(
+        "Личный чат Telegram не привязан.", "The private Telegram chat is not linked.")
+    case "scheduler_unconfigured":
+      store.text(
+        "Серверные ключи планировщика не настроены.",
+        "The scheduler server keys are not configured.")
+    case "scheduler_waiting":
+      store.text(
+        "Ожидается первый автоматический запуск планировщика.",
+        "Waiting for the first automatic scheduler run.")
+    case "scheduler_stale":
+      store.text(
+        "Планировщик не запускался более пяти минут.",
+        "The scheduler has not run for over five minutes.")
+    case "google_disconnected":
+      store.text("Google Calendar не подключён.", "Google Calendar is not connected.")
+    case "google_error":
+      store.text("Не удалось проверить Google Calendar.", "Could not check Google Calendar.")
+    case "telegram_error":
+      store.text(
+        "Ошибка отправки в Telegram.", "Could not send the Telegram notification.")
+    case "telegram_rejected":
+      store.text("Telegram отклонил уведомление.", "Telegram rejected the notification.")
+    case "telegram_uncertain":
+      store.text(
+        "Результат отправки в Telegram неизвестен.", "Telegram delivery status is unknown.")
+    case "internal_error":
+      store.text(
+        "Ошибка проверки напоминаний на сервере.", "The server could not check reminders.")
+    default: nil
+    }
   }
   private func loadIntegrations() async {
     guard !loadingIntegrations, store.isSignedIn, navigation.section == .settings else { return }
@@ -573,10 +610,20 @@ private struct IntegrationSecretEditor: View {
   @State private var model = ""
   @State private var busy = false
   @State private var deleteSetup = false
+  /// The saved secret belongs to one OAuth client: it is kept only while the Client ID is
+  /// unchanged (GoogleSetupDialog `keepingSecret`).
+  private var keepingGoogleSecret: Bool {
+    googleSetup?.hasClientSecret == true
+      && clientID.trimmingCharacters(in: .whitespacesAndNewlines) == googleSetup?.clientId
+  }
   private var valid: Bool {
     if kind == .google {
-      return !clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        && (!secret.isEmpty || googleSetup?.hasClientSecret == true)
+      let id = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
+      let newSecret = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+      return id.range(
+        of: #"^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$"#, options: .regularExpression)
+        != nil
+        && (newSecret.isEmpty ? keepingGoogleSecret : !newSecret.contains(where: \.isWhitespace))
     }
     if kind == .ai {
       return !secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
