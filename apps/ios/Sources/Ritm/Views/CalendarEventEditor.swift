@@ -314,7 +314,8 @@ struct CalendarEventEditor: View {
     let input = GoogleEventInput(
       title: title, description: details, date: date,
       time: allDay ? nil : time, duration: allDay ? 60 : duration, allDay: allDay,
-      colorId: colorID.isEmpty ? nil : colorID, repeat: event == nil ? recurrence : nil)
+      colorId: colorID.isEmpty ? nil : colorID, repeat: event == nil ? recurrence : nil,
+      preservesProviderColor: event.map { colorID == ($0.colorId ?? "") } ?? false)
     if previousInput != input {
       requestID = UUID().uuidString
       previousInput = input

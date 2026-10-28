@@ -45,7 +45,7 @@ public enum CalendarEventPolicy {
     if event.allDay, let date = event.start.date {
       return GoogleEventInput(
         title: event.title, description: event.description, date: date,
-        duration: 60, allDay: true, colorId: event.colorId)
+        duration: 60, allDay: true, colorId: event.colorId, preservesProviderColor: true)
     }
     guard let start = instant(event.start.dateTime), let end = instant(event.end.dateTime) else {
       return nil
@@ -53,7 +53,8 @@ public enum CalendarEventPolicy {
     return GoogleEventInput(
       title: event.title, description: event.description,
       date: HabitSchedule.dateKey(start, timeZone: timeZone), time: time(start, zone: zone),
-      duration: Int(end.timeIntervalSince(start) / 60), allDay: false, colorId: event.colorId)
+      duration: Int(end.timeIntervalSince(start) / 60), allDay: false, colorId: event.colorId,
+      preservesProviderColor: true)
   }
 
   private static func calendar(_ zone: TimeZone) -> Calendar {

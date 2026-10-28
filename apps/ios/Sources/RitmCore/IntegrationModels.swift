@@ -40,10 +40,13 @@ public struct GoogleEventInput: Codable, Sendable, Equatable {
   public var allDay: Bool
   public var colorId: String?
   public var `repeat`: TaskRepeat?
+  /// When true, `colorId` is left out of the body so Google keeps the event's current color.
+  /// Edits and moves must not resend an unchanged color (AGENTS.md); the web does the same.
+  public var preservesProviderColor: Bool
   public init(
     title: String, description: String = "", date: String, time: String? = nil,
     duration: Int = 30, allDay: Bool = false, colorId: String? = nil,
-    `repeat` recurrence: TaskRepeat? = nil
+    `repeat` recurrence: TaskRepeat? = nil, preservesProviderColor: Bool = false
   ) {
     self.title = title
     self.description = description
@@ -53,9 +56,23 @@ public struct GoogleEventInput: Codable, Sendable, Equatable {
     self.allDay = allDay
     self.colorId = colorId
     self.repeat = recurrence
+    self.preservesProviderColor = preservesProviderColor
   }
   private enum CodingKeys: String, CodingKey {
     case title, description, date, time, duration, allDay, colorId, `repeat`
+  }
+  public init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    self.init(
+      title: try values.decode(String.self, forKey: .title),
+      description: try values.decodeIfPresent(String.self, forKey: .description) ?? "",
+      date: try values.decode(String.self, forKey: .date),
+      time: try values.decodeIfPresent(String.self, forKey: .time),
+      duration: try values.decode(Int.self, forKey: .duration),
+      allDay: try values.decode(Bool.self, forKey: .allDay),
+      colorId: try values.decodeIfPresent(String.self, forKey: .colorId),
+      repeat: try values.decodeIfPresent(TaskRepeat.self, forKey: .repeat),
+      preservesProviderColor: !values.contains(.colorId))
   }
   public func encode(to encoder: any Encoder) throws {
     var values = encoder.container(keyedBy: CodingKeys.self)
@@ -65,7 +82,7 @@ public struct GoogleEventInput: Codable, Sendable, Equatable {
     try values.encode(time, forKey: .time)
     try values.encode(duration, forKey: .duration)
     try values.encode(allDay, forKey: .allDay)
-    try values.encode(colorId, forKey: .colorId)
+    if !preservesProviderColor { try values.encode(colorId, forKey: .colorId) }
     try values.encodeIfPresent(self.repeat, forKey: .repeat)
   }
 }

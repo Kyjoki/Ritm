@@ -23,6 +23,32 @@ final class CalendarEventPolicyTests: XCTestCase {
     XCTAssertFalse(CalendarEventPolicy.hasClockChange(event, timeZone: "Asia/Qyzylorda"))
   }
 
+  private func encodedKeys(_ input: GoogleEventInput) throws -> [String: Any] {
+    try XCTUnwrap(
+      JSONSerialization.jsonObject(with: JSONEncoder().encode(input)) as? [String: Any])
+  }
+
+  func testDraftOmitsColorSoMovesKeepTheProviderColor() throws {
+    let event = timed("2026-10-29T18:00:00.000Z", "2026-10-29T19:00:00.000Z")
+    var moved = try XCTUnwrap(CalendarEventPolicy.draft(event, timeZone: "UTC"))
+    moved.date = "2026-10-30"
+    let body = try encodedKeys(moved)
+    XCTAssertFalse(body.keys.contains("colorId"), "an unchanged color must not be sent")
+    XCTAssertEqual(body["date"] as? String, "2026-10-30")
+  }
+
+  func testChangedOrClearedColorIsSentAndNewEventsSendTheirColor() throws {
+    let event = timed("2026-10-29T18:00:00.000Z", "2026-10-29T19:00:00.000Z")
+    var recolored = try XCTUnwrap(CalendarEventPolicy.draft(event, timeZone: "UTC"))
+    recolored.colorId = "5"
+    recolored.preservesProviderColor = false
+    XCTAssertEqual(try encodedKeys(recolored)["colorId"] as? String, "5")
+    recolored.colorId = nil
+    XCTAssertTrue(try encodedKeys(recolored)["colorId"] is NSNull)
+    let created = GoogleEventInput(title: "New", date: "2026-10-29", time: "09:00")
+    XCTAssertTrue(try encodedKeys(created)["colorId"] is NSNull)
+  }
+
   func testMultiDayEventsStayReadOnlyButMidnightEndRoundTrips() {
     XCTAssertTrue(
       CalendarEventPolicy.canEdit(
