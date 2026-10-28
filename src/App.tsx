@@ -1,4 +1,4 @@
-import { Activity, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Activity, useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 import {
   CalendarDays,
   Check,
@@ -30,12 +30,7 @@ import { api, ApiError } from './lib/api';
 import { useI18n, getLanguage, translate } from './lib/i18n';
 import { dateInZone, minutesInZone } from './lib/date';
 import { addDays, getDayOccurrences, isTimedOccurrence } from './features/calendar-utils';
-import { CalendarPage } from './features/CalendarPage';
-import { SettingsPage } from './features/SettingsPage';
-import { AssistantPage } from './features/AssistantPage';
 import { DashboardPage } from './components/DashboardPage';
-import { FinancePage } from './features/FinancePage';
-import { HabitsPage } from './features/HabitsPage';
 import { TaskDialog } from './components/TaskDialog';
 import { LoginPage } from './features/LoginPage';
 import { GoogleEventDialog } from './components/GoogleEventDialog';
@@ -44,6 +39,35 @@ import { EventPreviewDialog } from './features/EventPreviewDialog';
 import './styles/visual-refresh.css';
 import './styles/motion.css';
 import { MotionControls, MotionPage, MotionPresence } from './components/Motion';
+// Heavy sections load on first visit; «Мой день» stays in the main bundle.
+const CalendarPage = lazy(() =>
+  import('./features/CalendarPage').then((m) => ({ default: m.CalendarPage })),
+);
+const SettingsPage = lazy(() =>
+  import('./features/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+);
+const AssistantPage = lazy(() =>
+  import('./features/AssistantPage').then((m) => ({ default: m.AssistantPage })),
+);
+const FinancePage = lazy(() =>
+  import('./features/FinancePage').then((m) => ({ default: m.FinancePage })),
+);
+const HabitsPage = lazy(() =>
+  import('./features/HabitsPage').then((m) => ({ default: m.HabitsPage })),
+);
+function PageFallback() {
+  return (
+    <div className="page-fallback" role="status" aria-busy="true">
+      <div className="skeleton skeleton-title" />
+      <div className="skeleton skeleton-line" />
+      <div className="skeleton-grid">
+        {[1, 2, 3].map((n) => (
+          <div key={n} className="skeleton skeleton-card" />
+        ))}
+      </div>
+    </div>
+  );
+}
 import {
   calendarOccurrences,
   canEditGoogleEvent,
@@ -800,197 +824,209 @@ export default function App() {
           <Activity mode={page === 'calendar' ? 'visible' : 'hidden'}>
             {(page === 'calendar' || visitedPages.current.has('calendar')) && (
               <MotionPage name="calendar">
-                <CalendarPage
-                  tasks={calendarTasks}
-                  today={today}
-                  timeZone={data.settings.timeZone}
-                  onEdit={(task) => setTaskDialog({ task })}
-                  onCreate={() => {
-                    notify(
-                      tr('Подключи Google Calendar в настройках, чтобы добавить запись.'),
-                      true,
-                    );
-                    go('settings');
-                  }}
-                  googleStatus={google.status}
-                  googleEvents={google.result?.events ?? EMPTY_GOOGLE_EVENTS}
-                  googleLoading={google.checkingStatus || google.loading || migrationLoading}
-                  googleError={google.error || migrationError}
-                  googlePartial={google.result?.partial ?? false}
-                  googleFetchedAt={google.result?.fetchedAt ?? null}
-                  onGoogleEdit={(event) => setGoogleDialog({ event })}
-                  onGoogleMove={async (event, date, time) => {
-                    try {
-                      if (
-                        !canEditGoogleEvent(event, data.settings.timeZone) ||
-                        event.taskLink ||
-                        event.googleTask ||
-                        event.allDay !== (time === null)
-                      )
-                        throw new Error(
-                          tr('Эту запись нельзя перетащить. Открой её для просмотра.'),
-                        );
-                      const input = {
-                        ...googleEventDraft(event, data.settings.timeZone),
-                        date,
-                        time,
-                      };
-                      const saved = await api.updateGoogleEvent(event.id, input, event.etag);
-                      google.upsertEvent(saved);
-                      google.refresh();
-                      notify(tr('Запись перенесена в календаре'));
-                    } catch (error) {
-                      handleError(error);
-                      google.refresh();
+                <Suspense fallback={<PageFallback />}>
+                  <CalendarPage
+                    tasks={calendarTasks}
+                    today={today}
+                    timeZone={data.settings.timeZone}
+                    onEdit={(task) => setTaskDialog({ task })}
+                    onCreate={() => {
+                      notify(
+                        tr('Подключи Google Calendar в настройках, чтобы добавить запись.'),
+                        true,
+                      );
+                      go('settings');
+                    }}
+                    googleStatus={google.status}
+                    googleEvents={google.result?.events ?? EMPTY_GOOGLE_EVENTS}
+                    googleLoading={google.checkingStatus || google.loading || migrationLoading}
+                    googleError={google.error || migrationError}
+                    googlePartial={google.result?.partial ?? false}
+                    googleFetchedAt={google.result?.fetchedAt ?? null}
+                    onGoogleEdit={(event) => setGoogleDialog({ event })}
+                    onGoogleMove={async (event, date, time) => {
+                      try {
+                        if (
+                          !canEditGoogleEvent(event, data.settings.timeZone) ||
+                          event.taskLink ||
+                          event.googleTask ||
+                          event.allDay !== (time === null)
+                        )
+                          throw new Error(
+                            tr('Эту запись нельзя перетащить. Открой её для просмотра.'),
+                          );
+                        const input = {
+                          ...googleEventDraft(event, data.settings.timeZone),
+                          date,
+                          time,
+                        };
+                        const saved = await api.updateGoogleEvent(event.id, input, event.etag);
+                        google.upsertEvent(saved);
+                        google.refresh();
+                        notify(tr('Запись перенесена в календаре'));
+                      } catch (error) {
+                        handleError(error);
+                        google.refresh();
+                      }
+                    }}
+                    onGoogleTaskToggle={toggleGoogleTask}
+                    busyGoogleTaskIds={busyGoogleTaskIds}
+                    onEnableGoogleTasks={
+                      google.status.tasksEnabled ? undefined : google.connectTasks
                     }
-                  }}
-                  onGoogleTaskToggle={toggleGoogleTask}
-                  busyGoogleTaskIds={busyGoogleTaskIds}
-                  onEnableGoogleTasks={google.status.tasksEnabled ? undefined : google.connectTasks}
-                  onGoogleCreate={(draft) => setGoogleDialog({ draft })}
-                  onRangeChange={google.setRange}
-                  onGoogleRefresh={() => {
-                    failedTransfers.current.clear();
-                    setMigrationError('');
-                    setMigrationRevision((value) => value + 1);
-                    google.refresh();
-                  }}
-                  onOpenSettings={() => go('settings')}
-                />
+                    onGoogleCreate={(draft) => setGoogleDialog({ draft })}
+                    onRangeChange={google.setRange}
+                    onGoogleRefresh={() => {
+                      failedTransfers.current.clear();
+                      setMigrationError('');
+                      setMigrationRevision((value) => value + 1);
+                      google.refresh();
+                    }}
+                    onOpenSettings={() => go('settings')}
+                  />
+                </Suspense>
               </MotionPage>
             )}
           </Activity>
           <Activity mode={page === 'assistant' ? 'visible' : 'hidden'}>
             {(page === 'assistant' || visitedPages.current.has('assistant')) && (
               <MotionPage name="assistant">
-                <AssistantPage
-                  active={page === 'assistant'}
-                  conversations={data.conversations}
-                  aiStatus={data.aiStatus}
-                  onCreate={async () => {
-                    const c = await api.createConversation();
-                    putConversation(c);
-                    return c;
-                  }}
-                  onDelete={async (id) => {
-                    await api.deleteConversation(id);
-                    setData((old) =>
-                      old
-                        ? { ...old, conversations: old.conversations.filter((c) => c.id !== id) }
-                        : old,
-                    );
-                  }}
-                  onSend={async (id, message, requestId, mode, reviewMessageId) => {
-                    try {
-                      const c = await api.chat(id, message, requestId, mode, reviewMessageId);
+                <Suspense fallback={<PageFallback />}>
+                  <AssistantPage
+                    active={page === 'assistant'}
+                    conversations={data.conversations}
+                    aiStatus={data.aiStatus}
+                    onCreate={async () => {
+                      const c = await api.createConversation();
                       putConversation(c);
                       return c;
-                    } catch (failure) {
-                      if (failure instanceof ApiError && failure.code === 'AI_DISCUSSION_STALE') {
-                        try {
-                          const fresh = await api.bootstrap();
-                          setData((old) =>
-                            old ? { ...old, conversations: fresh.conversations } : old,
-                          );
-                        } catch {
-                          // Preserve the failed reply; the user can reload if history is unavailable.
+                    }}
+                    onDelete={async (id) => {
+                      await api.deleteConversation(id);
+                      setData((old) =>
+                        old
+                          ? { ...old, conversations: old.conversations.filter((c) => c.id !== id) }
+                          : old,
+                      );
+                    }}
+                    onSend={async (id, message, requestId, mode, reviewMessageId) => {
+                      try {
+                        const c = await api.chat(id, message, requestId, mode, reviewMessageId);
+                        putConversation(c);
+                        return c;
+                      } catch (failure) {
+                        if (failure instanceof ApiError && failure.code === 'AI_DISCUSSION_STALE') {
+                          try {
+                            const fresh = await api.bootstrap();
+                            setData((old) =>
+                              old ? { ...old, conversations: fresh.conversations } : old,
+                            );
+                          } catch {
+                            // Preserve the failed reply; the user can reload if history is unavailable.
+                          }
                         }
+                        throw failure;
                       }
-                      throw failure;
-                    }
-                  }}
-                  onApply={async (conversationId, messageId, proposalIds) => {
-                    const result = await api.proposals(
-                      'apply',
-                      conversationId,
-                      messageId,
-                      proposalIds,
-                    );
-                    setData((old) =>
-                      old
-                        ? {
-                            ...old,
-                            tasks: result.tasks,
-                            conversations: old.conversations.map((c) =>
-                              c.id === result.conversation.id ? result.conversation : c,
-                            ),
-                          }
-                        : old,
-                    );
-                    notify(tr('Выбранные изменения применены'));
-                  }}
-                  onReject={async (c, m, ids) => {
-                    putConversation(await api.reject(c, m, ids));
-                  }}
-                  onUndo={async (c, m, ids) => {
-                    const result = await api.proposals('undo', c, m, ids);
-                    setData((old) =>
-                      old
-                        ? {
-                            ...old,
-                            tasks: result.tasks,
-                            conversations: old.conversations.map((v) =>
-                              v.id === result.conversation.id ? result.conversation : v,
-                            ),
-                          }
-                        : old,
-                    );
-                    notify(tr('Изменения расписания отменены'));
-                  }}
-                  onOpenSettings={() => go('settings')}
-                  initialPrompt={prompt}
-                  onPromptConsumed={() => setPrompt(undefined)}
-                />
+                    }}
+                    onApply={async (conversationId, messageId, proposalIds) => {
+                      const result = await api.proposals(
+                        'apply',
+                        conversationId,
+                        messageId,
+                        proposalIds,
+                      );
+                      setData((old) =>
+                        old
+                          ? {
+                              ...old,
+                              tasks: result.tasks,
+                              conversations: old.conversations.map((c) =>
+                                c.id === result.conversation.id ? result.conversation : c,
+                              ),
+                            }
+                          : old,
+                      );
+                      notify(tr('Выбранные изменения применены'));
+                    }}
+                    onReject={async (c, m, ids) => {
+                      putConversation(await api.reject(c, m, ids));
+                    }}
+                    onUndo={async (c, m, ids) => {
+                      const result = await api.proposals('undo', c, m, ids);
+                      setData((old) =>
+                        old
+                          ? {
+                              ...old,
+                              tasks: result.tasks,
+                              conversations: old.conversations.map((v) =>
+                                v.id === result.conversation.id ? result.conversation : v,
+                              ),
+                            }
+                          : old,
+                      );
+                      notify(tr('Изменения расписания отменены'));
+                    }}
+                    onOpenSettings={() => go('settings')}
+                    initialPrompt={prompt}
+                    onPromptConsumed={() => setPrompt(undefined)}
+                  />
+                </Suspense>
               </MotionPage>
             )}
           </Activity>
           <Activity mode={page === 'finance' ? 'visible' : 'hidden'}>
             {(page === 'finance' || visitedPages.current.has('finance')) && (
               <MotionPage name="finance">
-                <FinancePage
-                  active={page === 'finance'}
-                  today={`${clock.getFullYear()}-${String(clock.getMonth() + 1).padStart(2, '0')}-${String(clock.getDate()).padStart(2, '0')}`}
-                />
+                <Suspense fallback={<PageFallback />}>
+                  <FinancePage
+                    active={page === 'finance'}
+                    today={`${clock.getFullYear()}-${String(clock.getMonth() + 1).padStart(2, '0')}-${String(clock.getDate()).padStart(2, '0')}`}
+                  />
+                </Suspense>
               </MotionPage>
             )}
           </Activity>
           <Activity mode={page === 'habits' ? 'visible' : 'hidden'}>
             {(page === 'habits' || visitedPages.current.has('habits')) && (
               <MotionPage name="habits">
-                <HabitsPage
-                  active={page === 'habits'}
-                  timeZone={data.settings.timeZone}
-                  today={today}
-                />
+                <Suspense fallback={<PageFallback />}>
+                  <HabitsPage
+                    active={page === 'habits'}
+                    timeZone={data.settings.timeZone}
+                    today={today}
+                  />
+                </Suspense>
               </MotionPage>
             )}
           </Activity>
           <Activity mode={page === 'settings' ? 'visible' : 'hidden'}>
             {(page === 'settings' || visitedPages.current.has('settings')) && (
               <MotionPage name="settings">
-                <SettingsPage
-                  active={page === 'settings'}
-                  settings={data.settings}
-                  aiStatus={data.aiStatus}
-                  googleStatus={google.status}
-                  onConnectGoogle={google.connect}
-                  onConnectGoogleTasks={google.connectTasks}
-                  googleTasksMessage={google.result?.tasks?.message}
-                  onDisconnectGoogle={google.disconnect}
-                  onGoogleConfigured={async () => {
-                    await google.refreshStatus();
-                  }}
-                  onSave={saveSettings}
-                  onConfigureAI={async (key, model) => {
-                    const aiStatus = await api.configureAI(key, model);
-                    setData((old) => (old ? { ...old, aiStatus } : old));
-                  }}
-                  onDisconnectAI={async () => {
-                    const aiStatus = await api.disconnectAI();
-                    setData((old) => (old ? { ...old, aiStatus } : old));
-                  }}
-                  onLogout={requiresLogin ? logout : undefined}
-                />
+                <Suspense fallback={<PageFallback />}>
+                  <SettingsPage
+                    active={page === 'settings'}
+                    settings={data.settings}
+                    aiStatus={data.aiStatus}
+                    googleStatus={google.status}
+                    onConnectGoogle={google.connect}
+                    onConnectGoogleTasks={google.connectTasks}
+                    googleTasksMessage={google.result?.tasks?.message}
+                    onDisconnectGoogle={google.disconnect}
+                    onGoogleConfigured={async () => {
+                      await google.refreshStatus();
+                    }}
+                    onSave={saveSettings}
+                    onConfigureAI={async (key, model) => {
+                      const aiStatus = await api.configureAI(key, model);
+                      setData((old) => (old ? { ...old, aiStatus } : old));
+                    }}
+                    onDisconnectAI={async () => {
+                      const aiStatus = await api.disconnectAI();
+                      setData((old) => (old ? { ...old, aiStatus } : old));
+                    }}
+                    onLogout={requiresLogin ? logout : undefined}
+                  />
+                </Suspense>
               </MotionPage>
             )}
           </Activity>

@@ -59,7 +59,7 @@
 .calendar-color-picker small {
   display: block;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   margin-top: 5px;
 }
 @media (max-width: 420px) {

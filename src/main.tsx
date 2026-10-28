@@ -10,6 +10,9 @@ import './styles/calendar-settings.css';
 import './styles/assistant.css';
 import './styles/finance.css';
 import App from './App';
+// After App so the shared interaction rules win over screen styles.
+import './styles/interaction.css';
+import { InteractionLayer } from './components/InteractionLayer';
 import { I18nProvider, getLanguage, translate } from './lib/i18n';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
@@ -44,6 +47,7 @@ if (import.meta.hot) import.meta.hot.data.root = root;
 root.render(
   <ErrorBoundary>
     <I18nProvider>
+      <InteractionLayer />
       <App />
     </I18nProvider>
   </ErrorBoundary>,

@@ -71,7 +71,7 @@
   display: grid;
   gap: 5px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .finance-currency-label select {
   min-height: 42px;
@@ -84,7 +84,7 @@
   gap: 8px;
   align-items: center;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
 }
 .finance-info-note svg {
@@ -137,7 +137,7 @@
 }
 .finance-deposit-picker-heading span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .finance-deposit-options {
   display: flex;
@@ -167,7 +167,7 @@
 }
 .finance-deposit-option span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .finance-deposit-option.active {
   border-color: var(--accent);
@@ -182,7 +182,7 @@
   justify-content: center;
   gap: 8px;
   color: var(--accent);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
 }
 .finance-alert,
@@ -256,7 +256,7 @@
 .finance-hero > p {
   margin-top: 7px;
   color: #dfd0ef;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
 }
 .finance-hero-split {
@@ -279,7 +279,7 @@
 .finance-hero-split span span {
   display: grid;
   gap: 3px;
-  font-size: 10px;
+  font-size: 12px;
   color: #dfd0ef;
 }
 .finance-hero-split strong {
@@ -297,7 +297,7 @@
   border-radius: 10px;
   background: #ffffff19;
   color: #fff;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
 }
 .finance-overview-tiles {
@@ -331,7 +331,7 @@
 }
 .finance-tile-label {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.35;
 }
 .finance-tile-icon {
@@ -381,7 +381,7 @@
 .finance-card-heading span {
   display: block;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   margin-bottom: 5px;
 }
 .finance-card-heading h2 {
@@ -394,7 +394,7 @@
   gap: 5px;
   white-space: nowrap;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 .finance-chart-key span {
   width: 7px;
@@ -462,13 +462,13 @@
   height: 20px;
   text-align: center;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .finance-chart-empty {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   margin-top: 11px;
 }
@@ -541,7 +541,7 @@
 }
 .finance-donut-hole span {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 .finance-legend {
   flex: 1;
@@ -557,7 +557,7 @@
   align-items: center;
   gap: 7px;
   min-width: 0;
-  font-size: 10px;
+  font-size: 12px;
 }
 .finance-legend-dot {
   display: block;
@@ -576,7 +576,7 @@
 .finance-legend strong {
   margin-left: auto;
   white-space: nowrap;
-  font-size: 10px;
+  font-size: 12px;
 }
 .finance-refresh {
   width: 32px;
@@ -630,7 +630,7 @@
   flex: 1;
 }
 .finance-record-main strong {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -638,13 +638,13 @@
 }
 .finance-record-main > span {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .finance-record-money {
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 .finance-record-money.income {
@@ -668,7 +668,7 @@
   background: transparent;
   color: var(--muted);
   border-radius: 7px;
-  font-size: 10px;
+  font-size: 12px;
 }
 .finance-record-actions .finance-delete-confirm {
   color: var(--danger);
@@ -692,7 +692,7 @@
   font-size: 13px;
 }
 .finance-empty p {
-  font-size: 11px;
+  font-size: 12px;
 }
 .finance-empty .button {
   margin-top: 4px;
@@ -776,7 +776,7 @@
 }
 .finance-summary-tile small {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.35;
 }
 .finance-stock-net-tile {
@@ -793,7 +793,7 @@
 .finance-price-action {
   white-space: nowrap;
   color: var(--accent) !important;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
 }
 .finance-type-switch {
@@ -821,7 +821,7 @@
   border-radius: 8px;
   color: var(--muted);
   background: transparent;
-  font-size: 11px;
+  font-size: 12px;
 }
 .finance-type-switch button[aria-pressed='true'] {
   background: var(--panel);
@@ -918,7 +918,7 @@
     gap: 9px;
   }
   .finance-chart-key {
-    font-size: 9px;
+    font-size: 12px;
   }
   .finance-donut-wrap {
     flex-direction: column;
@@ -946,7 +946,7 @@
     width: 100%;
   }
   .finance-legend strong {
-    font-size: 9px;
+    font-size: 12px;
   }
   .finance-record {
     flex-wrap: wrap;

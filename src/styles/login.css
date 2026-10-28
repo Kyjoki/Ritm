@@ -20,7 +20,7 @@
 }
 .signin-preview-label {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .signin-theme {
   width: 44px;
@@ -62,7 +62,7 @@
   border-right: 1px solid rgba(193, 158, 228, 0.16);
 }
 .signin-eyebrow {
-  font-size: 9px;
+  font-size: 12px;
   letter-spacing: 0.14em;
   color: #c6b5de;
   font-weight: 500;
@@ -221,7 +221,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 8px;
+  font-size: 12px;
   letter-spacing: 0.12em;
   font-weight: 500;
   color: #bda8d2;
@@ -251,14 +251,14 @@
 }
 .signin-focus-body strong {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 1.5;
 }
 .signin-focus-body small {
   color: #bcaccb;
   display: block;
-  font-size: 9px;
+  font-size: 12px;
   margin-top: 4px;
 }
 .signin-focus-body > svg {
@@ -285,7 +285,7 @@
   justify-content: space-between;
   gap: 12px;
   color: #a896bb;
-  font-size: 9px;
+  font-size: 12px;
 }
 .signin-footer-star {
   font-size: 17px;
@@ -317,7 +317,7 @@
   border-radius: 15px;
 }
 .signin-form-eyebrow {
-  font-size: 9px;
+  font-size: 12px;
   letter-spacing: 0.1em;
   font-weight: 500;
   color: var(--muted);
@@ -433,7 +433,7 @@
   gap: 12px;
   margin-top: 29px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
 }
 .signin-account-note > span:nth-child(2) {
   display: flex;
@@ -448,7 +448,7 @@
 }
 .signin-form-bottom {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.6;
   text-align: center;
   margin-top: 16px;
@@ -464,7 +464,7 @@
   background: transparent;
   color: var(--muted);
   border: 0;
-  font-size: 10px;
+  font-size: 12px;
 }
 .signin-back:hover {
   color: var(--accent);
@@ -476,7 +476,7 @@
   justify-content: space-between;
   align-items: center;
   gap: 20px;
-  font-size: 9px;
+  font-size: 12px;
   color: var(--muted);
 }
 .signin-error {
@@ -484,7 +484,7 @@
   border-radius: 10px;
   color: var(--danger);
   background: var(--danger-soft);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   margin: -3px 0 0;
   animation: signin-error-in var(--motion-fast, 210ms) ease-out both;
@@ -530,7 +530,7 @@
   }
 }
 .signin-caps {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   margin: -12px 0 17px;
   line-height: 1.5;
@@ -611,7 +611,7 @@
     font-size: 27px;
   }
   .signin-focus-body strong {
-    font-size: 10px;
+    font-size: 12px;
   }
   .signin-art {
     min-height: 190px;
@@ -642,7 +642,7 @@
     font-size: 26px;
   }
   .signin-preview-label {
-    font-size: 9px;
+    font-size: 12px;
   }
   .signin-top-actions {
     gap: 10px;
@@ -676,11 +676,11 @@
     font-size: 30px;
   }
   .signin-form-eyebrow {
-    font-size: 8px;
+    font-size: 12px;
     letter-spacing: 0.09em;
   }
   .signin-subtitle {
-    font-size: 11px;
+    font-size: 12px;
     margin-top: 10px;
   }
   .signin-form {
@@ -710,12 +710,12 @@
   .signin-page-footer {
     margin-top: 30px;
     width: 100%;
-    font-size: 8px;
+    font-size: 12px;
     gap: 10px;
     padding-bottom: env(safe-area-inset-bottom);
   }
   .signin-form-bottom {
-    font-size: 10px;
+    font-size: 12px;
   }
 }
 @media (max-width: 360px) {
@@ -729,7 +729,7 @@
     font-size: 27px;
   }
   .signin-subtitle {
-    font-size: 10px;
+    font-size: 12px;
   }
   .signin-preview-label {
     display: none;

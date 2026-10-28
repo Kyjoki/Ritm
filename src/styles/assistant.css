@@ -41,7 +41,7 @@
   font-weight: 650;
 }
 .assistant-history-title > span {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   border: 1px solid var(--line);
   padding: 3px 7px;
@@ -131,7 +131,7 @@
   margin-top: auto;
   color: var(--muted);
   border-top: 1px solid var(--line);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
 }
 .assistant-history-note svg {
@@ -203,7 +203,7 @@
   align-items: center;
   gap: 5px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   border: 1px solid var(--line);
   padding: 5px 8px;
   border-radius: 20px;
@@ -314,7 +314,7 @@
   display: block;
   color: var(--muted);
   margin-top: 4px;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.5;
 }
 .assistant-setup {
@@ -343,14 +343,14 @@
 }
 .assistant-setup p {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.65;
   margin: 5px 0 0;
 }
 .assistant-setup .button {
   margin-left: 28px;
   min-height: 38px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .assistant-messages {
   display: flex;
@@ -378,7 +378,7 @@
 }
 .assistant-message-author {
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 650;
   color: var(--accent);
   margin-bottom: 7px;
@@ -407,7 +407,7 @@
   border-radius: 8px;
   background: transparent;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
 }
 .assistant-message-copy > button:hover {
@@ -420,14 +420,14 @@
 }
 .assistant-copy-error {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
 .assistant-message--pending > small {
   display: block;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   margin-top: 7px;
 }
 .assistant-steps {
@@ -480,14 +480,14 @@
 }
 .assistant-proposal-heading > span {
   margin-left: auto;
-  font-size: 10px;
+  font-size: 12px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: 3px 6px;
 }
 .assistant-proposal-hint {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.65;
   color: var(--muted);
   margin: 8px 0 15px;
@@ -550,7 +550,7 @@
   align-items: center;
   gap: 3px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.5;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -582,7 +582,7 @@
 .assistant-comparison span {
   display: block;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   margin-bottom: 4px;
 }
 .assistant-comparison strong {
@@ -598,14 +598,14 @@
 }
 .assistant-comparison small {
   display: block;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.55;
   color: var(--muted);
   margin-top: 3px;
 }
 .assistant-proposal-reason {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.7;
   margin: 10px 0 0;
   white-space: pre-wrap;
@@ -622,7 +622,7 @@
 }
 .assistant-proposal-actions .button {
   min-height: 38px;
-  font-size: 11px;
+  font-size: 12px;
   padding: 9px 12px;
 }
 .assistant-apply-confirmation {
@@ -689,7 +689,7 @@
 }
 .assistant-request-error .button {
   min-height: 38px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .assistant-composer-area {
   padding: 0 25px 18px;
@@ -708,7 +708,7 @@
   min-height: 33px;
   padding: 7px 11px;
   border-radius: 20px;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.4;
   cursor: pointer;
   transition:
@@ -770,7 +770,7 @@
   align-items: center;
   gap: 5px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.5;
   margin: 10px 0 0;
 }
@@ -788,7 +788,7 @@
   gap: 10px;
   border-top: 1px solid var(--line);
   padding: 11px 0;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 .assistant-compact-setup button {
@@ -833,7 +833,7 @@
   background: var(--panel);
   border-radius: 8px;
   padding: 10px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.7;
   margin: 13px 0 0;
 }
@@ -848,7 +848,7 @@
   font-size: 12px;
 }
 .assistant-delete-confirmation p {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   line-height: 1.65;
   margin: 6px 0 11px;
@@ -860,7 +860,7 @@
   gap: 7px;
 }
 .assistant-delete-confirmation .button {
-  font-size: 11px;
+  font-size: 12px;
   min-height: 35px;
   padding: 8px 9px;
 }
@@ -882,7 +882,7 @@
   margin-bottom: 15px;
 }
 .assistant-retry-outside .button {
-  font-size: 11px;
+  font-size: 12px;
 }
 .assistant-spinner {
   animation: assistant-orb-turn 1s linear infinite;
@@ -986,7 +986,7 @@
   }
   .assistant-connection {
     padding: 5px;
-    font-size: 9px;
+    font-size: 12px;
   }
 }
 @media (max-width: 800px) {
@@ -1065,7 +1065,7 @@
     font-size: 14px;
   }
   .assistant-chat-header p {
-    font-size: 10px;
+    font-size: 12px;
   }
   .assistant-orb {
     height: 36px;
@@ -1107,7 +1107,7 @@
     font-size: 12px;
   }
   .assistant-welcome-prompts small {
-    font-size: 10px;
+    font-size: 12px;
   }
   .assistant-setup {
     margin-top: 15px;
@@ -1137,7 +1137,7 @@
   }
   .assistant-composer-hint {
     justify-content: center;
-    font-size: 9px;
+    font-size: 12px;
     margin-top: 9px;
   }
   .assistant-prompt-chips {
@@ -1150,7 +1150,7 @@
   .assistant-prompt-chips button {
     flex: none;
     min-height: 44px;
-    font-size: 11px;
+    font-size: 12px;
   }
   .assistant-message--user {
     padding: 12px 13px;
@@ -1180,7 +1180,7 @@
     width: 20px;
   }
   .assistant-proposal-status {
-    font-size: 9px;
+    font-size: 12px;
     margin-left: 29px;
   }
   .assistant-proposal-title {
@@ -1196,11 +1196,11 @@
     font-size: 17px;
   }
   .assistant-comparison small {
-    font-size: 9px;
+    font-size: 12px;
   }
   .assistant-proposal-actions .button {
     min-height: 44px;
-    font-size: 11px;
+    font-size: 12px;
     flex-grow: 1;
     justify-content: center;
   }
@@ -1215,7 +1215,7 @@
     font-size: 12px;
   }
   .assistant-compact-setup {
-    font-size: 10px;
+    font-size: 12px;
   }
   .assistant-compact-setup button {
     min-height: 44px;
@@ -1290,7 +1290,7 @@
 .assistant-discussion-heading .button {
   min-height: 44px;
   padding: 6px 9px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .assistant-discussion-context p {
   margin: 5px 0 0;

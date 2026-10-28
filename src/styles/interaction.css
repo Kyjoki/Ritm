@@ -1,0 +1,495 @@
+/* Ritm interaction system.
+   Loaded last: one set of rules for how every control answers the user.
+   Signature: the "beat" — a ring that pulses out of a control like a metronome tick.
+   Rhythm: press 110ms · state 180ms · move 260ms · surfaces 400ms; springs for anything
+   that travels, plain ease-out for colour. Nothing here delays the action itself. */
+
+:root {
+  --dur-press: 110ms;
+  --dur-fast: 180ms;
+  --dur-base: 260ms;
+  --dur-slow: 400ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.45, 0, 0.9, 0.4);
+  --ease-spring: cubic-bezier(0.2, 1.1, 0.3, 1);
+  --ease-bounce: cubic-bezier(0.3, 1.5, 0.5, 1);
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 32%, transparent);
+  --danger-ring: 0 0 0 3px color-mix(in srgb, var(--danger) 26%, transparent);
+}
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    /* Spring k=420 c=32: settles in ~450ms with 1.7% overshoot. */
+    --ease-spring: linear(
+      0,
+      0.029,
+      0.096,
+      0.186,
+      0.286,
+      0.375,
+      0.476,
+      0.57,
+      0.655,
+      0.719,
+      0.785,
+      0.84,
+      0.885,
+      0.922,
+      0.947,
+      0.97,
+      0.987,
+      0.999,
+      1.006,
+      1.012,
+      1.015,
+      1.017,
+      1.017,
+      1.015,
+      1.012,
+      1.009,
+      1.006,
+      1.004,
+      1.002,
+      1.001,
+      1
+    );
+    /* Spring k=300 c=16: playful, for completion and drops. */
+    --ease-bounce: linear(
+      0,
+      0.077,
+      0.255,
+      0.479,
+      0.702,
+      0.896,
+      1.043,
+      1.138,
+      1.184,
+      1.191,
+      1.169,
+      1.132,
+      1.088,
+      1.046,
+      1.011,
+      0.986,
+      0.97,
+      0.964,
+      0.969,
+      0.977,
+      0.985,
+      0.993,
+      0.999,
+      1.004,
+      1.006,
+      1.004,
+      1.002,
+      1
+    );
+  }
+}
+
+/* ---------- Buttons: hover, press, release ---------- */
+button,
+.button,
+summary {
+  transition:
+    background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    box-shadow var(--dur-base) var(--ease-out),
+    opacity var(--dur-fast) ease,
+    transform var(--dur-base) var(--ease-spring),
+    translate var(--dur-base) var(--ease-spring),
+    scale var(--dur-base) var(--ease-spring);
+}
+/* Pressing is quick; releasing springs back. */
+button:active:not(:disabled),
+.button:active:not(:disabled),
+[role='button']:active {
+  transform: scale(0.96);
+  transition-duration: var(--dur-press);
+  transition-timing-function: var(--ease-out);
+}
+.button {
+  font-size: 13px;
+  letter-spacing: -0.005em;
+}
+.button-primary:hover:not(:disabled) {
+  box-shadow:
+    0 12px 26px color-mix(in srgb, var(--accent) 34%, transparent),
+    inset 0 1px rgb(255 255 255 / 0.18);
+}
+.button-secondary:hover:not(:disabled),
+.icon-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.button-danger:hover:not(:disabled) {
+  background: var(--danger);
+  color: var(--panel);
+}
+.icon-button svg,
+.button svg {
+  transition: transform var(--dur-base) var(--ease-spring);
+}
+.icon-button:hover:not(:disabled) svg {
+  transform: scale(1.1);
+}
+.text-button {
+  font-size: 12px;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 4px;
+  transition:
+    color var(--dur-fast) ease,
+    text-decoration-color var(--dur-fast) ease,
+    text-underline-offset var(--dur-base) var(--ease-spring);
+}
+.text-button:hover {
+  text-decoration-color: currentColor;
+  text-underline-offset: 2px;
+}
+button:disabled:not([data-feedback]) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------- Async feedback painted by InteractionLayer ---------- */
+[data-feedback] {
+  isolation: isolate;
+}
+[data-feedback='loading'] {
+  cursor: progress !important;
+  opacity: 1 !important;
+}
+[data-feedback]::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+}
+/* Loading: a light wave travels across the control in a steady beat. */
+[data-feedback='loading']::after {
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    color-mix(in srgb, var(--panel) 42%, transparent) 50%,
+    transparent 80%
+  );
+  background-size: 220% 100%;
+  animation: ritm-wave 1.05s var(--ease-out) infinite;
+}
+/* Success: the control flashes the accent with a drawn check, then returns. */
+[data-feedback='success']::after {
+  background: var(--accent)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12.5 4.5 4.5L19 7'/%3E%3C/svg%3E")
+    center / 18px no-repeat;
+  animation: ritm-success 1.3s var(--ease-out) both;
+}
+:root[data-theme='dark'] [data-feedback='success']::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23271938' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12.5 4.5 4.5L19 7'/%3E%3C/svg%3E");
+}
+[data-feedback='error'] {
+  border-color: var(--danger) !important;
+  box-shadow: var(--danger-ring) !important;
+}
+@keyframes ritm-wave {
+  from {
+    background-position: 160% 0;
+  }
+  to {
+    background-position: -60% 0;
+  }
+}
+@keyframes ritm-success {
+  0% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  14%,
+  72% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+/* ---------- Fields: hover, focus, filled, invalid ---------- */
+input:not([type='checkbox'], [type='radio'], [type='range']),
+textarea,
+select {
+  transition:
+    border-color var(--dur-fast) ease,
+    box-shadow var(--dur-base) var(--ease-out),
+    background-color var(--dur-fast) ease;
+}
+input:not([type='checkbox'], [type='radio'], [type='range']):hover:not(:disabled, :focus),
+textarea:hover:not(:disabled, :focus),
+select:hover:not(:disabled, :focus) {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
+}
+input:not([type='checkbox'], [type='radio'], [type='range']):focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+input:not([type='checkbox'], [type='radio'], [type='range']):focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+input:not([type='checkbox'], [type='radio'], [type='range'], [type='file']):not(
+    :placeholder-shown
+  ):not(:focus),
+textarea:not(:placeholder-shown):not(:focus) {
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--line));
+}
+:is(input, textarea, select)[aria-invalid='true'] {
+  border-color: var(--danger) !important;
+  box-shadow: var(--danger-ring) !important;
+}
+textarea:disabled {
+  opacity: 0.55;
+}
+.field {
+  font-size: 13px;
+}
+.field:focus-within {
+  color: var(--accent);
+}
+.field:focus-within :is(input, textarea, select) {
+  color: var(--text);
+}
+.field-hint {
+  font-size: 12px;
+}
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--accent);
+}
+
+/* ---------- Errors and notices arrive, they don't just appear ---------- */
+.error-note,
+.error-text,
+.info-note,
+[role='alert']:not(.toast) {
+  animation: ritm-note-in var(--dur-base) var(--ease-out) both;
+}
+.info-note {
+  font-size: 12px;
+}
+@keyframes ritm-note-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* ---------- Task checkbox: press, spring, drawn check ---------- */
+.task-checkbox {
+  width: 21px;
+  height: 21px;
+  transition:
+    background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    transform var(--dur-base) var(--ease-bounce);
+}
+:is(button, label):hover > .task-checkbox,
+.task-checkbox:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+:is(button, label):active > .task-checkbox {
+  transform: scale(0.84);
+  transition-duration: var(--dur-press);
+}
+.is-complete .task-checkbox {
+  transform: scale(1);
+}
+.is-complete .task-checkbox svg {
+  animation: none;
+}
+.is-complete .task-checkbox svg :is(path, polyline) {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 0;
+  animation: ritm-check-draw 320ms var(--ease-out) both;
+}
+.task-title {
+  transition:
+    color var(--dur-base) ease,
+    opacity var(--dur-base) ease;
+}
+@keyframes ritm-check-draw {
+  from {
+    stroke-dashoffset: 24;
+  }
+}
+
+/* ---------- Switch: the thumb travels on a spring and stretches on press ---------- */
+.settings-switch {
+  transition:
+    background-color var(--dur-base) ease,
+    border-color var(--dur-base) ease,
+    box-shadow var(--dur-base) var(--ease-out);
+}
+.settings-switch:before {
+  transition:
+    transform var(--dur-slow) var(--ease-spring),
+    width var(--dur-fast) var(--ease-out);
+}
+.settings-switch:active:not(:disabled):before {
+  width: 20px;
+}
+.settings-switch:checked:active:not(:disabled):before {
+  transform: translateX(11px);
+}
+.settings-switch:hover:not(:disabled) {
+  box-shadow: var(--focus-ring);
+}
+.settings-switch:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.settings-switch-row small {
+  font-size: 12px;
+}
+
+/* ---------- Travelling indicators use the same spring ---------- */
+[data-motion-indicator='true']::before {
+  transition:
+    transform var(--dur-slow) var(--ease-spring),
+    width var(--dur-slow) var(--ease-spring),
+    height var(--dur-slow) var(--ease-spring);
+}
+.sidebar-nav > button:not(.is-active):hover,
+.mobile-nav button:not(.is-active):hover {
+  color: var(--text);
+}
+.sidebar-nav > button svg,
+.mobile-nav button svg {
+  transition: transform var(--dur-base) var(--ease-spring);
+}
+.sidebar-nav > button:hover svg,
+.mobile-nav button:hover svg {
+  transform: translateY(-1px) scale(1.08);
+}
+
+/* ---------- Disclosure ---------- */
+summary {
+  cursor: pointer;
+}
+summary svg:last-child {
+  transition: transform var(--dur-base) var(--ease-spring);
+}
+details[open]:not([data-closing='true']) > summary svg:last-child {
+  transform: rotate(180deg);
+}
+
+/* ---------- Surfaces: dialogs and toasts open on a spring ---------- */
+.dialog {
+  animation: ritm-dialog-in var(--dur-slow) var(--ease-spring) both;
+}
+.dialog::backdrop {
+  animation: dialog-backdrop-enter var(--dur-base) ease-out both;
+}
+.dialog.is-closing {
+  animation: dialog-exit 0.18s var(--ease-in) both;
+}
+@keyframes ritm-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.965);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.toast {
+  font-size: 13px;
+  animation: ritm-toast-in var(--dur-slow) var(--ease-spring) both;
+}
+.toast button {
+  font-size: 12px;
+}
+.toast-error {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+}
+.toast > svg {
+  animation: ritm-icon-pop 520ms 80ms var(--ease-bounce) both;
+}
+@keyframes ritm-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 14px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+@keyframes ritm-icon-pop {
+  from {
+    transform: scale(0.4);
+  }
+}
+
+/* ---------- Cards respond to the pointer ---------- */
+.panel {
+  transition:
+    border-color var(--dur-base) ease,
+    box-shadow var(--dur-slow) var(--ease-out);
+}
+a.panel:hover,
+button.panel:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+}
+
+/* ---------- Reduced motion: state stays visible, movement goes ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+  }
+  button:active:not(:disabled),
+  .button:active:not(:disabled),
+  [role='button']:active {
+    transform: none;
+  }
+  [data-feedback='loading']::after {
+    animation: none;
+    background: color-mix(in srgb, var(--panel) 22%, transparent);
+  }
+  [data-feedback='success']::after {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* Six tabs share 390px: the tab bar keeps 11px labels (platform tab-bar size),
+   breaking only at the hyphen of «ИИ-помощник». */
+@media (max-width: 760px) {
+  .mobile-nav {
+    padding-inline: 4px;
+  }
+  .mobile-nav button {
+    padding-inline: 1px;
+    font-size: 11px;
+    letter-spacing: -0.015em;
+  }
+  .mobile-nav button span {
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+}
+
+.page-fallback {
+  display: grid;
+  gap: 14px;
+  padding-top: 12px;
+}
