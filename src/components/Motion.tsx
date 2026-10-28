@@ -584,20 +584,35 @@ export function MotionControls() {
         const measurements: { group: HTMLElement; values: Record<string, string> }[] = [];
         for (const group of pending) {
           if (!group.isConnected || !group.getClientRects().length) continue;
-          const active = group.querySelector<HTMLElement>(
-            ':scope > .is-active, :scope > [aria-pressed="true"], :scope > [aria-current="page"]',
-          );
-          if (!active) continue;
+          const active = Array.from(
+            group.querySelectorAll<HTMLElement>(
+              ':scope > .is-active, :scope > [aria-pressed="true"], :scope > [aria-current="page"]',
+            ),
+          ).find((element) => element.getClientRects().length > 0);
+          if (!active) {
+            group.removeAttribute('data-motion-indicator');
+            group.style.removeProperty('--indicator-width');
+            group.style.removeProperty('--indicator-height');
+            continue;
+          }
           const box = group.getBoundingClientRect(),
             target = active.getBoundingClientRect();
           const scale = box.width / group.offsetWidth || 1;
+          const isNav = group.matches('.sidebar-nav, .mobile-nav');
+          const isMobileNav = group.matches('.mobile-nav');
+          const horizontalInset = isNav && !isMobileNav ? 2 : 0;
+          const verticalInset = isNav ? (isMobileNav ? 4 : 2) : 0;
+          const width = target.width / scale - horizontalInset * 2;
+          const height = target.height / scale - verticalInset * 2;
           measurements.push({
             group,
             values: {
-              '--indicator-x': (target.left - box.left) / scale + 'px',
-              '--indicator-y': (target.top - box.top) / scale + 'px',
-              '--indicator-width': target.width / scale + 'px',
-              '--indicator-height': target.height / scale + 'px',
+              '--indicator-x':
+                (target.left - box.left) / scale - group.clientLeft + horizontalInset + 'px',
+              '--indicator-y':
+                (target.top - box.top) / scale - group.clientTop + verticalInset + 'px',
+              '--indicator-width': Math.max(0, width) + 'px',
+              '--indicator-height': Math.max(0, height) + 'px',
             },
           });
         }

@@ -1,14 +1,18 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
+import { createApp } from '../server/index.ts';
+import { liveMobilePreview } from '../vite.config.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const dataDir = mkdtempSync(join(tmpdir(), 'ritm-visual-preview-'));
-// Only explicit local variables reach either child. Project .env files are never loaded.
+const previewPort = Number(process.env.RITM_PREVIEW_PORT ?? 5176);
+const apiPort = Number(process.env.RITM_PREVIEW_API_PORT ?? 3002);
+// Only explicit local variables reach the API and seed process. Project .env files are never loaded.
 const env = {
   PATH: process.env.PATH,
   Path: process.env.Path,
@@ -19,8 +23,8 @@ const env = {
   DATA_DIR: dataDir,
   SEED_DEMO: 'true',
   HOST: '127.0.0.1',
-  PORT: '3001',
-  APP_ORIGIN: 'http://127.0.0.1:5173',
+  PORT: String(apiPort),
+  APP_ORIGIN: `http://127.0.0.1:${previewPort}`,
 };
 
 function runSeed() {
@@ -38,37 +42,37 @@ function runSeed() {
 }
 
 await runSeed();
-const backend = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
-  cwd: root,
-  env,
-  stdio: 'inherit',
+const backend = createApp({ dataDir, seed: true, env });
+const api = backend.app.listen(apiPort, '127.0.0.1', () => {
+  console.log(`Ritm server ready on port ${apiPort}.`);
 });
-backend.on('error', (error) => console.error(error.message));
 const vite = await createServer({
   configFile: false,
   root,
+  cacheDir: join(dataDir, 'vite-cache'),
   envDir: dataDir,
-  plugins: [react()],
+  plugins: [react(), liveMobilePreview()],
   server: {
     host: '127.0.0.1',
-    port: 5173,
+    port: previewPort,
     strictPort: true,
-    proxy: { '/api': 'http://127.0.0.1:3001' },
+    proxy: { '/api': `http://127.0.0.1:${apiPort}` },
+    fs: { allow: [root, realpathSync(join(root, 'node_modules'))] },
   },
 });
 await vite.listen();
-console.log('Ritm visual preview (isolated demo): http://127.0.0.1:5173/?design-preview=1');
+console.log(
+  `Ritm visual preview (isolated demo): http://127.0.0.1:${previewPort}/?design-preview=1`,
+);
 console.log('No production connection. Close with Ctrl+C.');
 let closing = false;
 async function close() {
   if (closing) return;
   closing = true;
-  backend.kill();
   await vite.close();
+  await new Promise((resolve) => api.close(resolve));
+  await backend.close();
 }
-backend.on('exit', () => {
-  void close();
-});
 process.on('SIGINT', () => {
   void close();
 });

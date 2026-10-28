@@ -1,17 +1,27 @@
-/* Local visual direction: layered violet glass, without changing shell scale or calendar geometry. */
+/* Shared surface materials. Layout, calendar geometry, and data remain in feature styles. */
 :root {
-  --glass-surface: rgba(255, 255, 255, 0.76);
+  --glass-surface: rgba(250, 247, 255, 0.72);
+  --glass-dense: rgba(252, 250, 255, 0.96);
+  --glass-inset: rgba(235, 226, 248, 0.62);
+  --glass-wash: rgba(255, 255, 255, 0.34);
   --glass-raised: rgba(255, 255, 255, 0.9);
   --glass-stroke: rgba(255, 255, 255, 0.85);
   --glass-shadow: 0 18px 54px rgba(62, 35, 107, 0.105), 0 2px 8px rgba(62, 35, 107, 0.035);
   --glass-shadow-hover: 0 23px 64px rgba(62, 35, 107, 0.16), 0 4px 12px rgba(62, 35, 107, 0.05);
+  --glass-nav-active: linear-gradient(145deg, rgba(165, 116, 223, 0.24), rgba(193, 164, 232, 0.14));
+  --glass-nav-edge: rgba(255, 255, 255, 0.64);
 }
 :root[data-theme='dark'] {
-  --glass-surface: rgba(39, 31, 55, 0.79);
+  --glass-surface: rgba(39, 31, 55, 0.76);
+  --glass-dense: rgba(32, 25, 45, 0.97);
+  --glass-inset: rgba(30, 22, 43, 0.7);
+  --glass-wash: rgba(218, 189, 255, 0.045);
   --glass-raised: rgba(48, 38, 66, 0.94);
   --glass-stroke: rgba(216, 188, 255, 0.12);
   --glass-shadow: 0 20px 60px rgba(3, 1, 10, 0.32), 0 2px 9px rgba(3, 1, 10, 0.16);
   --glass-shadow-hover: 0 24px 70px rgba(3, 1, 10, 0.43), 0 4px 12px rgba(3, 1, 10, 0.22);
+  --glass-nav-active: linear-gradient(145deg, rgba(194, 153, 241, 0.28), rgba(128, 92, 177, 0.2));
+  --glass-nav-edge: rgba(229, 205, 255, 0.24);
 }
 .ritm-glass.app-shell {
   background:
@@ -39,53 +49,40 @@
     radial-gradient(ellipse 53% 43% at 87% 7%, rgba(128, 78, 187, 0.23), transparent 75%),
     radial-gradient(ellipse 39% 39% at 13% 84%, rgba(77, 51, 133, 0.23), transparent 77%), #12101b;
 }
-.ritm-glass .sidebar {
-  background:
-    radial-gradient(circle at 8% 0%, rgba(177, 135, 230, 0.2), transparent 43%),
-    linear-gradient(157deg, rgba(37, 27, 57, 0.98), rgba(19, 16, 31, 0.99) 82%);
-  border-right-color: rgba(209, 176, 246, 0.17);
-  box-shadow:
-    inset -1px 0 rgba(233, 209, 255, 0.05),
-    11px 0 38px rgba(30, 17, 48, 0.1);
-}
-.ritm-glass.sidebar-light .sidebar {
-  color: var(--text);
-  background: linear-gradient(160deg, var(--glass-raised), var(--glass-surface));
-  border-right-color: var(--line);
-}
-.ritm-glass.sidebar-light .sidebar-nav > button.is-active {
-  color: var(--accent);
-  background: var(--soft);
-  border-color: var(--line);
-  box-shadow:
-    inset 0 1px var(--glass-stroke),
-    0 7px 20px rgba(79, 46, 118, 0.1);
-}
-.ritm-glass .sidebar-nav > button {
-  border-radius: 14px;
-}
-.ritm-glass .sidebar-nav > button.is-active {
-  background: linear-gradient(115deg, rgba(172, 125, 234, 0.3), rgba(127, 91, 178, 0.14));
-  border-color: rgba(224, 190, 255, 0.27);
-  box-shadow:
-    inset 0 1px rgba(255, 255, 255, 0.12),
-    0 8px 22px rgba(14, 9, 27, 0.16);
-}
-.ritm-glass .profile-button {
-  border-top-color: rgba(224, 190, 255, 0.16);
-}
 .ritm-glass .workspace-top > span {
   letter-spacing: 0.2em;
 }
 .ritm-glass .theme-switch {
-  border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
-  background: var(--glass-surface);
+  border: 1px solid color-mix(in srgb, var(--line) 70%, var(--glass-stroke));
+  border-radius: 999px;
+  background: linear-gradient(150deg, var(--glass-raised), var(--glass-surface));
   box-shadow:
     inset 0 1px var(--glass-stroke),
-    0 4px 15px rgba(88, 56, 130, 0.07);
+    0 6px 20px rgba(88, 56, 130, 0.11);
+  transition:
+    background 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 150ms var(--motion-ease);
+}
+@media (hover: hover) and (pointer: fine) {
+  .ritm-glass .theme-switch:hover {
+    border-color: color-mix(in srgb, var(--accent) 34%, var(--glass-stroke));
+    background: linear-gradient(
+      150deg,
+      var(--glass-raised),
+      color-mix(in srgb, var(--accent) 10%, var(--glass-surface))
+    );
+    box-shadow:
+      inset 0 1px var(--glass-stroke),
+      0 9px 24px rgba(88, 56, 130, 0.15);
+  }
+}
+.ritm-glass .theme-switch:active {
+  transform: scale(0.94);
 }
 .ritm-glass .panel {
-  background: var(--glass-surface);
+  background: linear-gradient(155deg, var(--glass-wash), transparent 65%), var(--glass-surface);
   border-color: color-mix(in srgb, var(--line) 64%, var(--glass-stroke));
   box-shadow:
     inset 0 1px var(--glass-stroke),
@@ -94,37 +91,41 @@
   -webkit-backdrop-filter: blur(16px) saturate(1.15);
   border-radius: 23px;
 }
-.ritm-glass .panel:where(button):hover {
-  box-shadow:
-    inset 0 1px var(--glass-stroke),
-    var(--glass-shadow-hover);
+@media (hover: hover) and (pointer: fine) {
+  .ritm-glass .panel:where(button):hover {
+    box-shadow:
+      inset 0 1px var(--glass-stroke),
+      var(--glass-shadow-hover);
+  }
 }
-.ritm-glass .button,
-.ritm-glass .icon-button {
+:is(.ritm-glass, .dialog) .button,
+:is(.ritm-glass, .dialog) .icon-button {
   border-radius: 13px;
 }
-.ritm-glass .button-primary {
+:is(.ritm-glass, .dialog) .button-primary {
   background: linear-gradient(125deg, #6540ae, #855acc 72%, #9e70d7);
   box-shadow:
     inset 0 1px rgba(255, 255, 255, 0.28),
     0 10px 26px rgba(103, 63, 168, 0.22);
 }
-:root[data-theme='dark'] .ritm-glass .button-primary {
+:root[data-theme='dark'] :is(.ritm-glass, .dialog) .button-primary {
   color: #21162f;
   background: linear-gradient(125deg, #b390e9, #d0aff1);
 }
-.ritm-glass .button-secondary,
-.ritm-glass .icon-button:not(.theme-switch) {
+:is(.ritm-glass, .dialog) .button-secondary,
+:is(.ritm-glass, .dialog) .icon-button:not(.theme-switch) {
   background: var(--glass-raised);
   border-color: color-mix(in srgb, var(--line) 72%, var(--glass-stroke));
   box-shadow: inset 0 1px var(--glass-stroke);
 }
-.ritm-glass .button-secondary:hover:not(:disabled),
-.ritm-glass .icon-button:not(.theme-switch):hover {
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
-  box-shadow:
-    inset 0 1px var(--glass-stroke),
-    0 6px 16px rgba(102, 65, 160, 0.1);
+@media (hover: hover) and (pointer: fine) {
+  :is(.ritm-glass, .dialog) .button-secondary:hover:not(:disabled),
+  :is(.ritm-glass, .dialog) .icon-button:not(.theme-switch):hover {
+    border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+    box-shadow:
+      inset 0 1px var(--glass-stroke),
+      0 6px 16px rgba(102, 65, 160, 0.1);
+  }
 }
 .ritm-glass .page-heading h1 {
   letter-spacing: -0.055em;
@@ -263,39 +264,90 @@
 .ritm-glass .assistant-chat {
   border-radius: 24px;
 }
+.ritm-glass .habits-analytics,
+.ritm-glass .habit-card {
+  background: linear-gradient(155deg, var(--glass-wash), transparent 65%), var(--glass-surface);
+  border-color: color-mix(in srgb, var(--line) 58%, var(--glass-stroke));
+  box-shadow:
+    inset 0 1px var(--glass-stroke),
+    var(--glass-shadow);
+}
+.ritm-glass .habits-kpis > div {
+  margin-left: 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 70%, var(--glass-stroke));
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--glass-raised) 88%, transparent);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.42);
+}
+.ritm-glass .habits-kpis > div:first-child {
+  margin-left: 0;
+  border-left: 1px solid color-mix(in srgb, var(--line) 70%, var(--glass-stroke));
+}
+.ritm-glass .habits-analytics-graphs,
+.ritm-glass .habit-awards {
+  border-color: color-mix(in srgb, var(--line) 82%, var(--glass-stroke));
+}
+.ritm-glass .habits-bars .habits-bar-track {
+  background: color-mix(in srgb, var(--soft) 78%, var(--glass-raised));
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.38);
+}
+.ritm-glass .habits-heat-day,
+.ritm-glass .habit-day,
+.ritm-glass .habit-stepper,
+.ritm-glass .habit-awards span,
+.ritm-glass .habits-empty,
+:is(.ritm-glass, .dialog) .habit-icon-choice,
+:is(.ritm-glass, .dialog) .habit-weekday-choice {
+  background: color-mix(in srgb, var(--glass-raised) 91%, var(--soft));
+  border-color: color-mix(in srgb, var(--line) 70%, var(--glass-stroke));
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.44);
+}
+.ritm-glass .habit-day.is-done,
+.ritm-glass .habits-heat-day.is-some,
+.ritm-glass .habits-heat-day.is-full,
+:is(.ritm-glass, .dialog) .habit-icon-choice.is-selected,
+:is(.ritm-glass, .dialog) .habit-weekday-choice.is-selected,
+.ritm-glass .habit-awards span.is-earned {
+  background: color-mix(in srgb, var(--accent) 19%, var(--glass-raised));
+  border-color: color-mix(in srgb, var(--accent) 68%, var(--glass-stroke));
+  color: var(--accent);
+}
+.ritm-glass .habits-heat-day.is-full {
+  color: var(--accent-ink);
+  background: var(--accent);
+}
+.ritm-glass .habits-segmented button.is-active {
+  background: var(--glass-raised);
+  box-shadow:
+    inset 0 1px var(--glass-stroke),
+    0 4px 12px rgba(65, 42, 104, 0.12);
+}
+.ritm-glass .habits-error {
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--glass-stroke));
+  border-radius: 16px;
+  box-shadow:
+    inset 0 1px var(--glass-stroke),
+    0 8px 22px rgba(72, 27, 43, 0.08);
+}
+.ritm-glass .habits-celebration {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--glass-stroke));
+  border-radius: 18px;
+  background: var(--glass-raised);
+  box-shadow:
+    inset 0 1px var(--glass-stroke),
+    var(--glass-shadow-hover);
+  backdrop-filter: blur(12px) saturate(1.08);
+  -webkit-backdrop-filter: blur(12px) saturate(1.08);
+}
 .ritm-glass .habits-gauge-fill,
 .ritm-glass .habits-bar-fill {
   filter: drop-shadow(0 0 5px rgba(127, 78, 192, 0.16));
-}
-.ritm-glass .habits-bars:not(.is-month) .habits-bar-fill {
-  transform-origin: center bottom;
-  animation: ritm-glass-bar 650ms var(--motion-ease) both;
-}
-.ritm-glass .habits-bar-button:nth-child(2) .habits-bar-fill {
-  animation-delay: 55ms;
-}
-.ritm-glass .habits-bar-button:nth-child(3) .habits-bar-fill {
-  animation-delay: 110ms;
-}
-.ritm-glass .habits-bar-button:nth-child(4) .habits-bar-fill {
-  animation-delay: 165ms;
-}
-.ritm-glass .habits-bar-button:nth-child(5) .habits-bar-fill {
-  animation-delay: 220ms;
-}
-.ritm-glass .habits-bar-button:nth-child(6) .habits-bar-fill {
-  animation-delay: 275ms;
-}
-.ritm-glass .habits-bar-button:nth-child(7) .habits-bar-fill {
-  animation-delay: 330ms;
 }
 .ritm-glass .habits-heat-day.is-full {
   box-shadow:
     inset 0 1px rgba(255, 255, 255, 0.25),
     0 5px 14px rgba(118, 77, 183, 0.14);
 }
-.ritm-glass .habit-card:hover,
-.ritm-glass .finance-summary-tile:hover,
 .ritm-glass .settings-card:focus-within {
   box-shadow:
     inset 0 1px var(--glass-stroke),
@@ -341,7 +393,7 @@
   background: color-mix(in srgb, var(--soft) 74%, transparent);
   box-shadow: inset 0 1px var(--glass-stroke);
 }
-.ritm-glass .dialog {
+.dialog {
   background: var(--glass-raised);
   border-color: var(--glass-stroke);
   box-shadow:
@@ -350,13 +402,99 @@
   backdrop-filter: blur(18px) saturate(1.1);
   -webkit-backdrop-filter: blur(18px) saturate(1.1);
 }
-.ritm-glass .dialog::backdrop {
+.dialog::backdrop {
   background: rgba(25, 14, 45, 0.5);
   backdrop-filter: blur(6px);
 }
-.ritm-glass .dialog-head,
-.ritm-glass .dialog-actions {
+.dialog-head,
+.dialog-actions {
   background: var(--glass-raised);
+}
+/* Dense surfaces keep charts, fields, and long text legible. The surrounding
+   panel carries the glass; nested blocks do not add another blur layer. */
+.ritm-glass
+  :is(
+    .cal-grid-scroll,
+    .cal-calendar-grid,
+    .cal-month-grid,
+    .assistant-chat-scroll,
+    .assistant-message--assistant,
+    .finance-record-list
+  ) {
+  background-color: var(--glass-dense);
+}
+.ritm-glass
+  :is(
+    .panel .panel,
+    .habits-kpis > div,
+    .finance-summary-tile,
+    .assistant-message,
+    .habit-days,
+    .dashboard-habits-scroll
+  ) {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+:is(.ritm-glass, .dialog, .signin-page)
+  :is(input:not([type='checkbox']):not([type='radio']):not([type='range']), textarea, select) {
+  background-color: var(--glass-dense);
+  border-color: color-mix(in srgb, var(--line) 85%, var(--glass-stroke));
+  box-shadow: inset 0 1px var(--glass-wash);
+}
+:is(.ritm-glass, .dialog, .signin-page)
+  :is(
+    input:not([type='checkbox']):not([type='radio']):not([type='range']),
+    textarea,
+    select
+  ):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.ritm-glass :is(.cal-segment, .habits-segmented, .finance-views, .assistant-mode-switch) {
+  background: linear-gradient(155deg, var(--glass-wash), transparent), var(--glass-inset);
+  box-shadow:
+    inset 0 1px var(--glass-stroke),
+    0 3px 10px rgba(62, 35, 107, 0.04);
+}
+.ritm-glass
+  :is(
+    .cal-segment .cal-selected,
+    .habits-segmented .is-active,
+    .finance-views .active,
+    .assistant-mode-switch [aria-pressed='true']
+  ) {
+  background: var(--glass-raised);
+  color: var(--accent);
+  box-shadow:
+    inset 0 1px var(--glass-stroke),
+    0 3px 10px rgba(62, 35, 107, 0.09);
+}
+.ritm-glass
+  :is(
+    .finance-empty,
+    .habits-empty,
+    .assistant-empty,
+    .cal-mobile-agenda,
+    .cal-summary,
+    .cal-backlog
+  ) {
+  background: linear-gradient(155deg, var(--glass-wash), transparent), var(--glass-surface);
+  border-color: color-mix(in srgb, var(--line) 70%, var(--glass-stroke));
+}
+.ritm-glass .theme-switch {
+  backdrop-filter: blur(10px) saturate(1.15);
+  -webkit-backdrop-filter: blur(10px) saturate(1.15);
+}
+.signin-page {
+  background:
+    radial-gradient(ellipse 70% 80% at 95% 0%, var(--glass-inset), transparent 75%), var(--bg);
+}
+.signin-layout {
+  background: linear-gradient(155deg, var(--glass-wash), transparent), var(--glass-surface);
+  border-color: color-mix(in srgb, var(--line) 70%, var(--glass-stroke));
+  box-shadow:
+    inset 0 1px var(--glass-stroke),
+    var(--glass-shadow);
 }
 @keyframes ritm-glass-line {
   from {
@@ -366,14 +504,6 @@
   to {
     stroke-dashoffset: 0;
     opacity: 1;
-  }
-}
-@keyframes ritm-glass-bar {
-  from {
-    transform: scaleY(0.08);
-  }
-  to {
-    transform: scaleY(1);
   }
 }
 @media (max-width: 1000px) and (min-width: 761px) {
@@ -447,16 +577,6 @@
       inset 0 1px var(--glass-stroke),
       0 7px 22px rgba(44, 24, 72, 0.08);
   }
-  .ritm-glass .mobile-nav {
-    background: var(--glass-raised);
-    border-top-color: var(--glass-stroke);
-    box-shadow: 0 -12px 34px rgba(44, 24, 72, 0.14);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-  }
-  .ritm-glass .mobile-nav button {
-    min-height: 44px;
-  }
   .ritm-glass .habits-page {
     max-width: 100%;
   }
@@ -472,35 +592,65 @@
   .ritm-glass .habit-card-bottom .button {
     min-height: 44px;
   }
-  .ritm-glass .dialog {
-    backdrop-filter: blur(9px);
-    -webkit-backdrop-filter: blur(9px);
+  .dialog {
+    background: var(--glass-dense);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .dialog::backdrop,
+  .ritm-glass .habits-celebration {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
   .ritm-glass .cal-calendar-panel {
     border-radius: 20px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ritm-glass .progress-chart polyline,
-  .ritm-glass .habits-bars:not(.is-month) .habits-bar-fill {
+  .ritm-glass .progress-chart polyline {
     animation: none !important;
   }
 }
 @media (prefers-reduced-transparency: reduce) {
+  :root,
+  :root[data-theme='dark'] {
+    --glass-surface: var(--panel);
+    --glass-raised: var(--panel);
+    --glass-dense: var(--field);
+    --glass-inset: var(--soft);
+  }
   .ritm-glass .panel,
-  .ritm-glass .dialog,
-  .ritm-glass .mobile-nav {
-    background: var(--panel);
+  .dialog,
+  .ritm-glass .habits-celebration,
+  .ritm-glass .theme-switch,
+  .dialog::backdrop {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
 }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root,
+  :root[data-theme='dark'] {
+    --glass-surface: var(--panel);
+    --glass-raised: var(--panel);
+    --glass-dense: var(--field);
+  }
+}
 @media (prefers-contrast: more) {
   .ritm-glass .panel,
-  .ritm-glass .dialog {
+  .dialog {
     border-color: var(--text);
   }
   .ritm-glass .progress-chart line {
     stroke: var(--muted);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ritm-glass .habit-card:hover,
+  .ritm-glass .finance-summary-tile:hover {
+    box-shadow:
+      inset 0 1px var(--glass-stroke),
+      var(--glass-shadow-hover);
   }
 }

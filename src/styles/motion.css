@@ -126,6 +126,20 @@
   background: var(--soft);
   border-color: var(--line);
 }
+.motion-v2.ritm-glass .sidebar-nav[data-motion-indicator='true']::before,
+.motion-v2.ritm-glass .mobile-nav[data-motion-indicator='true']::before {
+  background: var(--glass-nav-active, var(--soft));
+  border-color: var(--glass-nav-edge, var(--line));
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.38),
+    0 6px 18px rgba(97, 59, 148, 0.12);
+}
+.motion-v2.ritm-glass .sidebar-nav[data-motion-indicator='true']::before {
+  border-radius: 22px;
+}
+.motion-v2.ritm-glass .mobile-nav[data-motion-indicator='true']::before {
+  border-radius: 16px;
+}
 .motion-v2
   :is(.button, .icon-button, .text-button, .habit-day, .dashboard-habits-cell, .check-target) {
   transition:

@@ -1,4 +1,5 @@
 import { Activity, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import {
   CalendarDays,
   Check,
@@ -7,6 +8,7 @@ import {
   ListChecks,
   LoaderCircle,
   Moon,
+  MoreHorizontal,
   WalletCards,
   Plus,
   RefreshCw,
@@ -41,8 +43,10 @@ import { LoginPage } from './features/LoginPage';
 import { GoogleEventDialog } from './components/GoogleEventDialog';
 import { useGoogleCalendar } from './lib/google-calendar';
 import { EventPreviewDialog } from './features/EventPreviewDialog';
+import { Dialog } from './components/Dialog';
 import './styles/visual-refresh.css';
 import './styles/motion.css';
+import './styles/navigation-glass.css';
 import { MotionControls, MotionPage, MotionPresence } from './components/Motion';
 import {
   calendarOccurrences,
@@ -72,6 +76,26 @@ export default function App() {
   const { language, t: tr, setLanguage } = useI18n();
   const [data, setData] = useState<Bootstrap | null>(null),
     [page, setPage] = useState<Page>(currentPage);
+  const sidebarScroll = useRef<HTMLDivElement>(null);
+  const hasData = Boolean(data);
+  useEffect(() => {
+    const container = sidebarScroll.current;
+    if (!container) return;
+    const revealActive = () => {
+      const active = container.querySelector<HTMLElement>('[aria-current="page"]');
+      if (!active || container.scrollHeight <= container.clientHeight) return;
+      const bounds = container.getBoundingClientRect();
+      const item = active.getBoundingClientRect();
+      const scale = bounds.height / container.offsetHeight || 1;
+      if (item.top < bounds.top + 4 * scale)
+        container.scrollTop -= (bounds.top + 4 * scale - item.top) / scale;
+      else if (item.bottom > bounds.bottom - 4 * scale)
+        container.scrollTop += (item.bottom - bounds.bottom + 4 * scale) / scale;
+    };
+    revealActive();
+    window.addEventListener('resize', revealActive);
+    return () => window.removeEventListener('resize', revealActive);
+  }, [page, hasData]);
   const pageRef = useRef(page);
   const visitedPages = useRef(new Set<Page>());
   const [pageVisit, setPageVisit] = useState<'first' | 'return'>('first');
@@ -107,6 +131,11 @@ export default function App() {
   const [prompt, setPrompt] = useState<string>(),
     [clock, setClock] = useState(() => new Date());
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light');
+  const [previewTheme, setPreviewTheme] = useState<'light' | 'dark' | null>(() => {
+    if (!import.meta.env.DEV) return null;
+    const value = new URLSearchParams(window.location.search).get('previewTheme');
+    return value === 'light' || value === 'dark' ? value : null;
+  });
   const visualPreview =
     import.meta.env.DEV && new URLSearchParams(window.location.search).has('design-preview');
   const calendarTasks = useMemo(
@@ -210,6 +239,11 @@ export default function App() {
   const theme = data?.settings.theme;
   useEffect(() => {
     if (page === 'login-preview') return;
+    if (previewTheme) {
+      document.documentElement.dataset.theme = previewTheme;
+      setResolvedTheme(previewTheme);
+      return;
+    }
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const update = () => {
       let selected = theme;
@@ -236,7 +270,7 @@ export default function App() {
         /* storage may be unavailable */
       }
     return () => media.removeEventListener('change', update);
-  }, [theme, page]);
+  }, [theme, page, previewTheme]);
   useEffect(() => {
     document.title = `${tr(page === 'login-preview' ? tr('Вход') : (navigation.find((n) => n.id === page)?.label ?? tr('Мой день')))} — Ritm`;
   }, [page, tr]);
@@ -593,6 +627,10 @@ export default function App() {
     setMigrationError('');
   };
   const themeToggle = async () => {
+    if (previewTheme) {
+      setPreviewTheme(previewTheme === 'dark' ? 'light' : 'dark');
+      return;
+    }
     if (!data) return;
     try {
       await saveSettings({ ...data.settings, theme: resolvedTheme === 'dark' ? 'light' : 'dark' });
@@ -679,26 +717,35 @@ export default function App() {
         >
           <Brand />
         </button>
-        <nav className="sidebar-nav" aria-label={tr('Основная навигация')}>
-          {navigation.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => go(id)}
-              className={page === id ? 'is-active' : ''}
-              aria-current={page === id ? 'page' : undefined}
-            >
-              <Icon size={18} />
-              <span>{tr(label)}</span>
-              {page === id ? <span className="nav-dot" /> : null}
-            </button>
-          ))}
-        </nav>
+        <div className="sidebar-nav-scroll" ref={sidebarScroll}>
+          <nav className="sidebar-nav" aria-label={tr('Основная навигация')}>
+            {navigation.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => go(id)}
+                className={page === id ? 'is-active' : ''}
+                aria-current={page === id ? 'page' : undefined}
+                data-tooltip={tr(label)}
+                aria-label={tr(label)}
+              >
+                <Icon size={18} />
+                <span>{tr(label)}</span>
+                {page === id ? <span className="nav-dot" /> : null}
+              </button>
+            ))}
+          </nav>
+        </div>
         <div className="sidebar-bottom">
           <div className="sidebar-note">
             <span className="status-dot" />
             {tr('В своём ритме')}{' '}
           </div>
-          <button className="profile-button" onClick={() => go('settings')}>
+          <button
+            className="profile-button"
+            onClick={() => go('settings')}
+            aria-label={`${data.settings.displayName} · ${tr('Настройки')}`}
+            data-tooltip={`${data.settings.displayName} · ${tr('Настройки')}`}
+          >
             <span className="avatar">{data.settings.displayName.slice(0, 1).toUpperCase()}</span>
             <span>
               <strong>{data.settings.displayName}</strong>
@@ -1000,19 +1047,7 @@ export default function App() {
           <span>{tr('Меньше шума. Больше ясности.')}</span>
         </footer>
       </main>
-      <nav className="mobile-nav" aria-label={tr('Основная мобильная навигация')}>
-        {navigation.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => go(id)}
-            className={page === id ? 'is-active' : ''}
-            aria-current={page === id ? 'page' : undefined}
-          >
-            <Icon size={21} />
-            <span>{tr(label)}</span>
-          </button>
-        ))}
-      </nav>
+      <MobileNavigation page={page} onNavigate={go} />
       {taskDialog ? (
         <TaskDialog
           {...taskDialog}
@@ -1089,13 +1124,91 @@ export default function App() {
     </div>
   );
 }
+function MobileNavigation({ page, onNavigate }: { page: Page; onNavigate: (page: Page) => void }) {
+  const { t: tr } = useI18n();
+  const [moreOpen, setMoreOpen] = useState(false);
+  const overflowItems = navigation.filter(({ id }) => id === 'finance' || id === 'settings');
+  const currentOverflow = overflowItems.find(({ id }) => id === page);
+  useEffect(() => {
+    setMoreOpen(false);
+  }, [page]);
+  useEffect(() => {
+    const desktop = window.matchMedia('(min-width: 761px)');
+    const closeOnDesktop = () => {
+      if (desktop.matches) setMoreOpen(false);
+    };
+    desktop.addEventListener('change', closeOnDesktop);
+    return () => desktop.removeEventListener('change', closeOnDesktop);
+  }, []);
+  return (
+    <>
+      <nav className="mobile-nav" aria-label={tr('Основная мобильная навигация')}>
+        {navigation.slice(0, 4).map(({ id, label, icon: Icon }) => (
+          <button
+            type="button"
+            key={id}
+            onClick={() => onNavigate(id)}
+            className={page === id ? 'is-active' : ''}
+            aria-current={page === id ? 'page' : undefined}
+          >
+            <Icon size={21} aria-hidden="true" />
+            <span>{tr(label)}</span>
+          </button>
+        ))}
+        <button
+          type="button"
+          className={currentOverflow ? 'is-active' : ''}
+          aria-haspopup="dialog"
+          aria-expanded={moreOpen}
+          aria-label={
+            currentOverflow
+              ? tr('Ещё разделы. Сейчас открыт: {section}', { section: tr(currentOverflow.label) })
+              : tr('Ещё разделы')
+          }
+          onClick={() => setMoreOpen(true)}
+        >
+          <MoreHorizontal size={21} aria-hidden="true" />
+          <span>{tr(currentOverflow?.label ?? 'Ещё')}</span>
+        </button>
+      </nav>
+      {moreOpen ? (
+        <Dialog
+          title={tr('Ещё разделы')}
+          className="navigation-more-dialog"
+          onClose={() => setMoreOpen(false)}
+        >
+          <div className="navigation-more-items">
+            {overflowItems.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className={page === id ? 'is-active' : ''}
+                aria-current={page === id ? 'page' : undefined}
+                onClick={() => {
+                  // Restore the dialog's locked viewport before go() resets the new page scroll.
+                  flushSync(() => setMoreOpen(false));
+                  onNavigate(id);
+                }}
+              >
+                <Icon size={22} aria-hidden="true" />
+                <span>{tr(label)}</span>
+                {page === id ? <Check size={18} aria-hidden="true" /> : null}
+              </button>
+            ))}
+          </div>
+        </Dialog>
+      ) : null}
+    </>
+  );
+}
+
 function Brand() {
   return (
     <span className="brand">
       <span className="brand-mark" aria-hidden="true">
-        <img src="/ritm-mark.svg" width="36" height="36" alt="" />
+        <img src="/ritm-mark.svg" width="36" height="36" alt="" draggable={false} />
       </span>
-      Ritm
+      <span className="brand-name">Ritm</span>
     </span>
   );
 }

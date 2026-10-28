@@ -1,0 +1,408 @@
+/* Navigation owns its geometry; page and calendar scale stay unchanged. */
+.ritm-glass {
+  --nav-width: 72px;
+  --nav-offset: 12px;
+  --nav-gap: 16px;
+  --nav-control: 48px;
+  --nav-icon: 21px;
+  --nav-surface: linear-gradient(150deg, rgba(255, 252, 255, 0.82), rgba(225, 211, 244, 0.65));
+  --nav-ink: #645275;
+  --nav-active-ink: #643b96;
+  --nav-edge: rgba(255, 255, 255, 0.76);
+}
+:root[data-theme='dark'] .ritm-glass {
+  --nav-surface: linear-gradient(150deg, rgba(59, 45, 81, 0.85), rgba(31, 24, 45, 0.76));
+  --nav-ink: #c1b3d4;
+  --nav-active-ink: #e2caff;
+  --nav-edge: rgba(229, 211, 252, 0.3);
+}
+.ritm-glass.sidebar-dark .sidebar {
+  --nav-surface: linear-gradient(150deg, rgba(59, 45, 81, 0.85), rgba(31, 24, 45, 0.79));
+  --nav-ink: #c1b3d4;
+  --nav-active-ink: #e2caff;
+  --nav-edge: rgba(229, 211, 252, 0.3);
+}
+.ritm-glass .sidebar {
+  position: fixed;
+  inset: 50% auto auto var(--nav-offset);
+  z-index: 30;
+  width: var(--nav-width);
+  height: auto;
+  max-height: calc(100dvh - 24px);
+  padding: 12px 6px;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  color: var(--nav-ink);
+  background: var(--nav-surface);
+  border: 1px solid var(--nav-edge);
+  border-radius: 999px;
+  box-shadow:
+    inset 1px 1px rgba(255, 255, 255, 0.24),
+    inset -1px -1px rgba(191, 154, 234, 0.14),
+    0 14px 38px rgba(47, 26, 76, 0.16);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+}
+.ritm-glass .sidebar .brand-button {
+  display: grid;
+  place-items: center;
+  width: var(--nav-control);
+  min-height: var(--nav-control);
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.ritm-glass .sidebar-nav-scroll {
+  min-height: 0;
+}
+.ritm-glass .sidebar .brand {
+  gap: 0;
+}
+.ritm-glass .sidebar .brand-name,
+.ritm-glass .sidebar .nav-dot,
+.ritm-glass .sidebar-note {
+  display: none;
+}
+.ritm-glass .sidebar-nav {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  overflow: visible;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.ritm-glass .sidebar-nav > button {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: var(--nav-control);
+  height: var(--nav-control);
+  min-height: var(--nav-control);
+  padding: 0;
+  margin: 0 auto;
+  gap: 0;
+  border: 1px solid transparent;
+  border-radius: 18px;
+  color: var(--nav-ink);
+  background: transparent;
+  box-shadow: none;
+}
+.ritm-glass .sidebar-nav > button > svg {
+  width: var(--nav-icon);
+  height: var(--nav-icon);
+}
+.ritm-glass .sidebar-nav > button > span,
+.ritm-glass .profile-button > span:nth-child(2),
+.ritm-glass .profile-button > svg {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.ritm-glass .sidebar-nav > button.is-active,
+.ritm-glass.sidebar-light .sidebar-nav > button.is-active {
+  color: var(--nav-active-ink);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.ritm-glass .sidebar-bottom {
+  position: relative;
+  margin-top: 8px;
+  padding-top: 12px;
+  flex-shrink: 0;
+}
+.ritm-glass .sidebar-bottom::before {
+  content: '';
+  position: absolute;
+  inset: 0 8px auto;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--nav-edge) 25%,
+    var(--nav-edge) 75%,
+    transparent
+  );
+}
+.ritm-glass .sidebar .profile-button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--nav-control);
+  height: var(--nav-control);
+  margin: 0 auto;
+  padding: 0;
+  gap: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--nav-ink);
+  background: transparent;
+}
+.ritm-glass .sidebar .avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+}
+.ritm-glass .main-content {
+  margin-left: calc(var(--nav-offset) + var(--nav-width) + var(--nav-gap));
+}
+.ritm-glass .skip-link {
+  left: calc(var(--nav-offset) + var(--nav-width) + var(--nav-gap));
+}
+.ritm-glass .sidebar-nav > button[data-tooltip]::after,
+.ritm-glass .profile-button[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 55;
+  top: 50%;
+  left: calc(100% + 16px);
+  width: max-content;
+  max-width: 240px;
+  padding: 9px 12px;
+  border: 1px solid var(--glass-stroke);
+  border-radius: 12px;
+  background: var(--glass-raised);
+  color: var(--text);
+  box-shadow: var(--glass-shadow);
+  font-size: 13px;
+  line-height: 1.4;
+  font-weight: 500;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-3px, -50%);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+.ritm-glass .sidebar-nav > button:focus-visible::after,
+.ritm-glass .profile-button:focus-visible::after {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+.ritm-glass
+  :is(.sidebar-nav > button, .profile-button, .brand-button, .mobile-nav > button):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.ritm-glass :is(.sidebar-nav > button, .profile-button, .brand-button, .mobile-nav > button) {
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  transition:
+    color 150ms ease,
+    scale 120ms var(--motion-ease);
+}
+.ritm-glass
+  :is(.sidebar-nav > button, .profile-button, .brand-button, .mobile-nav > button):active {
+  scale: 0.95;
+}
+.ritm-glass :is(.sidebar-nav, .mobile-nav)[data-motion-indicator='true']::before {
+  z-index: 0;
+  border: 1px solid var(--glass-nav-edge);
+  border-radius: 18px;
+  background: var(--glass-nav-active);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.35),
+    inset 0 -1px rgba(154, 113, 207, 0.12),
+    0 4px 12px rgba(85, 48, 134, 0.12);
+}
+@media (hover: hover) and (pointer: fine) {
+  .ritm-glass .sidebar-nav > button:hover,
+  .ritm-glass .profile-button:hover {
+    color: var(--nav-active-ink);
+    background: transparent;
+  }
+  .ritm-glass .sidebar-nav > button:hover::after,
+  .ritm-glass .profile-button:hover::after {
+    opacity: 1;
+    transform: translate(0, -50%);
+  }
+}
+/* Match the existing 80% desktop page scale without changing that scale. */
+@media (min-width: 1200px) {
+  .ritm-glass {
+    --nav-width: 90px;
+    --nav-offset: 15px;
+    --nav-gap: 20px;
+    --nav-control: 60px;
+    --nav-icon: 26px;
+  }
+  .ritm-glass .sidebar {
+    padding: 15px 8px;
+    max-height: calc(125dvh - 30px);
+  }
+  .ritm-glass .sidebar .brand-mark {
+    width: 44px;
+    height: 44px;
+  }
+  .ritm-glass .sidebar .avatar {
+    width: 42px;
+    height: 42px;
+  }
+}
+@media (max-width: 760px) {
+  .ritm-glass .sidebar {
+    display: none;
+  }
+  .ritm-glass .main-content {
+    margin-left: 0;
+    padding-bottom: calc(100px + env(safe-area-inset-bottom));
+  }
+  .ritm-glass .mobile-nav {
+    position: fixed;
+    z-index: 45;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0;
+    inset: auto 8px calc(8px + env(safe-area-inset-bottom));
+    width: auto;
+    padding: 6px;
+    isolation: isolate;
+    border: 1px solid var(--nav-edge);
+    border-radius: 999px;
+    color: var(--nav-ink);
+    background: var(--nav-surface);
+    box-shadow:
+      inset 1px 1px rgba(255, 255, 255, 0.26),
+      inset -1px -1px rgba(191, 154, 234, 0.12),
+      0 12px 30px rgba(44, 24, 72, 0.2);
+    backdrop-filter: blur(10px) saturate(1.12);
+    -webkit-backdrop-filter: blur(10px) saturate(1.12);
+  }
+  .ritm-glass .mobile-nav > button {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-rows: 22px 22px;
+    gap: 3px;
+    justify-items: center;
+    align-content: center;
+    min-width: 44px;
+    min-height: 60px;
+    margin: 0;
+    padding: 4px 1px;
+    border: 0;
+    border-radius: 14px;
+    background: transparent;
+    color: var(--nav-ink);
+    font-size: 10px;
+    letter-spacing: 0;
+  }
+  .ritm-glass .mobile-nav > button > span {
+    display: grid;
+    align-items: center;
+    justify-items: center;
+    width: 100%;
+    min-height: 22px;
+    max-width: none;
+    line-height: 11px;
+    white-space: normal;
+    text-align: center;
+    text-wrap: balance;
+    overflow-wrap: normal;
+  }
+  .ritm-glass .mobile-nav > button.is-active {
+    color: var(--nav-active-ink);
+    background: transparent;
+  }
+  .ritm-glass .mobile-nav[data-motion-indicator='true']::before {
+    border-radius: 14px;
+  }
+  .ritm-glass .skip-link {
+    left: 12px;
+  }
+}
+/* The brand and profile stay visible on short windows; only the section list scrolls. */
+@media (min-width: 761px) and (max-height: 600px) {
+  .ritm-glass .sidebar-nav-scroll {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    padding-block: 4px;
+    scroll-padding-block: 4px;
+    scrollbar-width: none;
+  }
+  .ritm-glass .sidebar-nav-scroll::-webkit-scrollbar {
+    display: none;
+  }
+  .ritm-glass .sidebar-nav > button[data-tooltip]::after {
+    position: fixed;
+    left: calc(100% + 16px);
+    top: 50%;
+  }
+}
+.navigation-more-dialog {
+  width: min(420px, calc(100vw - 32px));
+}
+.navigation-more-dialog .dialog-head .page-eyebrow {
+  display: none;
+}
+.navigation-more-items {
+  display: grid;
+  gap: 10px;
+  padding: 4px 20px 24px;
+}
+.navigation-more-items > button {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 56px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  color: var(--text);
+  background: var(--soft);
+  text-align: left;
+  touch-action: manipulation;
+}
+.navigation-more-items > button > span {
+  flex: 1;
+}
+.navigation-more-items > button.is-active {
+  background: var(--glass-nav-active);
+  border-color: var(--accent);
+}
+.navigation-more-items > button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .ritm-glass :is(.sidebar, .mobile-nav) {
+    background: var(--panel);
+  }
+  .ritm-glass.sidebar-dark .sidebar {
+    background: #241c33;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .ritm-glass :is(.sidebar, .mobile-nav) {
+    background: var(--panel);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .ritm-glass.sidebar-dark .sidebar {
+    background: #241c33;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ritm-glass :is(.sidebar-nav, .mobile-nav)::before,
+  .ritm-glass :is(.sidebar-nav > button, .mobile-nav > button, .profile-button, .brand-button),
+  .ritm-glass [data-tooltip]::after {
+    transition: none;
+  }
+}

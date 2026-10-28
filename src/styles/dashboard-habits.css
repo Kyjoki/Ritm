@@ -214,6 +214,7 @@
   .dashboard-habits-actions {
     width: 100%;
     justify-content: flex-start;
+    flex-wrap: wrap;
   }
   .dashboard-habits-all {
     margin-left: auto;
