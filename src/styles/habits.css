@@ -143,7 +143,7 @@
 }
 .habits-gauge-value span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 .habits-kpis {
   display: grid;
@@ -159,7 +159,7 @@
 }
 .habits-kpis span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 .habits-kpis strong {
   margin-top: 10px;
@@ -244,7 +244,7 @@
   outline-offset: 2px;
 }
 .habits-bar-label {
-  font-size: 12px;
+  font-size: 10px;
 }
 .habits-heatmap {
   display: grid;
@@ -260,7 +260,7 @@
   border-radius: 7px;
   background: var(--field);
   color: var(--muted);
-  font-size: 12px;
+  font-size: 10px;
   cursor: pointer;
   transition:
     background 180ms ease,
@@ -293,7 +293,7 @@
   gap: 5px;
   margin-top: 10px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 10px;
 }
 .habits-heat-legend i {
   width: 11px;
@@ -329,7 +329,7 @@
   gap: 7px;
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 .habits-insights svg {
   color: var(--accent);
@@ -388,7 +388,7 @@
   display: block;
   margin-top: 4px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 .habit-card-actions {
   display: flex;
@@ -404,7 +404,7 @@
   gap: 7px 20px;
   margin: 13px 0 4px 55px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 .habit-card-meta span {
   display: inline-flex;
@@ -459,7 +459,7 @@
 }
 .habit-day > span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 10px;
 }
 .habit-day strong {
   font-size: 14px;
@@ -521,7 +521,7 @@
 }
 .habit-today-copy span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 .habit-today-copy strong {
   font-size: 12px;
@@ -604,7 +604,7 @@
   background: var(--field);
   border: 1px solid var(--line);
   color: var(--muted);
-  font-size: 12px;
+  font-size: 10px;
 }
 .habit-awards span.is-earned {
   background: var(--soft);
@@ -668,7 +668,7 @@
 }
 .habit-weekday-choice {
   width: 44px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
 }
 .habit-icon-choice.is-selected,
@@ -680,7 +680,7 @@
 .habit-form-hint {
   margin-top: 7px;
   color: var(--danger);
-  font-size: 12px;
+  font-size: 11px;
 }
 .habit-form-goal {
   display: grid;
@@ -818,7 +818,7 @@
     font-size: 22px;
   }
   .habits-kpis span {
-    font-size: 12px;
+    font-size: 10px;
   }
   .habits-insights {
     display: grid;
@@ -848,7 +848,7 @@
   }
   .habits-list-heading .button {
     padding: 8px 10px;
-    font-size: 12px;
+    font-size: 11px;
   }
 }
 @media (max-width: 380px) {

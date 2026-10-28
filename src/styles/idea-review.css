@@ -86,7 +86,7 @@
   flex-wrap: wrap;
 }
 .idea-review-round {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
 }
 .idea-review-revision {
@@ -119,7 +119,7 @@
 }
 .idea-review-discussion-actions p {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 .idea-review-verdict {
   display: inline-block;
@@ -257,7 +257,7 @@
   border: 1px solid var(--line);
 }
 .idea-review .idea-review-method {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
   margin-top: 12px;
 }

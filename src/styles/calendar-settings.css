@@ -79,7 +79,7 @@
   padding: 0 0 16px;
 }
 .cal-timezone {
-  font-size: 12px;
+  font-size: 9px;
   line-height: 1.5;
   color: var(--muted);
   overflow: hidden;
@@ -136,7 +136,7 @@
 }
 .cal-hour-labels {
   display: grid;
-  font-size: 12px;
+  font-size: 10px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -242,7 +242,7 @@
   border-radius: 8px;
   background: color-mix(in srgb, var(--accent) 18%, var(--panel));
   color: var(--text);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   padding: 4px;
   pointer-events: none;
@@ -282,7 +282,7 @@
   font-size: 12px;
 }
 .cal-drag-ghost span {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
 }
 .cal-drag-saving {
@@ -330,7 +330,7 @@
   background: var(--panel);
   color: var(--accent);
   box-shadow: 0 5px 20px rgb(36 20 58 / 0.2);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   pointer-events: none;
 }
@@ -351,7 +351,7 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.3;
 }
@@ -359,7 +359,7 @@
   flex: none;
   display: block;
   margin-top: 3px;
-  font-size: 12px;
+  font-size: 9px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -381,7 +381,7 @@
 }
 .cal-compact-event span {
   margin-top: 3px;
-  font-size: 12px;
+  font-size: 8px;
 }
 .cal-grid-event.cal-completed {
   opacity: 1;
@@ -396,7 +396,7 @@
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
   margin-top: 18px;
 }
@@ -421,7 +421,7 @@
   gap: 3px;
   padding: 11px 0;
   border-bottom: 1px solid var(--line);
-  font-size: 12px;
+  font-size: 10px;
   color: var(--muted);
 }
 .cal-all-day > span {
@@ -442,7 +442,7 @@
   padding: 6px;
   color: var(--calendar-event-text, var(--accent));
   font: inherit;
-  font-size: 12px;
+  font-size: 10px;
   text-align: left;
   cursor: pointer;
 }
@@ -476,7 +476,7 @@
   color: var(--accent);
 }
 .cal-section-head > span {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
 }
 .cal-summary p,
@@ -492,7 +492,7 @@
 }
 .cal-summary small,
 .cal-backlog small {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--muted);
   line-height: 1.5;
 }
@@ -571,7 +571,7 @@
   cursor: pointer;
 }
 .cal-month-day small {
-  font-size: 12px;
+  font-size: 9px;
   white-space: nowrap;
   color: var(--muted);
   overflow: hidden;
@@ -592,7 +592,7 @@
   padding: 5px;
   color: var(--calendar-event-text, var(--accent));
   font: inherit;
-  font-size: 12px;
+  font-size: 9px;
   line-height: 1.35;
   text-align: left;
   overflow: hidden;
@@ -601,7 +601,7 @@
   cursor: pointer;
 }
 .cal-month-more {
-  font-size: 12px;
+  font-size: 9px;
   color: var(--muted);
   padding-left: 4px;
 }
@@ -672,7 +672,7 @@
 .cal-agenda-copy > span {
   display: block;
   color: var(--calendar-event-text, var(--muted));
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1.6;
   margin-top: 3px;
 }
@@ -778,7 +778,7 @@
 .settings-profile span {
   display: block;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   margin-top: 3px;
 }
 .settings-field {
@@ -802,7 +802,7 @@
   color: var(--text);
 }
 .settings-hint {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--muted);
   line-height: 1.6;
   font-weight: 400;
@@ -842,7 +842,7 @@
   justify-content: center;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: 10px;
   padding: 9px 0 4px;
 }
 .settings-theme-option > span:last-child svg:last-child {
@@ -906,7 +906,7 @@
 }
 .settings-switch-row small {
   display: block;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 400;
   color: var(--muted);
   margin-top: 5px;
@@ -960,7 +960,7 @@
   border-radius: 12px;
   padding: 14px;
   margin-top: 22px;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.6;
 }
 .settings-quiet-note svg {
@@ -1118,7 +1118,7 @@
   align-items: center;
   gap: 5px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1.5;
   margin-top: 5px;
 }
@@ -1141,7 +1141,7 @@
 .settings-connection-copy > small {
   display: block;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 10px;
   margin-top: 4px;
 }
 .settings-connection-actions {
@@ -1151,7 +1151,7 @@
 }
 .settings-coming {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 10px;
   border: 1px solid var(--line);
   border-radius: 20px;
   padding: 6px 10px;
@@ -1161,7 +1161,7 @@
   border: 0;
   color: var(--muted);
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
   padding: 10px 0;
   cursor: pointer;
   text-decoration: underline;
@@ -1300,7 +1300,7 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1.6;
   color: var(--muted);
   background: var(--soft);
@@ -1382,13 +1382,13 @@
     font-size: 12px;
   }
   .cal-grid-event span {
-    font-size: 12px;
+    font-size: 10px;
   }
   .cal-month-cell {
     min-height: 137px;
   }
   .cal-month-event {
-    font-size: 12px;
+    font-size: 11px;
   }
 }
 @media (max-width: 1050px) {
@@ -1406,7 +1406,7 @@
     padding: 22px;
   }
   .settings-theme-option > span:last-child {
-    font-size: 12px;
+    font-size: 9px;
   }
   .settings-connection-actions {
     gap: 9px;
@@ -1505,7 +1505,7 @@
     min-height: 61px;
   }
   .cal-weekday {
-    font-size: 12px;
+    font-size: 10px;
     padding-bottom: 7px;
   }
   .cal-month-day > span {
@@ -1532,7 +1532,7 @@
     gap: 8px;
   }
   .settings-theme-option > span:last-child {
-    font-size: 12px;
+    font-size: 11px;
     padding: 10px 0 6px;
   }
   .settings-theme-preview {
@@ -1565,7 +1565,7 @@
     gap: 0;
   }
   .settings-connection-actions .button {
-    font-size: 12px;
+    font-size: 11px;
     padding: 10px;
     min-height: 44px;
   }
@@ -1589,7 +1589,7 @@
   .settings-save-status {
     max-width: 100%;
     min-height: 24px;
-    font-size: 12px;
+    font-size: 11px;
   }
   .settings-save-actions {
     display: flex;
@@ -1737,7 +1737,7 @@
   gap: 5px;
   margin: -3px 0 16px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 .cal-create-destination > span {
   margin-right: 6px;
@@ -1788,12 +1788,12 @@
   color: var(--text);
 }
 .cal-google-status-copy > span {
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
 .cal-google-updated {
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1.5;
   color: var(--muted);
 }
@@ -1809,7 +1809,7 @@
 }
 .cal-google-status-actions .button {
   min-height: 36px;
-  font-size: 12px;
+  font-size: 11px;
   padding: 8px 11px;
 }
 .cal-google-settings {
@@ -1822,7 +1822,7 @@
   color: var(--accent);
   border: 0;
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   cursor: pointer;
 }
@@ -1845,7 +1845,7 @@
   margin-right: 4px;
   border: 1px solid currentColor;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 8px;
   font-weight: 600;
   vertical-align: middle;
   flex: none;
@@ -1927,12 +1927,12 @@
     gap: 3px;
   }
   .cal-mobile-week .cal-period h2 {
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1.4;
     text-wrap: balance;
   }
   .cal-mobile-week .cal-today {
-    font-size: 12px;
+    font-size: 11px;
     padding: 8px;
     margin-left: 0;
   }
@@ -1969,13 +1969,13 @@
     display: none;
   }
   .cal-mobile-week .cal-google-status-copy strong {
-    font-size: 12px;
+    font-size: 10px;
   }
   .cal-mobile-week .cal-google-status:not(.cal-google-status-warning) .cal-google-status-actions {
     margin: 0;
   }
   .cal-mobile-week .cal-google-status-actions .button {
-    font-size: 12px;
+    font-size: 10px;
     padding: 5px 7px;
     min-height: 44px;
   }
@@ -1992,7 +1992,7 @@
     gap: 4px;
   }
   .cal-mobile-week .cal-day-heading span {
-    font-size: 12px;
+    font-size: 10px;
   }
   .cal-mobile-week .cal-day-heading strong {
     font-size: 18px;
@@ -2002,7 +2002,7 @@
     height: 28px;
   }
   .cal-mobile-week .cal-timezone {
-    font-size: 12px;
+    font-size: 10px;
   }
   .cal-mobile-week .cal-grid-scroll {
     height: clamp(288px, calc(100dvh - 277px - env(safe-area-inset-bottom)), 960px);
@@ -2014,7 +2014,7 @@
     height: clamp(288px, calc(100dvh - 309px - env(safe-area-inset-bottom)), 960px);
   }
   .cal-mobile-week .cal-hour-labels {
-    font-size: 12px;
+    font-size: 10px;
   }
   .cal-mobile-week .cal-grid-event {
     padding: 4px 2px;
@@ -2023,7 +2023,7 @@
   }
   .cal-mobile-week .cal-grid-event strong {
     display: block;
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1.35;
     white-space: nowrap;
     overflow-wrap: normal;
@@ -2035,7 +2035,7 @@
   }
   .cal-mobile-week .cal-event-time {
     display: block;
-    font-size: 12px;
+    font-size: 11px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -2044,14 +2044,14 @@
     overflow-y: auto;
   }
   .cal-mobile-week .cal-all-day-event {
-    font-size: 12px;
+    font-size: 10px;
     padding: 3px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
   .cal-mobile-week .cal-all-day > span {
-    font-size: 12px;
+    font-size: 10px;
   }
   .cal-mobile-week .cal-calendar-foot {
     display: none;
@@ -2086,7 +2086,7 @@
   border-radius: 8px;
   background: var(--soft);
   color: var(--accent);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
 }
 .cal-overlap-day-button:hover {
@@ -2334,7 +2334,7 @@
   gap: 0;
 }
 .cal-page .cal-day-heading span {
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.1;
 }
 .cal-page .cal-day-heading strong {
@@ -2346,7 +2346,7 @@
   height: 29px;
 }
 .cal-page .cal-timezone {
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1.2;
 }
 .cal-page .cal-grid-scroll {
@@ -2355,7 +2355,7 @@
   max-height: none;
 }
 .cal-page .cal-hour-labels {
-  font-size: 12px;
+  font-size: 11px;
 }
 .cal-page .cal-grid-event strong {
   font-size: 14px;
@@ -2363,7 +2363,7 @@
   overflow-wrap: anywhere;
 }
 .cal-page .cal-grid-event .cal-event-time {
-  font-size: 12px;
+  font-size: 11px;
 }
 .cal-page .cal-grid-event.cal-tiny-event {
   padding: 2px 5px;
@@ -2378,7 +2378,7 @@
 .cal-page .cal-calendar-foot {
   flex: none;
   margin-top: 7px;
-  font-size: 12px;
+  font-size: 10px;
 }
 .cal-page .cal-month-panel,
 .cal-page .cal-mobile-agenda {
@@ -2552,11 +2552,11 @@
     max-height: none;
   }
   .cal-page .cal-grid-event strong {
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1.3;
   }
   .cal-page .cal-grid-event .cal-event-time {
-    font-size: 12px;
+    font-size: 10px;
   }
   .cal-page .cal-day-heading {
     min-height: 43px;
@@ -2564,7 +2564,7 @@
   .cal-page .cal-day-heading span,
   .cal-page .cal-timezone,
   .cal-page .cal-hour-labels {
-    font-size: 12px;
+    font-size: 10px;
   }
   .cal-page .cal-day-heading strong {
     font-size: 17px;

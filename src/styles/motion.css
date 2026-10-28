@@ -200,7 +200,7 @@
   background: var(--panel);
   color: var(--text);
   box-shadow: var(--shadow);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.4;
   transition:
     opacity 160ms ease,

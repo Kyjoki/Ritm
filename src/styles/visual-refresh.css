@@ -31,7 +31,7 @@
   background: var(--glass-raised);
   color: var(--muted);
   box-shadow: var(--glass-shadow);
-  font-size: 12px;
+  font-size: 11px;
   pointer-events: none;
 }
 :root[data-theme='dark'] .ritm-glass.app-shell {
@@ -215,7 +215,7 @@
   justify-content: space-between;
   margin-top: 1px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 9px;
   letter-spacing: 0.03em;
 }
 .ritm-glass .progress-card .card-footnote {
@@ -389,7 +389,7 @@
   .visual-preview-badge {
     bottom: calc(82px + env(safe-area-inset-bottom));
     right: 12px;
-    font-size: 12px;
+    font-size: 10px;
   }
   .ritm-glass .main-content {
     padding-inline: 16px;

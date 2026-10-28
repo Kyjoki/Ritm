@@ -63,7 +63,7 @@
   margin: 11px 0 0;
   padding-left: 20px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.7;
 }
 .google-setup-help li {
@@ -91,14 +91,14 @@
 .google-setup-copy-row input {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: 11px;
 }
 .google-setup-copy-row .button {
   flex: none;
   min-height: 44px;
 }
 .google-setup-copy-notice {
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.5;
   color: var(--accent);
 }
@@ -135,7 +135,7 @@
 }
 .google-setup-remove-confirm p {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.7;
   margin: 8px 0 14px;
 }
@@ -176,7 +176,7 @@
   margin: 12px 0;
   display: grid;
   gap: 8px;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.6;
 }
 .google-setup-permissions li {
@@ -191,12 +191,12 @@
 }
 .google-setup-permissions p {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1.7;
   margin-bottom: 10px;
 }
 .google-setup-permissions > a {
-  font-size: 12px;
+  font-size: 11px;
 }
 .google-setup-footer {
   display: flex;
