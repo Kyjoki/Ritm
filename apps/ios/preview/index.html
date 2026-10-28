@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ritm · Все экраны iPhone</title>
+    <link rel="stylesheet" href="/preview.css" />
+    <script type="module" src="/preview.js"></script>
+  </head>
+  <body>
+    <main class="review-workspace">
+      <aside class="review-brief">
+        <div class="review-eyebrow"><span></span> RITM · IPHONE PREVIEW</div>
+        <h1>Ваш ритм.<br /><span>В ваших руках.</span></h1>
+        <p class="review-lead">
+          Все шесть разделов в интерактивном макете. Посмотрите экраны, откройте формы и отметьте,
+          что хочется изменить.
+        </p>
+        <div class="review-control-label">Оформление</div>
+        <div class="review-theme" aria-label="Тема макета">
+          <button type="button" data-theme="light" aria-pressed="true">Светлая</button>
+          <button type="button" data-theme="dark" aria-pressed="false">Тёмная</button>
+        </div>
+        <div class="review-controls">
+          <label
+            >Размер экрана<select id="device-size">
+              <option value="390x844">iPhone 13 · 390 × 844</option>
+              <option value="375x812">Компактный · 375 × 812</option>
+              <option value="430x932">Большой · 430 × 932</option>
+            </select></label
+          >
+        </div>
+        <nav class="review-sections" aria-label="Все экраны макета" id="section-shortcuts"></nav>
+        <div class="review-note">
+          <strong>Макет для обсуждения дизайна</strong>
+          <p>
+            HTML-представление экранов по текущим исходникам SwiftUI. Это не запуск iOS: системные
+            формы, жесты и материалы на телефоне могут отличаться.
+          </p>
+          <p>
+            Данные вымышленные. Действия остаются в макете; Google, ИИ и Telegram не подключаются.
+          </p>
+        </div>
+        <button type="button" id="reset-demo" class="review-reset">
+          Сбросить демонстрационные изменения ↻
+        </button>
+        <p class="review-hint">
+          Напиши название раздела и что поправить — изменения внесём и в приложение.
+        </p>
+      </aside>
+      <section class="device-stage" aria-label="Интерактивный макет iPhone">
+        <div class="device-frame" id="device-frame">
+          <div class="device-notch" aria-hidden="true"></div>
+          <div class="phone-screen" id="phone" data-theme="light">
+            <div class="phone-status" aria-hidden="true">
+              <strong>9:41</strong><span>▮▮▮ ◉ ▰</span>
+            </div>
+            <header class="phone-header">
+              <div class="brand"><span class="brand-mark">✦</span><strong>Ritm</strong></div>
+              <button
+                type="button"
+                class="icon-button"
+                id="phone-theme"
+                aria-label="Переключить тему"
+              ></button>
+            </header>
+            <div class="phone-scroll" id="page-scroll"><div id="page-content"></div></div>
+            <nav
+              class="phone-navigation"
+              id="phone-navigation"
+              aria-label="Навигация приложения"
+            ></nav>
+            <div class="home-indicator" aria-hidden="true"></div>
+            <div class="preview-toast" id="toast" role="status" hidden></div>
+            <div class="modal-layer" id="modal-layer" hidden>
+              <section
+                class="preview-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="modal-title"
+              >
+                <div class="modal-grabber" aria-hidden="true"></div>
+                <header>
+                  <h2 id="modal-title"></h2>
+                  <button
+                    class="icon-button"
+                    type="button"
+                    id="modal-close"
+                    aria-label="Закрыть окно"
+                  >
+                    ×
+                  </button>
+                </header>
+                <form id="modal-form">
+                  <div id="modal-body"></div>
+                  <footer id="modal-footer"></footer>
+                </form>
+              </section>
+            </div>
+          </div>
+        </div>
+        <p class="device-caption" id="device-caption">
+          iPhone 13 · 390 × 844 · интерактивный HTML-макет
+        </p>
+      </section>
+    </main>
+    <style id="feature-styles"></style>
+  </body>
+</html>

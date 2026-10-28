@@ -1,0 +1,5 @@
+version: 1
+bundleID: app.ritm.personal
+product: Ritm
+infoPath: Info.plist
+iconPath: Resources/AppIcon.png

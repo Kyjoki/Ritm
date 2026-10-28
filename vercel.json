@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": { "deploymentEnabled": { "codex/ritm-native-ios": false } },
   "framework": "vite",
   "buildCommand": "npm run build",
   "installCommand": "npm ci",

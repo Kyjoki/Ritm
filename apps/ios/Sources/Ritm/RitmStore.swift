@@ -1,0 +1,449 @@
+import Foundation
+import Observation
+import RitmCore
+
+/// UI state only. The existing Ritm server remains authoritative.
+@MainActor @Observable
+final class RitmStore {
+  private(set) var isSignedIn = false
+  private(set) var isLoading = false
+  private(set) var isMutating = false
+  var errorMessage: String?
+  private(set) var bootstrap: Bootstrap?
+  private(set) var habits: [Habit] = []
+  private(set) var todayEvents: [GoogleCalendarEvent] = []
+  private(set) var calendarStatusText = ""
+  private(set) var calendarReady = false
+  private(set) var calendarPartial = false
+  private(set) var lastSyncedAt: Date?
+  private(set) var isOffline = false
+  private(set) var uncertainWrite = false
+  private(set) var now = Date()
+
+  @ObservationIgnored private let client: APIClient?
+  @ObservationIgnored private let vault = SessionVault()
+  @ObservationIgnored private let notifications = LocalNotifications()
+  @ObservationIgnored private var started = false
+  @ObservationIgnored private var active = true
+  @ObservationIgnored private var refreshing = false
+  @ObservationIgnored private var refreshRequested = false
+  @ObservationIgnored private var generation = 0
+  @ObservationIgnored private var pollTask: Task<Void, Never>?
+  @ObservationIgnored private var nextAllowedRead = Date.distantPast
+  @ObservationIgnored private var connectionErrorShown = false
+
+  init() { client = try? APIClient() }
+
+  var language: Language {
+    bootstrap?.settings.language
+      ?? (Locale.preferredLanguages.first?.hasPrefix("ru") == true ? .ru : .en)
+  }
+  var timeZone: String { bootstrap?.settings.timeZone ?? "Asia/Qyzylorda" }
+  var today: String { HabitSchedule.dateKey(now, timeZone: timeZone) }
+  var todayLabel: String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: language == .ru ? "ru_RU" : "en_US")
+    formatter.timeZone = TimeZone(identifier: timeZone)
+    formatter.setLocalizedDateFormatFromTemplate("EEEE d MMMM")
+    return formatter.string(from: now)
+  }
+  func text(_ ru: String, _ en: String) -> String { language == .ru ? ru : en }
+
+  func requestNotificationPermission() async -> Bool {
+    let allowed = await notifications.requestPermission()
+    if !allowed {
+      errorMessage = text(
+        "Разрешите уведомления Ritm в настройках iPhone.",
+        "Allow Ritm notifications in iPhone Settings.")
+    }
+    return allowed
+  }
+
+  func updateLocalNotifications() async {
+    let ticket = generation
+    guard isSignedIn, let snapshot = bootstrap,
+      let credential = await client?.sessionCredential(), ticket == generation
+    else {
+      if !isSignedIn { notifications.clear() }
+      return
+    }
+    await notifications.update(snapshot: snapshot, until: credential.expires, now: Date())
+  }
+
+  /// Apply the acknowledged preferences before reconciliation. In particular,
+  /// a failed follow-up read must not reschedule reminders just switched off.
+  func saveSettings(_ value: AccountSettings) async -> AccountSettings? {
+    await write { client in
+      let saved = try await client.saveSettings(value)
+      self.bootstrap?.settings = saved
+      if !saved.notifications { self.notifications.clear() }
+      await client.setLanguage(saved.language)
+      return saved
+    }
+  }
+
+  var canWrite: Bool {
+    isSignedIn && !isLoading && !isMutating && !isOffline && !uncertainWrite
+      && Date() >= nextAllowedRead
+  }
+
+  /// Every feature shares the same session and invalidation boundary. A response
+  /// from before logout or a mutation must never repopulate a feature's state.
+  func read<Value: Sendable>(_ operation: @MainActor (APIClient) async throws -> Value) async
+    -> Value?
+  {
+    guard isSignedIn, active, !isMutating, Date() >= nextAllowedRead, let client else { return nil }
+    let ticket = generation
+    do {
+      let value = try await operation(client)
+      guard ticket == generation, isSignedIn, !Task.isCancelled else { return nil }
+      return value
+    } catch {
+      guard ticket == generation, !Task.isCancelled else { return nil }
+      await present(error)
+      return nil
+    }
+  }
+
+  @discardableResult
+  func performMutation(_ operation: @MainActor (APIClient) async throws -> Void) async -> Bool {
+    await write { client in
+      try await operation(client)
+      return true
+    } == true
+  }
+
+  func isScheduledToday(_ habit: Habit) -> Bool { HabitSchedule.isScheduled(habit, on: today) }
+  func isCompletedToday(_ habit: Habit) -> Bool { HabitSchedule.isComplete(habit, on: today) }
+  func habitProgressText(_ habit: Habit) -> String {
+    if let target = habit.target, target > 1 {
+      return "\(HabitSchedule.progress(habit, on: today))/\(target) \(habit.unit ?? "")"
+    }
+    return isCompletedToday(habit)
+      ? text("Выполнено", "Completed") : text("На сегодня", "For today")
+  }
+  func eventTimeText(_ event: GoogleCalendarEvent) -> String {
+    if event.allDay { return text("Весь день", "All day") }
+    guard let start = parseISO(event.start.dateTime), let end = parseISO(event.end.dateTime) else {
+      return text("Смотрите время в календаре", "See time in Calendar")
+    }
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone(identifier: timeZone)
+    formatter.dateFormat = "h:mm a"
+    return "\(formatter.string(from: start)) – \(formatter.string(from: end))"
+  }
+
+  func start() async {
+    guard !started, let client else { return }
+    started = true
+    isLoading = true
+    defer {
+      isLoading = false
+      schedulePolling()
+    }
+    do {
+      if let credential = try vault.load() { try await client.restoreCredential(credential) }
+      let session = try await client.session()
+      guard session.authenticated else {
+        await clearAccount()
+        return
+      }
+      isSignedIn = true
+      await refresh()
+    } catch {
+      await present(error)
+    }
+  }
+
+  func signIn(login: String, password: String) async {
+    guard !isMutating, !isLoading, let client else { return }
+    let login = login.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !login.isEmpty, !password.isEmpty else {
+      errorMessage = text("Введите логин и пароль.", "Enter your login and password.")
+      return
+    }
+    isMutating = true
+    errorMessage = nil
+    generation += 1
+    do {
+      await client.setLanguage(language)
+      let session = try await client.login(login: login, password: password)
+      guard session.authenticated, session.requiresLogin,
+        let credential = await client.sessionCredential()
+      else {
+        await clearAccount()
+        errorMessage = text(
+          "Сервер не подтвердил защищённую сессию.", "The server did not confirm a secure session.")
+        isMutating = false
+        return
+      }
+      try vault.save(credential)
+      isSignedIn = true
+      isOffline = false
+      nextAllowedRead = .distantPast
+    } catch {
+      await client.clearCredential()
+      try? vault.delete()
+      await present(error)
+    }
+    isMutating = false
+    if isSignedIn {
+      await refresh()
+      schedulePolling()
+    }
+  }
+
+  func refresh() async { await loadSnapshot() }
+
+  private func loadSnapshot(afterWrite: Bool = false) async {
+    guard isSignedIn, active, !isMutating || afterWrite,
+      Date() >= nextAllowedRead, let client
+    else { return }
+    if refreshing {
+      refreshRequested = true
+      return
+    }
+    refreshRequested = false
+    refreshing = true
+    let ticket = generation
+    if bootstrap == nil { isLoading = true }
+    defer {
+      refreshing = false
+      isLoading = false
+      if refreshRequested, active, isSignedIn, !isMutating {
+        refreshRequested = false
+        Task { await refresh() }
+      }
+    }
+    do {
+      // Keep authenticated reads ordered: a 401 must not be hidden by a sibling
+      // request cancelled when APIClient clears its credential generation.
+      let freshAccount = try await client.bootstrap()
+      guard ticket == generation, isSignedIn, !Task.isCancelled else { return }
+      let freshHabits = try await client.habits()
+      guard ticket == generation, isSignedIn, !Task.isCancelled else { return }
+      bootstrap = freshAccount
+      habits = freshHabits
+      now = Date()
+      isOffline = false
+      if connectionErrorShown {
+        errorMessage = nil
+        connectionErrorShown = false
+      }
+      lastSyncedAt = now
+      await client.setLanguage(freshAccount.settings.language)
+      await refreshCalendar(ticket: ticket)
+      if ticket == generation, isSignedIn, let credential = await client.sessionCredential() {
+        await notifications.update(snapshot: freshAccount, until: credential.expires, now: now)
+      }
+    } catch {
+      guard ticket == generation, !Task.isCancelled else { return }
+      await present(error)
+    }
+  }
+
+  func toggleHabit(_ habit: Habit) async {
+    now = Date()
+    guard let current = habits.first(where: { $0.id == habit.id }),
+      current.archived != true, isScheduledToday(current)
+    else { return }
+    let date = today
+    let completed = !isCompletedToday(current)
+    _ = await mutate { client in
+      _ = try await client.setHabitDay(
+        id: current.id, date: date, completed: completed, expectedUpdatedAt: current.updatedAt)
+    }
+  }
+
+  private func mutate(_ operation: @MainActor (APIClient) async throws -> Void) async -> Bool {
+    await performMutation(operation)
+  }
+
+  /// Mutations are serialized, confirmed by the API, and never automatically
+  /// retried. Views retain their draft until this method returns a value.
+  func write<Value: Sendable>(_ operation: @MainActor (APIClient) async throws -> Value) async
+    -> Value?
+  {
+    guard isSignedIn, !isMutating, !isOffline, !uncertainWrite,
+      Date() >= nextAllowedRead, let client
+    else { return nil }
+    now = Date()
+    generation += 1  // A read started before this write cannot overwrite newer UI state.
+    let ticket = generation
+    isMutating = true
+    errorMessage = nil
+    var result: Value?
+    do { result = try await operation(client) } catch {
+      guard ticket == generation else {
+        isMutating = false
+        return nil
+      }
+      await present(error)
+      let failure = error as? APIError
+      if isSignedIn && (failure == nil || failure?.status == 0 || (failure?.status ?? 0) >= 500) {
+        uncertainWrite = true
+        connectionErrorShown = false
+        errorMessage = text(
+          "Ответ на изменение не получен. Оно могло сохраниться. Проверьте список перед повтором.",
+          "The change was not confirmed. It may have been saved. Check the list before trying again."
+        )
+      }
+    }
+    // Writes are never retried automatically: an interrupted response may have committed.
+    // Reconcile before allowing the next action, without optimistic/persisted fake success.
+    if isSignedIn {
+      while refreshing {
+        do { try await Task.sleep(for: .milliseconds(40)) } catch {
+          isMutating = false
+          return nil
+        }
+      }
+      await loadSnapshot(afterWrite: true)
+    }
+    isMutating = false
+    return ticket == generation && isSignedIn && !Task.isCancelled ? result : nil
+  }
+
+  func acknowledgeUncertainWrite() {
+    uncertainWrite = false
+    errorMessage = nil
+  }
+
+  func signOut() async {
+    guard !isMutating, let client else { return }
+    isMutating = true
+    generation += 1
+    pollTask?.cancel()
+    var revokeFailed = false
+    do { try await client.logout() } catch { revokeFailed = true }
+    await clearAccount()
+    isMutating = false
+    if revokeFailed {
+      errorMessage = text(
+        "Вы вышли на этом iPhone. Отзыв сессии на сервере не подтверждён; она истечёт автоматически.",
+        "Signed out on this iPhone. Server revocation was not confirmed; the session will expire automatically."
+      )
+    }
+  }
+
+  func setActive(_ value: Bool) {
+    active = value
+    pollTask?.cancel()
+    if value {
+      now = Date()
+      schedulePolling()
+      Task { await refresh() }
+    }
+  }
+
+  private func schedulePolling() {
+    pollTask?.cancel()
+    guard isSignedIn, active else { return }
+    pollTask = Task { [weak self] in
+      while !Task.isCancelled {
+        do { try await Task.sleep(for: .seconds(30)) } catch { return }
+        guard !Task.isCancelled else { return }
+        await self?.refresh()
+      }
+    }
+  }
+
+  private func refreshCalendar(ticket: Int) async {
+    guard let client else { return }
+    do {
+      let status = try await client.googleStatus()
+      guard ticket == generation, isSignedIn, !Task.isCancelled else { return }
+      guard status.status == .connected else {
+        todayEvents = []
+        calendarReady = false
+        calendarPartial = false
+        calendarStatusText = text(
+          "Подключите Google Calendar в веб-версии Ritm.",
+          "Connect Google Calendar in Ritm on the web.")
+        return
+      }
+      let result = try await client.googleEvents(
+        from: today, to: HabitSchedule.addDays(to: today, days: 1) ?? today, timeZone: timeZone)
+      guard ticket == generation, isSignedIn, !Task.isCancelled else { return }
+      todayEvents = result.events.sorted {
+        ($0.start.dateTime ?? $0.start.date ?? "") < ($1.start.dateTime ?? $1.start.date ?? "")
+      }
+      calendarReady = true
+      calendarPartial = result.partial
+      calendarStatusText =
+        result.partial
+        ? text("Google вернул часть расписания.", "Google returned a partial schedule.")
+        : text("Google Calendar · синхронизировано", "Google Calendar · synced")
+    } catch {
+      guard ticket == generation, !Task.isCancelled else { return }
+      calendarReady = false
+      calendarStatusText = text(
+        "Не удалось обновить расписание. Показаны последние полученные события.",
+        "Could not refresh the schedule. Showing the last received events.")
+      if let failure = error as? APIError, failure.status == 401 { await present(error) }
+    }
+  }
+
+  private func present(_ error: Error) async {
+    if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+    if let failure = error as? APIError {
+      if failure.requiresAuthentication {
+        await clearAccount()
+        errorMessage = text(
+          "Сессия завершилась. Войдите снова.", "Your session has expired. Sign in again.")
+        return
+      }
+      if failure.code == "NETWORK" {
+        isOffline = true
+        connectionErrorShown = true
+      }
+      if let delay = failure.retryAfterSeconds {
+        nextAllowedRead = Date().addingTimeInterval(Double(delay))
+      }
+      errorMessage =
+        failure.code == "NETWORK"
+        ? text(
+          "Нет связи. Проверьте данные после восстановления соединения перед повтором действия.",
+          "Connection unavailable. Check your data after reconnecting before repeating an action.")
+        : failure.message
+    } else if error is URLError {
+      isOffline = true
+      connectionErrorShown = true
+      errorMessage = text(
+        "Нет связи. Изменения не отправлены повторно. Обновите данные перед следующим действием.",
+        "Connection unavailable. Changes were not retried. Refresh before making another change.")
+    } else {
+      errorMessage = text(
+        "Не удалось завершить действие. Попробуйте обновить данные.",
+        "Could not complete the action. Try refreshing your data.")
+    }
+  }
+
+  private func clearAccount() async {
+    generation += 1
+    pollTask?.cancel()
+    isSignedIn = false
+    bootstrap = nil
+    habits = []
+    todayEvents = []
+    calendarStatusText = ""
+    calendarReady = false
+    calendarPartial = false
+    lastSyncedAt = nil
+    isOffline = false
+    uncertainWrite = false
+    refreshRequested = false
+    connectionErrorShown = false
+    try? vault.delete()
+    notifications.clear()
+    await client?.clearCredential()
+  }
+
+  private func parseISO(_ value: String?) -> Date? {
+    guard let value else { return nil }
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+  }
+}
