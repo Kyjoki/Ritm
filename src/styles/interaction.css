@@ -101,8 +101,9 @@ summary {
     scale var(--dur-base) var(--ease-spring);
 }
 /* Pressing is quick; releasing springs back. */
-button:active:not(:disabled),
+button:active:not(:disabled, .cal-draggable-event, .cal-grid-event, .cal-all-day-event),
 .button:active:not(:disabled),
+.icon-button:active:not(:disabled),
 [role='button']:active {
   transform: scale(0.96);
   transition-duration: var(--dur-press);
@@ -255,12 +256,6 @@ textarea:disabled {
 }
 .field {
   font-size: 13px;
-}
-.field:focus-within {
-  color: var(--accent);
-}
-.field:focus-within :is(input, textarea, select) {
-  color: var(--text);
 }
 .field-hint {
   font-size: 12px;

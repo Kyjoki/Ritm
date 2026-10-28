@@ -28,7 +28,7 @@ function beat(element: Element, strong = false) {
     style.getPropertyValue('--beat-color').trim() || style.getPropertyValue('--accent').trim();
   element.animate(
     [
-      { outline: `2px solid ${color}`, outlineOffset: '0px', opacity: 1 },
+      { outline: `2px solid ${color}`, outlineOffset: '0px' },
       { outline: `2px solid transparent`, outlineOffset: strong ? '9px' : '6px' },
     ],
     { duration: strong ? 620 : 460, easing: BEAT_EASE, composite: 'replace' },
@@ -69,6 +69,7 @@ export function InteractionLayer() {
     const feedback = new Map<HTMLElement, Feedback>();
     const timers = new Map<HTMLElement, number>();
     const forcedPosition = new WeakSet<HTMLElement>();
+    const pressLabels = new WeakMap<HTMLElement, string | null>();
     let lastErrorAt = -Infinity;
 
     const paint = (button: HTMLElement, value: Feedback) => {
@@ -128,7 +129,10 @@ export function InteractionLayer() {
     const onClick = (event: MouseEvent) => {
       const target = event.target as Element;
       const button = target.closest<HTMLButtonElement>('button');
-      if (button && !button.disabled) dispatch(button, { type: 'press', at: performance.now() });
+      if (button && !button.disabled) {
+        pressLabels.set(button, button.textContent);
+        dispatch(button, { type: 'press', at: performance.now() });
+      }
       const toggle = target.closest(TOGGLE);
       if (toggle)
         requestAnimationFrame(() =>
@@ -162,25 +166,28 @@ export function InteractionLayer() {
       el instanceof HTMLTextAreaElement ||
       el instanceof HTMLSelectElement;
 
+    const drop = (button: HTMLElement) => {
+      feedback.delete(button);
+      companions.delete(button);
+      window.clearTimeout(timers.get(button));
+      paint(button, idle);
+    };
+    /** A self-disabling button is only "working" if something shows it: companions
+     *  disabled with it, a changed label («Сохраняем…») or a spinner inside. Otherwise
+     *  it is a plain state change, e.g. «next period» reaching the current week. */
+    const looksBusy = (button: HTMLButtonElement, partners: Set<Element>) =>
+      partners.size > 0 ||
+      button.textContent !== pressLabels.get(button) ||
+      Boolean(button.querySelector('.spinning, [class*="spinner"]'));
+
     const observer = new MutationObserver((records) => {
       const now = performance.now();
-      const disabledNow: Element[] = [];
+      // Pass 1: errors first, so an error rendered after the button in DOM order
+      // still turns the outcome into "error" rather than a false success.
       for (const record of records) {
         const target = record.target as HTMLElement;
         if (record.type === 'attributes') {
-          if (record.attributeName === 'disabled' && isControl(target)) {
-            if (target.disabled) {
-              disabledNow.push(target);
-              if (target instanceof HTMLButtonElement)
-                dispatch(target, { type: 'disabled', at: now });
-            } else {
-              if (target instanceof HTMLButtonElement && feedback.get(target)?.state === 'loading')
-                finish(target, now);
-              for (const [button, set] of companions)
-                if (set.has(target) && feedback.get(button)?.state === 'loading')
-                  finish(button, now);
-            }
-          } else if (
+          if (
             record.attributeName === 'aria-invalid' &&
             target.getAttribute('aria-invalid') === 'true'
           ) {
@@ -189,44 +196,53 @@ export function InteractionLayer() {
           }
           continue;
         }
-        for (const node of record.addedNodes) {
-          if (!(node instanceof Element)) continue;
-          if (node.matches(ERROR_SIGNAL) || node.querySelector(ERROR_SIGNAL)) lastErrorAt = now;
-          // A result toast also closes any request whose button stays disabled.
-          const toast = node.matches('.toast') ? node : node.querySelector('.toast');
-          if (toast)
-            for (const [button, state] of feedback)
-              if (state.state === 'loading') finish(button, now);
-        }
-        for (const node of record.removedNodes) {
-          if (node instanceof HTMLElement) {
-            for (const button of feedback.keys())
-              if (!button.isConnected) {
-                feedback.delete(button);
-                companions.delete(button);
-                window.clearTimeout(timers.get(button));
-              }
-          }
-        }
+        for (const node of record.addedNodes)
+          if (
+            node instanceof Element &&
+            (node.matches(ERROR_SIGNAL) || node.querySelector(ERROR_SIGNAL))
+          )
+            lastErrorAt = now;
+        if (record.removedNodes.length)
+          for (const button of feedback.keys()) if (!button.isConnected) drop(button);
       }
-      for (const [button, state] of feedback) {
-        if (state.state !== 'loading' || state.since !== now || companions.has(button)) continue;
-        const scope = button.closest('form, dialog, .panel') ?? button.parentElement;
-        companions.set(
-          button,
-          new Set(disabledNow.filter((el) => el !== button && scope?.contains(el))),
-        );
+      // Pass 2: disabled / enabled transitions.
+      const disabledNow: Element[] = [];
+      const disabledButtons: HTMLButtonElement[] = [];
+      for (const record of records) {
+        const target = record.target as HTMLElement;
+        if (
+          record.type !== 'attributes' ||
+          record.attributeName !== 'disabled' ||
+          !isControl(target)
+        )
+          continue;
+        if (target.disabled) {
+          disabledNow.push(target);
+          if (target instanceof HTMLButtonElement && feedback.get(target)?.state === 'armed')
+            disabledButtons.push(target);
+          continue;
+        }
+        if (target instanceof HTMLButtonElement && feedback.get(target)?.state === 'loading')
+          finish(target, now);
+        for (const [button, set] of companions)
+          if (set.has(target) && feedback.get(button)?.state === 'loading') finish(button, now);
+      }
+      for (const button of disabledButtons) {
+        const scope = button.closest('form, dialog') ?? button.parentElement;
+        const partners = new Set(disabledNow.filter((el) => el !== button && scope?.contains(el)));
+        if (!looksBusy(button, partners)) {
+          drop(button);
+          continue;
+        }
+        dispatch(button, { type: 'disabled', at: now });
+        if (feedback.get(button)?.state === 'loading') companions.set(button, partners);
       }
     });
     // Safety net: a request that never reports back must not leave a spinner behind.
     const watchdog = window.setInterval(() => {
       const now = performance.now();
       for (const [button, state] of feedback)
-        if (state.state === 'loading' && now - state.since > 15000) {
-          companions.delete(button);
-          feedback.delete(button);
-          paint(button, idle);
-        }
+        if (state.state === 'loading' && now - state.since > 15000) drop(button);
     }, 2000);
     observer.observe(document.body, {
       subtree: true,

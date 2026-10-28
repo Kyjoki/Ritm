@@ -40,21 +40,54 @@ import './styles/visual-refresh.css';
 import './styles/motion.css';
 import { MotionControls, MotionPage, MotionPresence } from './components/Motion';
 // Heavy sections load on first visit; «Мой день» stays in the main bundle.
+// A failed chunk (offline, or a stale file after a deploy) is retried once, then the
+// page reloads once to pick up the new build instead of showing the global error.
+function loadSection<T>(load: () => Promise<T>) {
+  return () =>
+    load()
+      .then((module) => {
+        sessionStorage.removeItem('ritm-chunk-reload');
+        return module;
+      })
+      .catch(
+        () =>
+          new Promise<T>((resolve, reject) =>
+            window.setTimeout(() => {
+              load().then(resolve, (error) => {
+                if (!sessionStorage.getItem('ritm-chunk-reload')) {
+                  sessionStorage.setItem('ritm-chunk-reload', '1');
+                  window.location.reload();
+                }
+                reject(error);
+              });
+            }, 600),
+          ),
+      );
+}
+const sectionImports = {
+  calendar: loadSection(() => import('./features/CalendarPage')),
+  settings: loadSection(() => import('./features/SettingsPage')),
+  assistant: loadSection(() => import('./features/AssistantPage')),
+  finance: loadSection(() => import('./features/FinancePage')),
+  habits: loadSection(() => import('./features/HabitsPage')),
+};
 const CalendarPage = lazy(() =>
-  import('./features/CalendarPage').then((m) => ({ default: m.CalendarPage })),
+  sectionImports.calendar().then((m) => ({ default: m.CalendarPage })),
 );
 const SettingsPage = lazy(() =>
-  import('./features/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+  sectionImports.settings().then((m) => ({ default: m.SettingsPage })),
 );
 const AssistantPage = lazy(() =>
-  import('./features/AssistantPage').then((m) => ({ default: m.AssistantPage })),
+  sectionImports.assistant().then((m) => ({ default: m.AssistantPage })),
 );
-const FinancePage = lazy(() =>
-  import('./features/FinancePage').then((m) => ({ default: m.FinancePage })),
-);
-const HabitsPage = lazy(() =>
-  import('./features/HabitsPage').then((m) => ({ default: m.HabitsPage })),
-);
+const FinancePage = lazy(() => sectionImports.finance().then((m) => ({ default: m.FinancePage })));
+const HabitsPage = lazy(() => sectionImports.habits().then((m) => ({ default: m.HabitsPage })));
+/** Warm the section chunks once the first screen is idle, so navigation rarely waits. */
+function preloadSections() {
+  const run = () => Object.values(sectionImports).forEach((load) => void load().catch(() => {}));
+  if ('requestIdleCallback' in window) window.requestIdleCallback(run, { timeout: 4000 });
+  else setTimeout(run, 2000);
+}
 function PageFallback() {
   return (
     <div className="page-fallback" role="status" aria-busy="true">
@@ -176,6 +209,10 @@ export default function App() {
   useEffect(() => {
     if (data) setLanguage(data.settings.language);
   }, [data?.settings.language, setLanguage]);
+  const signedIn = Boolean(data);
+  useEffect(() => {
+    if (signedIn) preloadSections();
+  }, [signedIn]);
   useEffect(() => {
     void load();
     return () => {
