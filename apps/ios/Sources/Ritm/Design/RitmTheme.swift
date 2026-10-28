@@ -1,120 +1,474 @@
 import SwiftUI
+import UIKit
 
-/// The same four-point silhouette as public/ritm-mark.svg, rendered natively.
+// Design tokens from src/styles/tokens.css, visual-refresh.css and navigation-glass.css as they
+// resolve at a 390 px viewport. Each colour is a light/dark pair resolved from the trait
+// collection, so it follows both the device appearance and the account theme that
+// RitmRootView applies with preferredColorScheme. Tokens are computed properties so they stay
+// free of shared mutable state under Swift 6 strict concurrency.
 
-/// A single entrance per retained view. Data updates and tab returns do not replay it.
-enum RitmTheme {
-  static let lavender = Color(red: 0.67, green: 0.50, blue: 0.91)
-  static let ink = Color(red: 0.16, green: 0.10, blue: 0.25)
-
-  static func accent(_ scheme: ColorScheme) -> Color {
-    scheme == .dark
-      ? Color(red: 0.78, green: 0.66, blue: 0.98)
-      : Color(red: 0.42, green: 0.24, blue: 0.67)
-  }
-
-  static func surface(_ scheme: ColorScheme) -> Color {
-    scheme == .dark
-      ? Color(red: 0.15, green: 0.12, blue: 0.21)
-      : Color(red: 0.98, green: 0.96, blue: 1)
+extension UIColor {
+  convenience init(rgb: UInt32, alpha: Double = 1) {
+    self.init(
+      red: CGFloat((rgb >> 16) & 0xFF) / 255, green: CGFloat((rgb >> 8) & 0xFF) / 255,
+      blue: CGFloat(rgb & 0xFF) / 255, alpha: CGFloat(alpha))
   }
 }
+
+extension Color {
+  init(rgb: UInt32, opacity: Double = 1) {
+    self.init(uiColor: UIColor(rgb: rgb, alpha: opacity))
+  }
+
+  init(light: UInt32, dark: UInt32, lightOpacity: Double = 1, darkOpacity: Double = 1) {
+    self.init(
+      uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+          ? UIColor(rgb: dark, alpha: darkOpacity) : UIColor(rgb: light, alpha: lightOpacity)
+      })
+  }
+}
+
+enum RitmTheme {
+  static var background: Color { Color(light: 0xF7F5FB, dark: 0x12101B) }
+  static var panel: Color { Color(light: 0xFFFFFF, dark: 0x1D172A) }
+  static var text: Color { Color(light: 0x29223B, dark: 0xF1EBFB) }
+  static var muted: Color { Color(light: 0x706577, dark: 0xAAA0BA) }
+  static var line: Color { Color(light: 0xE8E2F0, dark: 0x352B45) }
+  static var accentColor: Color { Color(light: 0x7651BC, dark: 0xB99CEB) }
+  static var accentInk: Color { Color(light: 0xFFFFFF, dark: 0x271938) }
+  static var soft: Color { Color(light: 0xF0EAF9, dark: 0x30253E) }
+  static var field: Color { Color(light: 0xFFFFFF, dark: 0x211A2F) }
+  static var ringTrack: Color { Color(light: 0xECE5F3, dark: 0x382B47) }
+  static var danger: Color { Color(light: 0xB53654, dark: 0xF59AAF) }
+  static var dangerSoft: Color { Color(light: 0xFFF0F3, dark: 0x3B202F) }
+  static var success: Color { Color(light: 0x7651BC, dark: 0xC3A7EC) }
+  /// `color-mix(in srgb, var(--line) 64%, var(--glass-stroke))` as the browser computes it.
+  static var panelBorder: Color {
+    Color(light: 0xEFEBF5, dark: 0x3F3451, lightOpacity: 0.946, darkOpacity: 0.683)
+  }
+  static var glassRaised: Color {
+    Color(light: 0xFFFFFF, dark: 0x302642, lightOpacity: 0.9, darkOpacity: 0.94)
+  }
+  static var glassDense: Color {
+    Color(light: 0xFCFAFF, dark: 0x20192D, lightOpacity: 0.96, darkOpacity: 0.97)
+  }
+  /// `0 7px 22px rgba(44, 24, 72, .08)` in both themes.
+  static var panelShadow: Color { Color(rgb: 0x2C1848, opacity: 0.08) }
+
+  // Names kept from the first native draft; they now resolve to the web tokens.
+  static var lavender: Color { accentColor }
+  static var ink: Color { accentInk }
+  static func accent(_ scheme: ColorScheme) -> Color { accentColor }
+  static func surface(_ scheme: ColorScheme) -> Color { panel }
+
+  /// Start and end points of a CSS `linear-gradient(<angle>deg, …)` in a unit box.
+  static func points(cssAngle degrees: Double) -> (start: UnitPoint, end: UnitPoint) {
+    let radians = degrees * .pi / 180
+    let dx = sin(radians) / 2
+    let dy = -cos(radians) / 2
+    return (UnitPoint(x: 0.5 - dx, y: 0.5 - dy), UnitPoint(x: 0.5 + dx, y: 0.5 + dy))
+  }
+
+  static func linear(_ stops: [Gradient.Stop], cssAngle: Double) -> LinearGradient {
+    let direction = points(cssAngle: cssAngle)
+    return LinearGradient(stops: stops, startPoint: direction.start, endPoint: direction.end)
+  }
+
+  /// `--title-gradient`, 110°.
+  static var titleGradient: LinearGradient {
+    linear(
+      [
+        .init(color: Color(light: 0x4C2B78, dark: 0xF1E5FF), location: 0),
+        .init(color: Color(light: 0x8250BA, dark: 0xB999E2), location: 0.65),
+        .init(color: Color(light: 0x7E66A9, dark: 0xC1AFE5), location: 1),
+      ], cssAngle: 110)
+  }
+
+  /// Primary call to action, 125°. The dark theme has two stops on the web; the middle
+  /// stop here is their blend at 72 %, so both themes share one gradient shape.
+  static var ctaGradient: LinearGradient {
+    linear(
+      [
+        .init(color: Color(light: 0x6540AE, dark: 0xB390E9), location: 0),
+        .init(color: Color(light: 0x855ACC, dark: 0xC8A6EF), location: 0.72),
+        .init(color: Color(light: 0x9E70D7, dark: 0xD0AFF1), location: 1),
+      ], cssAngle: 125)
+  }
+  static var ctaInk: Color { Color(light: 0xFFFFFF, dark: 0x21162F) }
+  static var ctaShadow: Color { Color(rgb: 0x673FA8, opacity: 0.22) }
+
+  /// The 155° panel sheen that lights the top-left of every card.
+  static var panelSheen: LinearGradient {
+    linear(
+      [
+        .init(
+          color: Color(light: 0xFFFFFF, dark: 0xDABDFF, lightOpacity: 0.34, darkOpacity: 0.045),
+          location: 0),
+        .init(color: .clear, location: 0.65),
+      ], cssAngle: 155)
+  }
+
+  /// Hero cards («Ближайшее событие», finance balance): 139° deep violet.
+  static var heroGradient: LinearGradient {
+    linear(
+      [
+        .init(color: Color(rgb: 0x44306B), location: 0),
+        .init(color: Color(rgb: 0x6B49A0), location: 0.64),
+        .init(color: Color(rgb: 0x8A65B7), location: 1),
+      ], cssAngle: 139)
+  }
+}
+
+enum RitmMotion {
+  /// `cubic-bezier(.22, 1, .36, 1)`, the easing used by every web transition.
+  static func ease(_ duration: Double) -> Animation {
+    .timingCurve(0.22, 1, 0.36, 1, duration: duration)
+  }
+  static var press: Animation { ease(0.12) }
+  static var indicator: Animation { ease(0.24) }
+  static var dialogIn: Animation { ease(0.24) }
+  static var dialogOut: Animation { .easeIn(duration: 0.18) }
+}
+
+// MARK: - Typography
+
+/// Text roles with the web sizes at 390 px. Sizes scale with Dynamic Type through
+/// UIFontMetrics, so 27 pt stays 27 pt at the default size, as on the web.
+enum RitmTextRole {
+  case pageTitle, eyebrow, pageDescription, cardTitle, cardCaption, body, message, button,
+    navLabel, brand, footer, sectionTitle, value
+
+  var size: CGFloat {
+    switch self {
+    case .pageTitle: 27
+    case .pageDescription: 11
+    case .eyebrow, .cardCaption, .navLabel: 10
+    case .cardTitle: 15
+    case .body, .button: 12
+    case .message: 13
+    case .brand, .sectionTitle: 22
+    case .footer: 9
+    case .value: 25
+    }
+  }
+
+  var weight: Font.Weight {
+    switch self {
+    case .pageTitle, .cardTitle, .button, .sectionTitle, .value: .semibold
+    // `font-weight: 650` renders with Inter's 700 face.
+    case .eyebrow, .brand: .bold
+    case .cardCaption, .navLabel: .medium
+    case .pageDescription, .body, .message, .footer: .regular
+    }
+  }
+
+  /// Letter spacing in em.
+  var tracking: CGFloat {
+    switch self {
+    case .pageTitle: -0.055
+    case .eyebrow: 0.065
+    case .cardTitle: -0.025
+    case .brand: -0.06
+    case .sectionTitle, .value: -0.03
+    default: 0
+    }
+  }
+
+  /// Extra space between lines, from the CSS line-height minus the font's own leading.
+  var lineSpacing: CGFloat {
+    switch self {
+    case .pageDescription: 3
+    case .message: 7
+    case .body: 3
+    default: 0
+    }
+  }
+
+  var textStyle: UIFont.TextStyle {
+    switch self {
+    case .pageTitle, .sectionTitle, .brand, .value: .title2
+    case .cardTitle: .headline
+    case .eyebrow, .cardCaption, .navLabel, .footer: .caption2
+    case .pageDescription: .caption1
+    case .body, .message, .button: .subheadline
+    }
+  }
+}
+
+private struct RitmTextModifier: ViewModifier {
+  let role: RitmTextRole
+  @Environment(\.dynamicTypeSize) private var typeSize
+
+  func body(content: Content) -> some View {
+    let traits = UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(typeSize))
+    let size = UIFontMetrics(forTextStyle: role.textStyle)
+      .scaledValue(for: role.size, compatibleWith: traits)
+    content
+      .font(.system(size: size, weight: role.weight))
+      .tracking(size * role.tracking)
+      .lineSpacing(role.lineSpacing * size / role.size)
+  }
+}
+
+extension View {
+  func ritmText(_ role: RitmTextRole) -> some View { modifier(RitmTextModifier(role: role)) }
+}
+
+// MARK: - Surfaces
+
 struct RitmBackground: View {
   @Environment(\.colorScheme) private var scheme
 
+  /// One `radial-gradient(rx ry at x y, colour, transparent fade)` layer, as fractions of the box.
+  private struct Glow {
+    let color: Color
+    let rx: CGFloat
+    let ry: CGFloat
+    let x: CGFloat
+    let y: CGFloat
+    let fade: CGFloat
+  }
+
+  private var glows: [Glow] {
+    scheme == .dark
+      ? [
+        Glow(color: Color(rgb: 0x804EBB, opacity: 0.23), rx: 0.53, ry: 0.43, x: 0.87, y: 0.07, fade: 0.75),
+        Glow(color: Color(rgb: 0x4D3385, opacity: 0.23), rx: 0.39, ry: 0.39, x: 0.13, y: 0.84, fade: 0.77),
+      ]
+      : [
+        Glow(color: Color(rgb: 0x9F74E1, opacity: 0.2), rx: 0.55, ry: 0.43, x: 0.9, y: 0.05, fade: 0.77),
+        Glow(color: Color(rgb: 0xD3B6F6, opacity: 0.18), rx: 0.36, ry: 0.36, x: 0.1, y: 0.8, fade: 0.76),
+        Glow(color: Color(rgb: 0xE7CFFF, opacity: 0.14), rx: 0.35, ry: 0.24, x: 0.55, y: 0.5, fade: 0.82),
+      ]
+  }
+
   var body: some View {
-    ZStack {
-      (scheme == .dark
-        ? Color(red: 0.065, green: 0.05, blue: 0.10)
-        : Color(red: 0.95, green: 0.93, blue: 0.98))
-      RadialGradient(
-        colors: [RitmTheme.lavender.opacity(scheme == .dark ? 0.18 : 0.20), .clear],
-        center: .topTrailing,
-        startRadius: 12,
-        endRadius: 520
-      )
+    GeometryReader { proxy in
+      ZStack {
+        RitmTheme.background
+        ForEach(glows.indices, id: \.self) { index in
+          let glow = glows[index]
+          Rectangle()
+            .fill(
+              EllipticalGradient(
+                stops: [
+                  .init(color: glow.color, location: 0),
+                  .init(color: glow.color.opacity(0), location: glow.fade),
+                ],
+                center: .center, startRadiusFraction: 0, endRadiusFraction: 0.5)
+            )
+            .frame(width: 2 * glow.rx * proxy.size.width, height: 2 * glow.ry * proxy.size.height)
+            .position(x: glow.x * proxy.size.width, y: glow.y * proxy.size.height)
+        }
+      }
+      .frame(width: proxy.size.width, height: proxy.size.height)
     }
     .ignoresSafeArea()
     .accessibilityHidden(true)
   }
 }
-struct RitmCard<Content: View>: View {
-  @Environment(\.colorScheme) private var scheme
+
+/// The opaque mobile panel: fill, 155° sheen, one contour and the soft violet shadow.
+struct RitmPanelBackground: View {
+  var radius: CGFloat = 23
+  var raised = false
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   @Environment(\.colorSchemeContrast) private var contrast
+
+  var body: some View {
+    let shape = RoundedRectangle(cornerRadius: radius, style: .circular)
+    shape
+      .fill(raised && !reduceTransparency ? RitmTheme.glassRaised : RitmTheme.panel)
+      .overlay {
+        if !reduceTransparency { shape.fill(RitmTheme.panelSheen) }
+      }
+      .overlay {
+        // One contour; lighting is a fill, never a second inset outline.
+        shape.strokeBorder(
+          contrast == .increased ? RitmTheme.text : RitmTheme.panelBorder, lineWidth: 1)
+      }
+      .shadow(color: RitmTheme.panelShadow, radius: 11, y: 7)
+  }
+}
+
+struct RitmCard<Content: View>: View {
   private let content: Content
   private let entranceDelay: Double
+  private let padding: CGFloat
+  private let radius: CGFloat
+  private let raised: Bool
 
-  init(delay: Double = 0, @ViewBuilder content: () -> Content) {
+  init(
+    delay: Double = 0, padding: CGFloat = 20, radius: CGFloat = 23, raised: Bool = false,
+    @ViewBuilder content: () -> Content
+  ) {
     self.content = content()
     self.entranceDelay = delay
+    self.padding = padding
+    self.radius = radius
+    self.raised = raised
   }
 
   var body: some View {
     content
-      .padding(20)
+      .padding(padding)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .background {
-        let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
-        shape
-          .fill(
-            reduceTransparency || contrast == .increased
-              ? AnyShapeStyle(RitmTheme.surface(scheme))
-              : AnyShapeStyle(.ultraThinMaterial)
-          )
-          .overlay {
-            shape.fill(
-              LinearGradient(
-                colors: [RitmTheme.lavender.opacity(0.08), .clear],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-              ))
-          }
-          .overlay {
-            // One contour; lighting is a fill, never a second inset outline.
-            shape.strokeBorder(
-              scheme == .dark
-                ? Color.white.opacity(contrast == .increased ? 0.55 : 0.14)
-                : RitmTheme.lavender.opacity(contrast == .increased ? 0.65 : 0.22),
-              lineWidth: 1
-            )
-          }
-          .shadow(color: .black.opacity(scheme == .dark ? 0.12 : 0.035), radius: 16, y: 6)
-      }
+      .background { RitmPanelBackground(radius: radius, raised: raised) }
       .modifier(RitmEntrance(delay: entranceDelay))
   }
 }
+
+// MARK: - Buttons
+
+/// Web press feedback: scale .955 over 120 ms, no opacity change. With Reduce Motion the web
+/// removes the animation; a slight dimming keeps the press visible without movement.
 struct RitmPressStyle: ButtonStyle {
+  var scale: CGFloat = 0.955
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
-      .opacity(configuration.isPressed ? 0.72 : 1)
-      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
-      .animation(
-        reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 1),
-        value: configuration.isPressed)
+      .scaleEffect(configuration.isPressed && !reduceMotion ? scale : 1)
+      .opacity(configuration.isPressed && reduceMotion ? 0.8 : 1)
+      .animation(reduceMotion ? nil : RitmMotion.press, value: configuration.isPressed)
   }
 }
+
 struct RitmPrimaryButtonStyle: ButtonStyle {
+  var minHeight: CGFloat = 44
   @Environment(\.isEnabled) private var isEnabled
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
-      .font(.headline)
-      .frame(maxWidth: .infinity, minHeight: 50)
-      .foregroundStyle(RitmTheme.ink)
-      .background(
-        RitmTheme.lavender.gradient, in: RoundedRectangle(cornerRadius: 17, style: .continuous)
-      )
-      .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.45)
-      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
-      .animation(
-        reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 1),
-        value: configuration.isPressed)
+      .ritmText(.button)
+      .padding(.horizontal, 14)
+      .frame(maxWidth: .infinity, minHeight: minHeight)
+      .foregroundStyle(RitmTheme.ctaInk)
+      .background(RitmTheme.ctaGradient, in: RoundedRectangle(cornerRadius: 13, style: .circular))
+      .shadow(color: RitmTheme.ctaShadow, radius: 13, y: 10)
+      .opacity(isEnabled ? 1 : 0.6)
+      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.955 : 1)
+      .animation(reduceMotion ? nil : RitmMotion.press, value: configuration.isPressed)
   }
 }
+
+/// Secondary web button: panel fill, one contour, accent text.
+struct RitmSecondaryButtonStyle: ButtonStyle {
+  var minHeight: CGFloat = 44
+  @Environment(\.isEnabled) private var isEnabled
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .ritmText(.button)
+      .padding(.horizontal, 14)
+      .frame(minHeight: minHeight)
+      .foregroundStyle(RitmTheme.accentColor)
+      .background {
+        RoundedRectangle(cornerRadius: 13, style: .circular)
+          .fill(RitmTheme.panel)
+          .overlay {
+            RoundedRectangle(cornerRadius: 13, style: .circular)
+              .strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
+          }
+      }
+      .opacity(isEnabled ? 1 : 0.6)
+      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.955 : 1)
+      .animation(reduceMotion ? nil : RitmMotion.press, value: configuration.isPressed)
+  }
+}
+
+/// The 44 × 44 icon-only call to action next to a page title (DashboardPage «+»).
+struct RitmIconCTA: View {
+  let symbol: String
+  let label: String
+  let action: () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      Image(systemName: symbol)
+        .font(.system(size: 21, weight: .regular))
+        .foregroundStyle(RitmTheme.ctaInk)
+        .frame(width: 44, height: 44)
+        .background(RitmTheme.ctaGradient, in: RoundedRectangle(cornerRadius: 13, style: .circular))
+        .shadow(color: RitmTheme.ctaShadow, radius: 13, y: 10)
+    }
+    .buttonStyle(RitmPressStyle())
+    .accessibilityLabel(label)
+  }
+}
+
+// MARK: - Page structure
+
+/// The web page heading: eyebrow, gradient title, description and an optional action that sits
+/// 21 pt lower than the text (app.css .dashboard-heading).
+struct RitmPageHeading<Action: View>: View {
+  let eyebrow: String
+  let title: String
+  let description: String?
+  private let action: Action
+
+  init(
+    eyebrow: String, title: String, description: String? = nil,
+    @ViewBuilder action: () -> Action
+  ) {
+    self.eyebrow = eyebrow
+    self.title = title
+    self.description = description
+    self.action = action()
+  }
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 12) {
+      VStack(alignment: .leading, spacing: 0) {
+        Text(eyebrow)
+          .ritmText(.eyebrow)
+          .foregroundStyle(RitmTheme.accentColor)
+          .padding(.bottom, 8)
+        Text(title)
+          .ritmText(.pageTitle)
+          .foregroundStyle(RitmTheme.titleGradient)
+          .accessibilityAddTraits(.isHeader)
+        if let description {
+          Text(description)
+            .ritmText(.pageDescription)
+            .foregroundStyle(RitmTheme.muted)
+            .padding(.top, 9)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      action.padding(.top, 21)
+    }
+    .padding(.bottom, 24)
+  }
+}
+
+extension RitmPageHeading where Action == EmptyView {
+  init(eyebrow: String, title: String, description: String? = nil) {
+    self.init(eyebrow: eyebrow, title: title, description: description) { EmptyView() }
+  }
+}
+
+/// «Ritm · Меньше шума. Больше ясности.» under every page.
+struct RitmPageFooter: View {
+  @Environment(RitmStore.self) private var store
+
+  var body: some View {
+    HStack {
+      Text("Ritm")
+      Spacer(minLength: 12)
+      Text(store.text("Меньше шума. Больше ясности.", "Less noise. More clarity."))
+    }
+    .ritmText(.footer)
+    .foregroundStyle(RitmTheme.muted)
+    .opacity(0.8)
+    .padding(.top, 24)
+    .accessibilityElement(children: .combine)
+  }
+}
+
 struct RitmEmptyState: View {
   let symbol: String
   let title: String
@@ -123,31 +477,35 @@ struct RitmEmptyState: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       Image(systemName: symbol)
-        .font(.title2)
-        .foregroundStyle(.tint)
+        .font(.system(size: 20))
+        .foregroundStyle(RitmTheme.accentColor)
         .accessibilityHidden(true)
-      Text(title).font(.headline)
-      Text(message).font(.subheadline).foregroundStyle(.secondary)
+      Text(title).ritmText(.cardTitle).foregroundStyle(RitmTheme.text)
+      Text(message).ritmText(.body).foregroundStyle(RitmTheme.muted)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
+
+/// Web error: danger text on danger-soft, radius 10.
 struct RitmErrorBanner: View {
   let message: String
 
   var body: some View {
     Label {
-      Text(message).font(.subheadline).textSelection(.enabled)
+      Text(message).ritmText(.body).textSelection(.enabled)
     } icon: {
       Image(systemName: "exclamationmark.circle")
     }
-    .foregroundStyle(.primary)
-    .padding(14)
+    .foregroundStyle(RitmTheme.danger)
+    .padding(12)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
+    .background(RitmTheme.dangerSoft, in: RoundedRectangle(cornerRadius: 10, style: .circular))
     .accessibilityElement(children: .combine)
   }
 }
+
+/// The same four-point silhouette as public/ritm-mark.svg, rendered natively.
 struct RitmMark: Shape {
   func path(in rect: CGRect) -> Path {
     let scale = min(rect.width, rect.height) / 64
@@ -164,6 +522,7 @@ struct RitmMark: Shape {
     return path
   }
 }
+
 private struct RitmPageActiveKey: EnvironmentKey { static let defaultValue = true }
 extension EnvironmentValues {
   var ritmPageActive: Bool {
@@ -171,19 +530,39 @@ extension EnvironmentValues {
     set { self[RitmPageActiveKey.self] = newValue }
   }
 }
+
+/// Web MotionPage: the first visit rises 5 pt and fades in over 330 ms; a return visit only
+/// fades from 45 % over 150 ms. Data updates never replay it.
 struct RitmEntrance: ViewModifier {
   @Environment(\.ritmPageActive) private var active
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var introduced = false
+  @State private var returning = false
   var delay: Double = 0
+
   func body(content: Content) -> some View {
-    content.opacity(introduced || reduceMotion ? 1 : 0)
-      .offset(y: introduced || reduceMotion ? 0 : 7)
+    content
+      .opacity(reduceMotion ? 1 : (introduced ? (returning ? 0.45 : 1) : 0))
+      .offset(y: introduced || reduceMotion ? 0 : 5)
       .onAppear { enter() }
-      .onChange(of: active) { _, _ in enter() }
+      .onChange(of: active) { _, isActive in
+        if isActive { introduced ? returnVisit() : enter() }
+      }
   }
+
   private func enter() {
     guard active, !introduced else { return }
-    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.24).delay(delay)) { introduced = true }
+    withAnimation(reduceMotion ? nil : RitmMotion.ease(0.33).delay(min(delay, 0.22))) {
+      introduced = true
+    }
+  }
+
+  private func returnVisit() {
+    guard !reduceMotion else { return }
+    returning = true
+    // Let the dimmed frame render first, then fade back in on the next run loop turn.
+    Task { @MainActor in
+      withAnimation(.easeOut(duration: 0.15).delay(min(delay * 0.45, 0.1))) { returning = false }
+    }
   }
 }

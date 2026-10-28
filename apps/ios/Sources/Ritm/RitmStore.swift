@@ -19,6 +19,7 @@ final class RitmStore {
   private(set) var isOffline = false
   private(set) var uncertainWrite = false
   private(set) var now = Date()
+  private(set) var pendingTheme: Theme?
 
   @ObservationIgnored private let client: APIClient?
   @ObservationIgnored private let vault = SessionVault()
@@ -80,6 +81,20 @@ final class RitmStore {
       await client.setLanguage(saved.language)
       return saved
     }
+  }
+
+  /// The account theme drives the whole app, as on the web (App.tsx). Before sign-in the web
+  /// starts light (public/theme-init.js).
+  var theme: Theme { pendingTheme ?? bootstrap?.settings.theme ?? .light }
+
+  /// The header toggle switches at once and saves the opposite of what is shown to the account.
+  /// A failed save falls back to the server value.
+  func toggleTheme(showingDark: Bool) async {
+    guard var settings = bootstrap?.settings, pendingTheme == nil else { return }
+    settings.theme = showingDark ? .light : .dark
+    pendingTheme = settings.theme
+    _ = await saveSettings(settings)
+    pendingTheme = nil
   }
 
   var canWrite: Bool {

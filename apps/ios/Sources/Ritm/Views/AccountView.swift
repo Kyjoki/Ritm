@@ -5,7 +5,6 @@ struct AccountView: View {
   @Environment(RitmStore.self) private var store
   @Environment(RitmNavigation.self) private var navigation
   @Environment(\.openURL) private var openURL
-  @AppStorage("ritm.appearance") private var appearance = "system"
   @State private var draft = AccountSettings()
   @State private var baseline: AccountSettings?
   @State private var google: GoogleCalendarStatus?
@@ -45,12 +44,13 @@ struct AccountView: View {
       RitmBackground()
       ScrollView {
         VStack(alignment: .leading, spacing: 18) {
-          Text(store.text("Настройки", "Settings")).font(.largeTitle.bold())
-          Text(
-            store.text(
-              "Ваш Ritm, привычный на каждом устройстве.", "Your Ritm, familiar on every device.")
-          ).font(.subheadline).foregroundStyle(.secondary)
-          SyncStatusView()
+          RitmShellHeader().padding(.bottom, -18)
+          RitmPageHeading(
+            eyebrow: store.text("Ritm под твой образ жизни", "Ritm fits your life"),
+            title: store.text("Настройки", "Settings"),
+            description: store.text("Твоё пространство. Твои правила.", "Your space. Your rules.")
+          )
+          .padding(.bottom, -18)
           if let message = store.errorMessage { RitmErrorBanner(message: message) }
           if let notice {
             Text(notice).font(.subheadline).foregroundStyle(.tint).padding(.vertical, 6)
@@ -65,7 +65,8 @@ struct AccountView: View {
           }
           integrations
           syncCard
-        }.padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 28).frame(maxWidth: 700)
+          RitmPageFooter()
+        }.padding(.horizontal, 16).padding(.bottom, 28).frame(maxWidth: 700)
           .frame(maxWidth: .infinity)
       }.scrollDismissesKeyboard(.interactively).refreshable {
         await store.refresh()
@@ -160,20 +161,10 @@ struct AccountView: View {
           Text(store.text("Светлая", "Light")).tag(Theme.light)
           Text(store.text("Тёмная", "Dark")).tag(Theme.dark)
         }.pickerStyle(.segmented)
-        Picker(store.text("На этом iPhone", "On this iPhone"), selection: $appearance) {
-          Text(store.text("Как в системе", "System")).tag("system")
-          Text(store.text("Светлая", "Light")).tag("light")
-          Text(store.text("Тёмная", "Dark")).tag("dark")
-        }.frame(minHeight: 44)
         Picker(store.text("Боковая панель веб-версии", "Web sidebar"), selection: $draft.sidebar) {
           Text(store.text("Графитовая", "Graphite")).tag("dark")
           Text(store.text("Светлая", "Light")).tag("light")
         }.frame(minHeight: 44)
-        Text(
-          store.text(
-            "Тема аккаунта синхронизируется. Оформление этого iPhone можно выбрать отдельно.",
-            "The account theme syncs. This iPhone can use a separate appearance.")
-        ).font(.caption).foregroundStyle(.secondary)
       }
     }
   }

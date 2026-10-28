@@ -152,6 +152,7 @@ struct DayView: View {
       RitmBackground()
       ScrollView {
         VStack(alignment: .leading, spacing: 16) {
+          RitmShellHeader().padding(.bottom, -16)
           header
           SyncStatusView()
           if let message = store.errorMessage { RitmErrorBanner(message: message) }
@@ -175,7 +176,8 @@ struct DayView: View {
             scheduleCard
             HabitWeeklyGrid()
           }
-        }.padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 28).frame(maxWidth: 700)
+          RitmPageFooter()
+        }.padding(.horizontal, 16).padding(.bottom, 28).frame(maxWidth: 700)
           .frame(maxWidth: .infinity)
       }.refreshable {
         await store.refresh()

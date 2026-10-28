@@ -78,6 +78,7 @@ struct HabitsView: View {
       RitmBackground()
       ScrollView {
         VStack(alignment: .leading, spacing: 18) {
+          RitmShellHeader().padding(.bottom, -18)
           HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 8) {
               Text(store.text("RITM · Ежедневные привычки", "RITM · Daily habits")).font(
@@ -151,7 +152,8 @@ struct HabitsView: View {
           ForEach(scoped) { habit in
             HabitDetailCard(habit: habit, dates: dates, onEdit: { editingHabit = habit })
           }
-        }.padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 28).frame(maxWidth: 700)
+          RitmPageFooter()
+        }.padding(.horizontal, 16).padding(.bottom, 28).frame(maxWidth: 700)
           .frame(maxWidth: .infinity)
       }.refreshable { await store.refresh() }
     }
