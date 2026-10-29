@@ -83,6 +83,12 @@ node node_modules/vite/bin/vite.js build --configLoader runner
 Сначала пользователь вносит корректировки. Сейчас нет подписанного IPA, регистрации устройства или установленного приложения.
 
 1. Настроить Apple SDK и xtool по [официальной инструкции Windows/WSL](https://github.com/xtool-org/xtool/blob/main/Documentation/xtool.docc/Installation-Linux.md).
+   На этом компьютере уже стоят Swift 6.4.1 и xtool 1.24.0 в WSL (`~/.local/bin/xtool`, SHA-256 сверен с релизом GitHub). Не хватает только SDK: владелец сам скачивает **Xcode 27.1** (`.xip`) с developer.apple.com под своим Apple ID. Для сборки без подписи вход в Apple ID в xtool не нужен:
+   ```bash
+   xtool sdk install /mnt/c/Users/Maksim/Downloads/Xcode_27.1.xip
+   cd apps/ios && xtool dev build
+   ```
+   `xtool dev build` без `--sign` только компилирует `.app`: на iPhone ничего не ставится.
 2. Выполнить полную сборку, исправить ошибки Apple SDK/SwiftUI, проверить ресурсы, App Icon и Bundle ID `app.ritm.personal` для своего Apple Developer Team.
 3. Настроить подпись локально и выполнить `xtool dev` из `apps/ios`, когда можно установить приложение. Пароли и ключи Apple не отправлять в чат/Git.
 4. Пройти сценарии из `VERIFICATION.md` на iPhone 13 / iOS 17.6.1 и сверить все экраны с вебом в обеих темах.
