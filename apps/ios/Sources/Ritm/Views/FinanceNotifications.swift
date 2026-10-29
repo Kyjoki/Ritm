@@ -308,16 +308,14 @@ struct FinanceNotificationOverlay: View {
       : .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.18)
   }
 
-  /// The banner slides down from under the top bar in 0.26 s and leaves upward in 0.20 s.
+  /// The banner inflates from its own centre like the popover (0.30 s, about 3 % overshoot) and
+  /// shrinks back into it while fading in 0.20 s.
   private func bannerMotion(arriving: Bool) -> Animation {
     if reduceMotion { return .easeOut(duration: 0.12) }
     return arriving
-      ? .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.26)
-      : .timingCurve(0.4, 0, 1, 1, duration: 0.20)
+      ? .timingCurve(0.34, 1.32, 0.5, 1, duration: 0.30)
+      : .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.20)
   }
-
-  /// Taller than any banner, so at the start of the slide it is wholly behind the top bar.
-  private static let bannerLift: CGFloat = 96
 
   var body: some View {
     let center = store.notices
@@ -338,8 +336,7 @@ struct FinanceNotificationOverlay: View {
     }
   }
 
-  /// The banner's own layer. Its top is masked at the bar's lower edge, so the banner appears
-  /// from beneath the bar instead of drawing over it.
+  /// The banner's own layer, placed under the top bar.
   private func bannerLayer(_ center: FinanceNoticeCenter) -> some View {
     let visible: FinanceNotice? = center.isOpen ? nil : center.banner
     return ZStack(alignment: .top) {
@@ -348,21 +345,14 @@ struct FinanceNotificationOverlay: View {
           notice: banner, open: { openNotice(banner) }, close: { center.dismissBanner() }
         )
         .id(banner.id)
-        .padding(.horizontal, 16)
-        .padding(.top, Self.bannerTop)
+        // The transition lives on the banner itself, so it scales about the banner's centre.
         .transition(
-          reduceMotion
-            ? .opacity
-            : .offset(y: -Self.bannerLift).combined(with: .opacity))
+          reduceMotion ? .opacity : .scale(scale: 0.4, anchor: .center).combined(with: .opacity))
       }
     }
+    .padding(.horizontal, 16)
+    .padding(.top, Self.bannerTop)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    .mask(alignment: .top) {
-      VStack(spacing: 0) {
-        Color.clear.frame(height: reduceMotion ? 0 : Self.headerHeight)
-        Color.black
-      }
-    }
     .animation(bannerMotion(arriving: visible != nil), value: visible?.id)
   }
 
@@ -619,19 +609,21 @@ private struct FinanceNoticeRow: View {
           Text(line.title)
             .ritmFont(14, weight: .semibold, tracking: -0.01)
             .foregroundStyle(RitmTheme.text)
-            .lineLimit(1)
+            .lineLimit(2)
           Text(line.detail)
             .ritmFont(11)
             .foregroundStyle(RitmTheme.muted)
-            .lineLimit(1)
+            .lineLimit(2)
         }
-        Spacer(minLength: 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
         VStack(alignment: .trailing, spacing: 6) {
           Text(line.amount)
             .ritmFont(13, weight: .semibold)
+            .monospacedDigit()
             .foregroundStyle(notice.kind == .transfer ? RitmTheme.muted : RitmTheme.text)
             .lineLimit(1)
-            .minimumScaleFactor(0.8)
+            .minimumScaleFactor(0.6)
+            .layoutPriority(1)
           HStack(spacing: 8) {
             if unread {
               Circle().fill(RitmTheme.accentColor).frame(width: 8, height: 8)

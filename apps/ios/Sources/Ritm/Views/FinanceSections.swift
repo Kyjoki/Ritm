@@ -195,12 +195,15 @@ struct FinanceOverviewSections: View {
         Text(format.name(of: share.cardID) ?? "—")
           .ritmFont(12, weight: .medium)
           .foregroundStyle(RitmTheme.text)
-          .lineLimit(1)
-        Spacer(minLength: 6)
+          .lineLimit(2)
+          .frame(maxWidth: .infinity, alignment: .leading)
         RitmCountText(share.amountMinor) { format.money($0, currency) }
           .ritmFont(12, weight: .semibold)
+          .monospacedDigit()
           .foregroundStyle(RitmTheme.text)
           .lineLimit(1)
+          .minimumScaleFactor(0.6)
+          .layoutPriority(1)
         RitmCountText(Int((share.share * 100).rounded())) { "\($0)%" }
           .ritmFont(11)
           .foregroundStyle(RitmTheme.muted)
@@ -476,7 +479,13 @@ struct FinanceAccountSections: View {
     HStack {
       Text(label).ritmFont(11).foregroundStyle(RitmTheme.muted)
       Spacer(minLength: 8)
-      Text(value).ritmFont(12, weight: .medium).monospacedDigit().foregroundStyle(RitmTheme.text)
+      Text(value)
+        .ritmFont(12, weight: .medium)
+        .monospacedDigit()
+        .foregroundStyle(RitmTheme.text)
+        .lineLimit(1)
+        .minimumScaleFactor(0.6)
+        .layoutPriority(1)
     }
     .accessibilityElement(children: .combine)
   }
@@ -507,22 +516,27 @@ struct FinanceAccountSections: View {
     } label: {
       HStack(spacing: 10) {
         VStack(alignment: .leading, spacing: 2) {
-          Text(position.name).ritmFont(12, weight: .bold).foregroundStyle(RitmTheme.text).lineLimit(1)
-          Text(positionMeta(position)).ritmFont(10).foregroundStyle(RitmTheme.muted).lineLimit(1)
+          Text(position.name).ritmFont(12, weight: .bold).foregroundStyle(RitmTheme.text).lineLimit(2)
+          Text(positionMeta(position)).ritmFont(10).foregroundStyle(RitmTheme.muted).lineLimit(2)
         }
-        Spacer(minLength: 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
         VStack(alignment: .trailing, spacing: 2) {
           Text(format.money(position.valueMinor, card.currency))
             .ritmFont(12, weight: .semibold)
             .monospacedDigit()
             .foregroundStyle(RitmTheme.text)
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
           if let gain = position.gainMinor {
             Text(format.signed(gain, card.currency))
               .ritmFont(10, weight: .medium)
               .monospacedDigit()
               .foregroundStyle(FinanceTone.net(gain))
+              .lineLimit(1)
+              .minimumScaleFactor(0.6)
           }
         }
+        .layoutPriority(1)
       }
       .frame(minHeight: 52)
       .contentShape(Rectangle())
