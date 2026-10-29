@@ -52,19 +52,26 @@ struct RitmRootView: View {
     Group {
       if store.isSignedIn {
         ZStack {
-          VStack(spacing: 0) {
-            if !navigation.section.embedsHeader { RitmShellHeader().padding(.horizontal, 16) }
-            ZStack {
-              ForEach(visitedSections, id: \.self) { section in
-                // The web switches pages instantly; only the nav indicator moves.
-                NavigationStack { sectionView(section) }
-                  .opacity(navigation.section == section ? 1 : 0)
-                  .allowsHitTesting(navigation.section == section)
-                  .accessibilityHidden(navigation.section != section)
-                  .environment(\.ritmPageActive, navigation.section == section)
-                  .zIndex(navigation.section == section ? 1 : 0)
-                  .toolbarBackground(.hidden, for: .navigationBar)
-              }
+          ZStack {
+            ForEach(visitedSections, id: \.self) { section in
+              // The web switches pages instantly; only the nav indicator moves.
+              NavigationStack { sectionView(section) }
+                .opacity(navigation.section == section ? 1 : 0)
+                .allowsHitTesting(navigation.section == section)
+                .accessibilityHidden(navigation.section != section)
+                .environment(\.ritmPageActive, navigation.section == section)
+                .zIndex(navigation.section == section ? 1 : 0)
+                .toolbarBackground(.hidden, for: .navigationBar)
+            }
+          }
+          // The pinned header is a top inset with its own backdrop: pages scroll under it, but
+          // never show crisp content behind the logo and the buttons.
+          .safeAreaInset(edge: .top, spacing: 0) {
+            if !navigation.section.embedsHeader {
+              RitmShellHeader()
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity)
+                .background(alignment: .top) { RitmHeaderBackdrop() }
             }
           }
           .background { RitmBackground() }
@@ -107,7 +114,8 @@ struct RitmRootView: View {
 
   private func setMore(_ open: Bool) {
     guard showingMore != open else { return }
-    withAnimation(reduceMotion ? nil : RitmMore.animation) { showingMore = open }
+    let motion = reduceMotion ? RitmMore.reduced : open ? RitmMore.inflate : RitmMore.deflate
+    withAnimation(motion) { showingMore = open }
   }
 
   private func toggleMore() {
@@ -180,9 +188,38 @@ struct RitmHeaderIconBackground: View {
 struct RitmShellHeader: View {
   @Environment(RitmStore.self) private var store
   @Environment(\.colorScheme) private var scheme
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.ritmPageActive) private var pageActive
+  @State private var toggleFrame = RitmFrameBox()
 
   private var showingDark: Bool {
     store.theme == .system ? scheme == .dark : store.theme == .dark
+  }
+
+  /// Snapshot the screen with the old theme, switch, and let a circle from the button reveal it.
+  private func switchTheme() {
+    let dark = showingDark
+    let frame = toggleFrame.frame
+    let origin = frame == .zero ? CGPoint(x: 360, y: 80) : CGPoint(x: frame.midX, y: frame.midY)
+    RitmThemeReveal.run(origin: origin, reduceMotion: reduceMotion) {
+      Task { await store.toggleTheme(showingDark: dark) }
+    }
+  }
+
+  private var toggleFrameReader: some View {
+    GeometryReader { proxy in
+      let frame = proxy.frame(in: .global)
+      Color.clear
+        .onAppear { record(frame) }
+        .onChange(of: frame) { _, value in record(value) }
+        .onChange(of: pageActive) { _, _ in record(frame) }
+    }
+  }
+
+  /// Pages kept alive behind the active one must not move the origin.
+  private func record(_ frame: CGRect) {
+    guard pageActive else { return }
+    toggleFrame.frame = frame
   }
 
   var body: some View {
@@ -205,9 +242,7 @@ struct RitmShellHeader: View {
         .accessibilityAddTraits(.isHeader)
       Spacer(minLength: 0)
       FinanceBellButton()
-      Button {
-        Task { await store.toggleTheme(showingDark: showingDark) }
-      } label: {
+      Button(action: switchTheme) {
         Image(systemName: showingDark ? "sun.max" : "moon")
           .font(.system(size: 18))
           .foregroundStyle(RitmTheme.muted)
@@ -215,6 +250,7 @@ struct RitmShellHeader: View {
           .background { RitmHeaderIconBackground() }
       }
       .buttonStyle(RitmPressStyle(scale: 0.9))
+      .background { toggleFrameReader }
       .disabled(store.pendingTheme != nil)
       .accessibilityLabel(store.text("Переключить тему", "Switch appearance"))
     }
@@ -222,11 +258,54 @@ struct RitmShellHeader: View {
   }
 }
 
+/// Last known frame of a view in window coordinates. Deliberately not observed: it moves with
+/// scrolling and is only read at the moment of a tap.
+@MainActor final class RitmFrameBox {
+  var frame: CGRect = .zero
+}
+
+/// The pinned header's own backdrop: a bar gradient from the theme background over an
+/// ultra-thin material, fading out below the bar, so content scrolling underneath never shows
+/// crisp text behind the logo and the buttons (MOTION.md §7). It reaches up under the status bar.
+private struct RitmHeaderBackdrop: View {
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  private static let fade: CGFloat = 18
+
+  var body: some View {
+    ZStack {
+      if !reduceTransparency { Rectangle().fill(.ultraThinMaterial) }
+      LinearGradient(
+        colors: [
+          RitmTheme.background.opacity(reduceTransparency ? 1 : 0.94),
+          RitmTheme.background.opacity(reduceTransparency ? 1 : 0.8),
+        ], startPoint: .top, endPoint: .bottom)
+    }
+    .mask {
+      VStack(spacing: 0) {
+        Rectangle()
+        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+          .frame(height: Self.fade)
+      }
+    }
+    .padding(.bottom, -Self.fade)
+    .ignoresSafeArea(edges: .top)
+    .allowsHitTesting(false)
+    .accessibilityHidden(true)
+  }
+}
+
 /// Motion of the bottom bar (prototype shell.html): the indicator slides in 0.28 s on
-/// cubic-bezier(.2, .8, .2, 1); the «Ещё» panel opens and closes in 0.18 s.
+/// cubic-bezier(.2, .8, .2, 1); the «Ещё» panel inflates out of its icon in 0.30 s with a tiny
+/// overshoot (cubic-bezier(.34, 1.32, .5, 1), about 3 %) and shrinks back in 0.18 s without one.
 private enum RitmMore {
   static let slide = Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28)
-  static let animation = Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.18)
+  static let inflate = Animation.timingCurve(0.34, 1.32, 0.5, 1, duration: 0.30)
+  static let deflate = Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.18)
+  static let reduced = Animation.easeOut(duration: 0.12)
+  /// Scale of the panel at the moment it leaves the icon.
+  static let seed: CGFloat = 0.35
+  /// Delay between neighbouring tiles when the panel opens.
+  static let stagger = 0.04
 }
 
 /// Bounds of the «Ещё» slot in the bar, so the panel can be anchored right above it.
@@ -421,6 +500,7 @@ private struct RitmMorePanel: View {
   private static let panelWidth = tileWidth * 2 + spacing + padding * 2
 
   @Environment(RitmStore.self) private var store
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   let isOpen: Bool
   let current: RitmSection
   let anchor: CGRect
@@ -432,6 +512,26 @@ private struct RitmMorePanel: View {
   private var edgeInset: CGFloat { 16 }
   /// Tail position inside the panel, measured from its leading edge.
   private var tailX: CGFloat { Self.panelWidth - (container.width - edgeInset - anchor.midX) }
+  /// Where the bubble actually draws its tail tip (it keeps clear of the rounded corners).
+  private var tipX: CGFloat {
+    let margin = RitmBubble.radius + RitmBubble.tailHeight
+    return min(max(tailX, margin), Self.panelWidth - margin)
+  }
+  /// From the tail tip (the panel's bottom point) to the centre of the «Ещё» icon. Scaling the
+  /// panel about the tip and shifting it by `(1 - scale)` of this vector is the same as scaling
+  /// it about the icon, so the panel grows out of the icon without knowing its own height.
+  private var inflateShift: CGSize {
+    let leading = container.width - edgeInset - Self.panelWidth
+    return CGSize(width: anchor.midX - (leading + tipX), height: anchor.midY - (barTop - 8))
+  }
+
+  private func tileMotion(_ index: Int) -> Animation? {
+    guard !reduceMotion else { return nil }
+    return isOpen
+      ? Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24)
+        .delay(RitmMore.stagger * Double(index + 1))
+      : RitmMore.deflate
+  }
 
   var body: some View {
     ZStack(alignment: .top) {
@@ -455,8 +555,11 @@ private struct RitmMorePanel: View {
   }
 
   private var panel: some View {
-    HStack(spacing: Self.spacing) {
-      ForEach(RitmSection.moreSections, id: \.self) { tile($0) }
+    let scale = reduceMotion || isOpen ? 1 : RitmMore.seed
+    return HStack(spacing: Self.spacing) {
+      ForEach(Array(RitmSection.moreSections.enumerated()), id: \.element) { index, section in
+        tile(section, index: index)
+      }
     }
     .padding(Self.padding)
     .padding(.bottom, RitmBubble.tailHeight)
@@ -466,9 +569,9 @@ private struct RitmMorePanel: View {
         .overlay { bubble.stroke(RitmTheme.panelBorder, lineWidth: 1) }
         .shadow(color: Color(rgb: 0x1A0D2D, opacity: 0.3), radius: 24, y: 12)
     }
-    .scaleEffect(
-      isOpen ? 1 : 0.82,
-      anchor: UnitPoint(x: min(max(tailX / Self.panelWidth, 0), 1), y: 1))
+    .scaleEffect(scale, anchor: UnitPoint(x: tipX / Self.panelWidth, y: 1))
+    .offset(
+      x: (1 - scale) * inflateShift.width, y: (1 - scale) * inflateShift.height)
     .opacity(isOpen ? 1 : 0)
     .allowsHitTesting(isOpen)
     .accessibilityHidden(!isOpen)
@@ -476,8 +579,9 @@ private struct RitmMorePanel: View {
     .accessibilityAction(.escape, dismiss)
   }
 
-  private func tile(_ section: RitmSection) -> some View {
+  private func tile(_ section: RitmSection, index: Int) -> some View {
     let selected = section == current
+    let shown = reduceMotion || isOpen
     return Button {
       choose(section)
     } label: {
@@ -504,6 +608,9 @@ private struct RitmMorePanel: View {
       .contentShape(Rectangle())
     }
     .buttonStyle(RitmPressStyle(scale: 0.95))
+    .opacity(shown ? 1 : 0)
+    .scaleEffect(shown ? 1 : 0.88)
+    .animation(tileMotion(index), value: isOpen)
     .accessibilityAddTraits(selected ? .isSelected : [])
   }
 }

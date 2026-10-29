@@ -76,7 +76,7 @@ struct CalendarView: View {
     ZStack {
       RitmBackground()
       VStack(spacing: 0) {
-        toolbar.padding(.horizontal, 12)
+        toolbar.padding(.horizontal, 12).ritmPageReveal(index: 0)
         GeometryReader { proxy in
           ScrollView {
             VStack(alignment: .leading, spacing: 4) {
@@ -84,8 +84,8 @@ struct CalendarView: View {
                 RitmErrorBanner(message: message).padding(.bottom, 8)
               }
               MutationRecoveryView()
-              panel.frame(height: max(320, proxy.size.height - 8))
-              secondary
+              panel.frame(height: max(320, proxy.size.height - 8)).ritmPageReveal(index: 1)
+              secondary.ritmPageReveal(index: 2)
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 16)

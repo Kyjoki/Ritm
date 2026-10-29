@@ -27,8 +27,8 @@ enum FinanceTone {
   }
 }
 
-/// Remembers which charts already played their draw-in, so a chart animates once per
-/// (card, period) and later renders of the same key appear drawn.
+/// Kept for the page that owns it. The charts now key their draw-in through `RitmDrawGate`
+/// (once per page visit and data set), so nothing reads this log any more.
 final class FinanceDrawLog {
   var keys = Set<String>()
 }
@@ -167,7 +167,8 @@ private struct FinanceGridShape: Shape {
 }
 
 /// Hand-drawn balance chart in the style of `DayRhythmChart`: dashed grid, smooth line, soft
-/// fill and a value badge. The line draws in once per `drawKey`.
+/// fill and a value badge. The line draws in once per `drawKey` (MOTION.md §4): the stroke in
+/// 780 ms, the area fading in once the line passes 40 %, the end points popping at the end.
 struct FinanceAreaChart: View {
   let points: [FinancePoint]
   let period: FinancePeriod
@@ -176,37 +177,18 @@ struct FinanceAreaChart: View {
   let drawKey: String
   let log: FinanceDrawLog
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var progress: CGFloat
 
   private static let left: CGFloat = 44
   private static let right: CGFloat = 8
   private static let top: CGFloat = 12
   private static let bottom: CGFloat = 26
 
-  init(
-    points: [FinancePoint], period: FinancePeriod, currency: FinanceCurrency,
-    format: FinanceFormat, drawKey: String, log: FinanceDrawLog
-  ) {
-    self.points = points
-    self.period = period
-    self.currency = currency
-    self.format = format
-    self.drawKey = drawKey
-    self.log = log
-    _progress = State(initialValue: log.keys.contains(drawKey) ? 1 : 0)
-  }
-
   var body: some View {
     if let scale = FinanceScale(points: points) {
-      chart(scale)
+      RitmDrawGate(key: drawKey) { drawn in chart(scale, drawn: drawn) }
         .frame(height: 196)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(summary(scale))
-        .onAppear {
-          log.keys.insert(drawKey)
-          guard progress < 1 else { return }
-          withAnimation(reduceMotion ? nil : RitmMotion.ease(0.78).delay(0.12)) { progress = 1 }
-        }
     } else {
       Text(format.text("Пока недостаточно данных для графика.", "Not enough data for a chart yet."))
         .ritmFont(11)
@@ -229,7 +211,7 @@ struct FinanceAreaChart: View {
     return (0..<count).map { Int((Double($0) * Double(points.count - 1) / Double(count - 1)).rounded()) }
   }
 
-  private func chart(_ scale: FinanceScale) -> some View {
+  private func chart(_ scale: FinanceScale, drawn: Bool) -> some View {
     GeometryReader { proxy in
       let box = CGRect(
         x: Self.left, y: Self.top,
@@ -252,15 +234,17 @@ struct FinanceAreaChart: View {
               colors: [RitmTheme.accentColor.opacity(0.26), RitmTheme.accentColor.opacity(0.02)],
               startPoint: .top, endPoint: .bottom)
           )
-          .opacity(Double(progress))
+          .opacity(drawn ? 1 : 0)
+          .animation(reduceMotion ? nil : RitmMotion.areaFade, value: drawn)
           .frame(width: box.width, height: box.height)
           .offset(x: box.minX, y: box.minY)
         FinanceLineShape(xs: scale.xs, ys: scale.ys, closed: false)
-          .trim(from: 0, to: progress)
+          .trim(from: 0, to: drawn ? 1 : 0)
           .stroke(
             RitmTheme.accentColor,
             style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
           )
+          .animation(reduceMotion ? nil : RitmMotion.lineDraw, value: drawn)
           .frame(width: box.width, height: box.height)
           .offset(x: box.minX, y: box.minY)
         ForEach(labels, id: \.self) { index in
@@ -268,11 +252,13 @@ struct FinanceAreaChart: View {
             .fill(RitmTheme.panel)
             .overlay { Circle().strokeBorder(RitmTheme.accentColor, lineWidth: 2) }
             .frame(width: 8, height: 8)
+            .scaleEffect(drawn ? 1 : 0.6)
             .position(
               x: box.minX + scale.xs[index] * box.width,
               y: box.minY + (1 - scale.ys[index]) * box.height
             )
-            .opacity(Double(progress))
+            .opacity(drawn ? 1 : 0)
+            .animation(reduceMotion ? nil : RitmMotion.dotPop, value: drawn)
         }
         ForEach(Array(scale.ticks.enumerated()), id: \.offset) { _, tick in
           Text(FinanceScale.compact(tick))
@@ -291,13 +277,13 @@ struct FinanceAreaChart: View {
               x: min(max(box.minX + scale.xs[index] * box.width, 24), proxy.size.width - 24),
               y: proxy.size.height - 7)
         }
-        Text(format.money(points.last?.valueMinor ?? 0, currency))
+        RitmCountText(points.last?.valueMinor ?? 0) { format.money($0, currency) }
           .ritmFont(10, weight: .medium)
-          .monospacedDigit()
           .foregroundStyle(RitmTheme.text)
           .frame(width: 120, alignment: .trailing)
           .position(x: proxy.size.width - Self.right - 60, y: max(6, lastY - 14))
-          .opacity(Double(progress))
+          .opacity(drawn ? 1 : 0)
+          .animation(reduceMotion ? nil : RitmMotion.dotPop, value: drawn)
       }
     }
   }
@@ -322,7 +308,8 @@ private struct FinanceDonutSlice: Shape {
   }
 }
 
-/// Expense categories: a ring that sweeps in once per `drawKey`, with a legend beside it.
+/// Expense categories: a ring that sweeps in over 700 ms once per `drawKey`, with a legend
+/// beside it whose rows fade in one after another.
 struct FinanceDonut: View {
   let slices: [FinanceCategoryShare]
   let currency: FinanceCurrency
@@ -330,21 +317,8 @@ struct FinanceDonut: View {
   let drawKey: String
   let log: FinanceDrawLog
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var progress: Double
 
   private static let ringWidth: CGFloat = 20
-
-  init(
-    slices: [FinanceCategoryShare], currency: FinanceCurrency, format: FinanceFormat,
-    drawKey: String, log: FinanceDrawLog
-  ) {
-    self.slices = slices
-    self.currency = currency
-    self.format = format
-    self.drawKey = drawKey
-    self.log = log
-    _progress = State(initialValue: log.keys.contains(drawKey) ? 1 : 0)
-  }
 
   private var total: Int { slices.reduce(0) { $0 + $1.amountMinor } }
 
@@ -366,34 +340,31 @@ struct FinanceDonut: View {
   }
 
   var body: some View {
-    HStack(alignment: .center, spacing: 18) {
-      ring
-      legend
-    }
-    .onAppear {
-      log.keys.insert(drawKey)
-      guard progress < 1 else { return }
-      withAnimation(reduceMotion ? nil : RitmMotion.ease(0.78).delay(0.1)) { progress = 1 }
+    RitmDrawGate(key: drawKey) { drawn in
+      HStack(alignment: .center, spacing: 18) {
+        ring(drawn: drawn)
+        legend(drawn: drawn)
+      }
     }
   }
 
-  private var ring: some View {
+  private func ring(drawn: Bool) -> some View {
     let spans = self.spans
     return ZStack {
       Circle().stroke(RitmTheme.ringTrack, lineWidth: Self.ringWidth)
       ForEach(Array(slices.enumerated()), id: \.offset) { index, _ in
-        FinanceDonutSlice(start: spans[index].0, end: spans[index].1, progress: progress)
+        FinanceDonutSlice(start: spans[index].0, end: spans[index].1, progress: drawn ? 1 : 0)
           .stroke(FinanceTone.chart(index), style: StrokeStyle(lineWidth: Self.ringWidth))
       }
     }
+    .animation(reduceMotion ? nil : RitmMotion.sweep, value: drawn)
     .padding(Self.ringWidth / 2)
     .rotationEffect(.degrees(-90))
     .frame(width: 128, height: 128)
     .overlay {
       VStack(spacing: 2) {
-        Text(format.money(total, currency))
+        RitmCountText(total) { format.money($0, currency) }
           .ritmFont(12, weight: .semibold)
-          .monospacedDigit()
           .lineLimit(1)
           .minimumScaleFactor(0.6)
         Text(format.text("Всего", "Total")).ritmFont(10).foregroundStyle(RitmTheme.muted)
@@ -403,7 +374,7 @@ struct FinanceDonut: View {
     .accessibilityHidden(true)
   }
 
-  private var legend: some View {
+  private func legend(drawn: Bool) -> some View {
     VStack(alignment: .leading, spacing: 8) {
       ForEach(Array(slices.enumerated()), id: \.offset) { index, slice in
         HStack(spacing: 8) {
@@ -415,18 +386,18 @@ struct FinanceDonut: View {
             .accessibilityHidden(true)
           VStack(alignment: .leading, spacing: 1) {
             Text(name(slice)).ritmFont(11, weight: .semibold).lineLimit(1)
-            Text(format.money(slice.amountMinor, currency))
+            RitmCountText(slice.amountMinor) { format.money($0, currency) }
               .ritmFont(10)
-              .monospacedDigit()
               .foregroundStyle(RitmTheme.muted)
               .lineLimit(1)
           }
           Spacer(minLength: 4)
-          Text("\(Int((slice.share * 100).rounded()))%")
+          RitmCountText(Int((slice.share * 100).rounded())) { "\($0)%" }
             .ritmFont(11, weight: .semibold)
-            .monospacedDigit()
             .foregroundStyle(RitmTheme.muted)
         }
+        .opacity(drawn ? 1 : 0)
+        .animation(reduceMotion ? nil : RitmMotion.legendFade(index: index), value: drawn)
         .accessibilityElement(children: .combine)
       }
     }
@@ -442,16 +413,14 @@ struct FinanceDistributionBar: View {
   let drawKey: String
   let log: FinanceDrawLog
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var progress: CGFloat
-
-  init(shares: [Double], drawKey: String, log: FinanceDrawLog) {
-    self.shares = shares
-    self.drawKey = drawKey
-    self.log = log
-    _progress = State(initialValue: log.keys.contains(drawKey) ? 1 : 0)
-  }
 
   var body: some View {
+    RitmDrawGate(key: drawKey) { drawn in bar(drawn: drawn) }
+      .frame(height: 14)
+      .accessibilityHidden(true)
+  }
+
+  private func bar(drawn: Bool) -> some View {
     GeometryReader { proxy in
       let gaps = 3 * CGFloat(max(0, shares.count - 1))
       let usable = max(0, proxy.size.width - gaps)
@@ -463,14 +432,11 @@ struct FinanceDistributionBar: View {
         }
       }
       .frame(width: proxy.size.width, alignment: .leading)
-      .mask(alignment: .leading) { Rectangle().frame(width: proxy.size.width * progress) }
-    }
-    .frame(height: 14)
-    .accessibilityHidden(true)
-    .onAppear {
-      log.keys.insert(drawKey)
-      guard progress < 1 else { return }
-      withAnimation(reduceMotion ? nil : RitmMotion.ease(0.6).delay(0.1)) { progress = 1 }
+      .mask(alignment: .leading) {
+        Rectangle()
+          .frame(width: drawn ? proxy.size.width : 0)
+          .animation(reduceMotion ? nil : RitmMotion.sweep, value: drawn)
+      }
     }
   }
 }
@@ -526,7 +492,17 @@ struct FinanceStat: Identifiable {
   let title: String
   let value: String
   let tone: Color
+  /// When set, the figure counts to `amount` and `render` writes it exactly like `value`.
+  var amount: Int?
+  var render: ((Int) -> String)?
   var id: String { title }
+
+  /// A figure that counts up; `value` is its settled text.
+  static func counted(
+    title: String, amount: Int, tone: Color, render: @escaping (Int) -> String
+  ) -> FinanceStat {
+    FinanceStat(title: title, value: render(amount), tone: tone, amount: amount, render: render)
+  }
 }
 
 /// Three figures in a row with hairline dividers (Доходы / Расходы / Разница).
@@ -539,17 +515,23 @@ struct FinanceStatTiles: View {
         if index > 0 { Rectangle().fill(RitmTheme.line).frame(width: 1, height: 38) }
         VStack(spacing: 5) {
           Text(stat.title).ritmFont(10).foregroundStyle(RitmTheme.muted).lineLimit(1)
-          Text(stat.value)
+          figure(stat)
             .ritmFont(15, weight: .semibold, tracking: -0.03)
-            .monospacedDigit()
             .foregroundStyle(stat.tone)
             .lineLimit(1)
             .minimumScaleFactor(0.65)
-            .contentTransition(.numericText())
         }
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
       }
+    }
+  }
+
+  @ViewBuilder private func figure(_ stat: FinanceStat) -> some View {
+    if let amount = stat.amount, let render = stat.render {
+      RitmCountText(amount, format: render)
+    } else {
+      Text(stat.value).monospacedDigit()
     }
   }
 }

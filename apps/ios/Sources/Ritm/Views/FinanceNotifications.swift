@@ -299,8 +299,25 @@ struct FinanceNotificationOverlay: View {
   private static let headerHeight: CGFloat = 62
   private static let bannerTop: CGFloat = headerHeight + 6
 
-  private var popoverMotion: Animation { reduceMotion ? .easeOut(duration: 0.12) : RitmMotion.ease(0.18) }
-  private var bannerMotion: Animation { reduceMotion ? .easeOut(duration: 0.12) : RitmMotion.ease(0.22) }
+  /// The popover inflates out of the bell in 0.30 s with a tiny overshoot
+  /// (cubic-bezier(.34, 1.32, .5, 1), about 3 %) and shrinks back in 0.18 s, plain ease-out.
+  private func popoverMotion(opening: Bool) -> Animation {
+    if reduceMotion { return .easeOut(duration: 0.12) }
+    return opening
+      ? .timingCurve(0.34, 1.32, 0.5, 1, duration: 0.30)
+      : .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.18)
+  }
+
+  /// The banner slides down from under the top bar in 0.26 s and leaves upward in 0.20 s.
+  private func bannerMotion(arriving: Bool) -> Animation {
+    if reduceMotion { return .easeOut(duration: 0.12) }
+    return arriving
+      ? .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.26)
+      : .timingCurve(0.4, 0, 1, 1, duration: 0.20)
+  }
+
+  /// Taller than any banner, so at the start of the slide it is wholly behind the top bar.
+  private static let bannerLift: CGFloat = 96
 
   var body: some View {
     let center = store.notices
@@ -314,20 +331,39 @@ struct FinanceNotificationOverlay: View {
             .accessibilityHidden(true)
           popover(center, in: proxy)
         }
-        if let banner = center.banner, !center.isOpen {
-          FinanceBanner(
-            notice: banner, open: { openNotice(banner) }, close: { center.dismissBanner() }
-          )
-          .id(banner.id)
-          .padding(.horizontal, 16)
-          .padding(.top, Self.bannerTop)
-          .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
-        }
+        bannerLayer(center)
       }
       .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
-      .animation(popoverMotion, value: center.isOpen)
-      .animation(bannerMotion, value: center.banner?.id)
+      .animation(popoverMotion(opening: center.isOpen), value: center.isOpen)
     }
+  }
+
+  /// The banner's own layer. Its top is masked at the bar's lower edge, so the banner appears
+  /// from beneath the bar instead of drawing over it.
+  private func bannerLayer(_ center: FinanceNoticeCenter) -> some View {
+    let visible: FinanceNotice? = center.isOpen ? nil : center.banner
+    return ZStack(alignment: .top) {
+      if let banner = visible {
+        FinanceBanner(
+          notice: banner, open: { openNotice(banner) }, close: { center.dismissBanner() }
+        )
+        .id(banner.id)
+        .padding(.horizontal, 16)
+        .padding(.top, Self.bannerTop)
+        .transition(
+          reduceMotion
+            ? .opacity
+            : .offset(y: -Self.bannerLift).combined(with: .opacity))
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    .mask(alignment: .top) {
+      VStack(spacing: 0) {
+        Color.clear.frame(height: reduceMotion ? 0 : Self.headerHeight)
+        Color.black
+      }
+    }
+    .animation(bannerMotion(arriving: visible != nil), value: visible?.id)
   }
 
   private func popover(_ center: FinanceNoticeCenter, in proxy: GeometryProxy) -> some View {
@@ -341,7 +377,8 @@ struct FinanceNotificationOverlay: View {
     // The popover's right edge lines up with the header's (bell + gap + theme toggle).
     let left = min(max(bell.maxX + 52 - width, 12), size.width - width - 12)
     let top = bell.maxY + 2
-    let anchor = UnitPoint(x: bell.midX / max(size.width, 1), y: bell.maxY / max(size.height, 1))
+    // The bell's centre, as a point of the full-size wrapper the transition scales.
+    let anchor = UnitPoint(x: bell.midX / max(size.width, 1), y: bell.midY / max(size.height, 1))
     let listLimit = max(120, min(380, size.height - top - 112 - 150))
     return FinancePopover(
       width: width, notchX: bell.midX - left, listLimit: listLimit, openNotice: openNotice,
@@ -350,9 +387,10 @@ struct FinanceNotificationOverlay: View {
     .padding(.leading, left)
     .padding(.top, top)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    // Scaling the full-size wrapper about the bell point scales the popover about the bell.
+    // Scaling the full-size wrapper about the bell's centre scales the popover about the bell,
+    // so it grows out of the bell (the notch with it) and closes back into it.
     .transition(
-      reduceMotion ? .opacity : .scale(scale: 0.92, anchor: anchor).combined(with: .opacity))
+      reduceMotion ? .opacity : .scale(scale: 0.4, anchor: anchor).combined(with: .opacity))
   }
 }
 

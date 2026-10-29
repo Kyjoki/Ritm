@@ -57,7 +57,7 @@ struct FinanceOverviewSections: View {
 
   var body: some View {
     VStack(spacing: 12) {
-      actionRow
+      actionRow.ritmPageReveal(index: 2)
       dynamicsCard
       distributionCard
       recentCard
@@ -121,7 +121,7 @@ struct FinanceOverviewSections: View {
       entries, currency: currency, period: period, today: today)
     let stats = FinanceWallet.overviewStats(entries, currency: currency, period: period, today: today)
     let key = "overview-\(currency.rawValue)-\(period.rawValue)"
-    return RitmCard {
+    return RitmCard(reveal: 3) {
       VStack(alignment: .leading, spacing: 14) {
         FinanceCardTitle(
           title: format.text("Динамика средств", "Funds over time"),
@@ -141,25 +141,30 @@ struct FinanceOverviewSections: View {
         financeDivider()
         FinanceStatTiles(
           stats: [
-            FinanceStat(
-              title: format.text("Доходы", "Income"),
-              value: format.signed(stats.incomeMinor, currency), tone: FinanceTone.income),
-            FinanceStat(
-              title: format.text("Расходы", "Spending"),
-              value: format.signed(-stats.expenseMinor, currency), tone: FinanceTone.expense),
-            FinanceStat(
-              title: format.text("Разница", "Net"),
-              value: format.signed(stats.incomeMinor - stats.expenseMinor, currency),
-              tone: FinanceTone.net(stats.incomeMinor - stats.expenseMinor)),
+            counted(
+              format.text("Доходы", "Income"), stats.incomeMinor, FinanceTone.income, currency),
+            counted(
+              format.text("Расходы", "Spending"), -stats.expenseMinor, FinanceTone.expense,
+              currency),
+            counted(
+              format.text("Разница", "Net"), stats.incomeMinor - stats.expenseMinor,
+              FinanceTone.net(stats.incomeMinor - stats.expenseMinor), currency),
           ])
       }
     }
   }
 
+  private func counted(
+    _ title: String, _ minor: Int, _ tone: Color, _ currency: FinanceCurrency
+  ) -> FinanceStat {
+    let format = self.format
+    return .counted(title: title, amount: minor, tone: tone) { format.signed($0, currency) }
+  }
+
   private var distributionCard: some View {
     let shares = FinanceWallet.distribution(cards, currency: currency)
     let key = "distribution-\(currency.rawValue)-\(shares.count)"
-    return RitmCard {
+    return RitmCard(reveal: 4) {
       VStack(alignment: .leading, spacing: 14) {
         FinanceCardTitle(
           title: format.text("Распределение по счетам", "Spread across accounts"),
@@ -192,14 +197,12 @@ struct FinanceOverviewSections: View {
           .foregroundStyle(RitmTheme.text)
           .lineLimit(1)
         Spacer(minLength: 6)
-        Text(format.money(share.amountMinor, currency))
+        RitmCountText(share.amountMinor) { format.money($0, currency) }
           .ritmFont(12, weight: .semibold)
-          .monospacedDigit()
           .foregroundStyle(RitmTheme.text)
           .lineLimit(1)
-        Text("\(Int((share.share * 100).rounded()))%")
+        RitmCountText(Int((share.share * 100).rounded())) { "\($0)%" }
           .ritmFont(11)
-          .monospacedDigit()
           .foregroundStyle(RitmTheme.muted)
           .frame(width: 36, alignment: .trailing)
       }
@@ -212,7 +215,7 @@ struct FinanceOverviewSections: View {
 
   private var recentCard: some View {
     let recent = FinanceWallet.recent(entries, limit: 6)
-    return RitmCard {
+    return RitmCard(reveal: 5) {
       VStack(alignment: .leading, spacing: 8) {
         FinanceCardTitle(title: format.text("Последние операции", "Recent operations"))
         if recent.isEmpty {
@@ -247,7 +250,7 @@ struct FinanceAccountSections: View {
 
   var body: some View {
     VStack(spacing: 12) {
-      header
+      header.ritmPageReveal(index: 2)
       dynamicsCard
       switch card.kind {
       case .account: categoriesCard
@@ -268,20 +271,27 @@ struct FinanceAccountSections: View {
           .foregroundStyle(RitmTheme.text)
           .lineLimit(2)
           .accessibilityAddTraits(.isHeader)
-        Text(
-          card.balanceMinor.map {
-            format.text("Баланс ", "Balance ") + format.money($0, card.currency) + " · "
-              + card.currency.rawValue
-          } ?? format.text("Данные выбранного счёта", "Selected account")
-        )
-        .ritmFont(11)
-        .monospacedDigit()
-        .foregroundStyle(RitmTheme.muted)
+        balanceLine
+          .ritmFont(11)
+          .foregroundStyle(RitmTheme.muted)
       }
       Spacer(minLength: 0)
       menu
     }
     .padding(.top, 2)
+  }
+
+  /// «Баланс 1 250 000 ₸ · KZT»: the amount counts up when the account opens or changes.
+  @ViewBuilder private var balanceLine: some View {
+    if let balance = card.balanceMinor {
+      let currency = card.currency
+      RitmCountText(balance) {
+        format.text("Баланс ", "Balance ") + format.money($0, currency) + " · "
+          + currency.rawValue
+      }
+    } else {
+      Text(format.text("Данные выбранного счёта", "Selected account"))
+    }
   }
 
   private var menu: some View {
@@ -337,49 +347,46 @@ struct FinanceAccountSections: View {
   // MARK: Balance
 
   private var stats: [FinanceStat] {
-    let money = { (minor: Int) in format.signed(minor, card.currency) }
+    let currency = card.currency
+    let format = self.format
+    func signed(_ title: String, _ minor: Int, _ tone: Color) -> FinanceStat {
+      .counted(title: title, amount: minor, tone: tone) { format.signed($0, currency) }
+    }
     switch card.kind {
     case .stocks:
       let gains = FinanceWallet.positions(entries, currency: card.currency).compactMap(\.gainMinor)
       let result = gains.reduce(0, +)
       return [
-        FinanceStat(
-          title: format.text("Оценка", "Valuation"),
-          value: card.balanceMinor.map { format.money($0, card.currency) } ?? "—",
-          tone: RitmTheme.text),
-        FinanceStat(
-          title: format.text("Результат", "Result"),
-          value: gains.isEmpty ? "—" : money(result), tone: FinanceTone.net(result)),
-        FinanceStat(
+        card.balanceMinor.map { balance in
+          FinanceStat.counted(
+            title: format.text("Оценка", "Valuation"), amount: balance, tone: RitmTheme.text
+          ) { format.money($0, currency) }
+        }
+          ?? FinanceStat(
+            title: format.text("Оценка", "Valuation"), value: "—", tone: RitmTheme.text),
+        gains.isEmpty
+          ? FinanceStat(
+            title: format.text("Результат", "Result"), value: "—", tone: FinanceTone.net(result))
+          : signed(format.text("Результат", "Result"), result, FinanceTone.net(result)),
+        FinanceStat.counted(
           title: format.text("Позиции", "Positions"),
-          value: "\(FinanceWallet.positions(entries, currency: card.currency).count)",
-          tone: RitmTheme.text),
+          amount: FinanceWallet.positions(entries, currency: card.currency).count,
+          tone: RitmTheme.text
+        ) { "\($0)" },
       ]
     case .deposit:
       let value = FinanceWallet.stats(entries, card: card, period: period, today: today)
       return [
-        FinanceStat(
-          title: format.text("Пополнения", "Deposits"), value: money(value.transfersInMinor),
-          tone: FinanceTone.income),
-        FinanceStat(
-          title: format.text("Снятия", "Withdrawals"), value: money(-value.transfersOutMinor),
-          tone: FinanceTone.expense),
-        FinanceStat(
-          title: format.text("Разница", "Net"), value: money(value.netMinor),
-          tone: FinanceTone.net(value.netMinor)),
+        signed(format.text("Пополнения", "Deposits"), value.transfersInMinor, FinanceTone.income),
+        signed(format.text("Снятия", "Withdrawals"), -value.transfersOutMinor, FinanceTone.expense),
+        signed(format.text("Разница", "Net"), value.netMinor, FinanceTone.net(value.netMinor)),
       ]
     case .account:
       let value = FinanceWallet.stats(entries, card: card, period: period, today: today)
       return [
-        FinanceStat(
-          title: format.text("Поступления", "Income"), value: money(value.incomeMinor),
-          tone: FinanceTone.income),
-        FinanceStat(
-          title: format.text("Расходы", "Spending"), value: money(-value.expenseMinor),
-          tone: FinanceTone.expense),
-        FinanceStat(
-          title: format.text("Разница", "Net"), value: money(value.netMinor),
-          tone: FinanceTone.net(value.netMinor)),
+        signed(format.text("Поступления", "Income"), value.incomeMinor, FinanceTone.income),
+        signed(format.text("Расходы", "Spending"), -value.expenseMinor, FinanceTone.expense),
+        signed(format.text("Разница", "Net"), value.netMinor, FinanceTone.net(value.netMinor)),
       ]
     }
   }
@@ -388,7 +395,7 @@ struct FinanceAccountSections: View {
     let series = FinanceWallet.balanceSeries(entries, card: card, period: period, today: today)
     let key = "card-\(card.id)-\(period.rawValue)"
     let moved = FinanceWallet.stats(entries, card: card, period: period, today: today)
-    return RitmCard {
+    return RitmCard(reveal: 3) {
       VStack(alignment: .leading, spacing: 14) {
         FinanceCardTitle(
           title: format.text("Динамика баланса", "Balance over time"),
@@ -422,7 +429,7 @@ struct FinanceAccountSections: View {
     let slices = FinanceWallet.categories(
       entries, card: card, period: period, today: today)
     let key = "categories-\(card.id)-\(period.rawValue)"
-    return RitmCard {
+    return RitmCard(reveal: 4) {
       VStack(alignment: .leading, spacing: 14) {
         FinanceCardTitle(title: format.text("Расходы по категориям", "Spending by category"))
         if slices.isEmpty {
@@ -440,7 +447,7 @@ struct FinanceAccountSections: View {
   }
 
   private var depositCard: some View {
-    RitmCard {
+    RitmCard(reveal: 4) {
       VStack(alignment: .leading, spacing: 10) {
         FinanceCardTitle(title: format.text("О депозите", "About the deposit"))
         if let entry {
@@ -476,7 +483,7 @@ struct FinanceAccountSections: View {
 
   private var positionsCard: some View {
     let positions = FinanceWallet.positions(entries, currency: card.currency)
-    return RitmCard {
+    return RitmCard(reveal: 4) {
       VStack(alignment: .leading, spacing: 8) {
         FinanceCardTitle(title: format.text("Позиции", "Positions"))
         if positions.isEmpty {
@@ -537,7 +544,7 @@ struct FinanceAccountSections: View {
   private var historyCard: some View {
     let history = FinanceWallet.history(entries, card: card)
     let shown = showAllHistory ? history : Array(history.prefix(Self.historyLimit))
-    return RitmCard {
+    return RitmCard(reveal: 5) {
       VStack(alignment: .leading, spacing: 8) {
         FinanceCardTitle(title: format.text("История операций", "Operation history"))
         if history.isEmpty {

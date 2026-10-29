@@ -137,17 +137,6 @@ enum RitmTheme {
   }
 }
 
-enum RitmMotion {
-  /// `cubic-bezier(.22, 1, .36, 1)`, the easing used by every web transition.
-  static func ease(_ duration: Double) -> Animation {
-    .timingCurve(0.22, 1, 0.36, 1, duration: duration)
-  }
-  static var press: Animation { ease(0.12) }
-  static var indicator: Animation { ease(0.24) }
-  static var dialogIn: Animation { ease(0.24) }
-  static var dialogOut: Animation { .easeIn(duration: 0.18) }
-}
-
 // MARK: - Typography
 
 /// Text roles with the web sizes at 390 px. Sizes scale with Dynamic Type through
@@ -331,37 +320,41 @@ struct RitmPanelBackground: View {
 
 struct RitmCard<Content: View>: View {
   private let content: Content
-  private let entranceDelay: Double
+  private let reveal: Int?
   private let padding: CGFloat
   private let radius: CGFloat
   private let raised: Bool
 
   init(
-    delay: Double = 0, padding: CGFloat = 20, radius: CGFloat = 23, raised: Bool = false,
+    reveal: Int? = nil, padding: CGFloat = 20, radius: CGFloat = 23, raised: Bool = false,
     @ViewBuilder content: () -> Content
   ) {
     self.content = content()
-    self.entranceDelay = delay
+    self.reveal = reveal
     self.padding = padding
     self.radius = radius
     self.raised = raised
   }
 
   var body: some View {
-    content
+    let card = content
       .padding(padding)
       .frame(maxWidth: .infinity, alignment: .leading)
       .background { RitmPanelBackground(radius: radius, raised: raised) }
-      .modifier(RitmEntrance(delay: entranceDelay))
+    if let reveal {
+      card.ritmPageReveal(index: reveal)
+    } else {
+      card
+    }
   }
 }
 
 // MARK: - Buttons
 
-/// Web press feedback: scale .955 over 120 ms, no opacity change. With Reduce Motion the web
-/// removes the animation; a slight dimming keeps the press visible without movement.
+/// Press feedback (MOTION.md): scale .97 over 130 ms, no opacity change. With Reduce Motion the
+/// animation is removed; a slight dimming keeps the press visible without movement.
 struct RitmPressStyle: ButtonStyle {
-  var scale: CGFloat = 0.955
+  var scale: CGFloat = RitmMotion.pressScale
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   func makeBody(configuration: Configuration) -> some View {
@@ -386,7 +379,7 @@ struct RitmPrimaryButtonStyle: ButtonStyle {
       .background(RitmTheme.ctaGradient, in: RoundedRectangle(cornerRadius: 13, style: .circular))
       .shadow(color: RitmTheme.ctaShadow, radius: 13, y: 10)
       .opacity(isEnabled ? 1 : 0.6)
-      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.955 : 1)
+      .scaleEffect(configuration.isPressed && !reduceMotion ? RitmMotion.pressScale : 1)
       .animation(reduceMotion ? nil : RitmMotion.press, value: configuration.isPressed)
   }
 }
@@ -427,7 +420,7 @@ struct RitmSecondaryButtonStyle: ButtonStyle {
           }
       }
       .opacity(isEnabled ? 1 : 0.6)
-      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.955 : 1)
+      .scaleEffect(configuration.isPressed && !reduceMotion ? RitmMotion.pressScale : 1)
       .animation(reduceMotion ? nil : RitmMotion.press, value: configuration.isPressed)
   }
 }
@@ -580,41 +573,5 @@ extension EnvironmentValues {
   var ritmPageActive: Bool {
     get { self[RitmPageActiveKey.self] }
     set { self[RitmPageActiveKey.self] = newValue }
-  }
-}
-
-/// Web MotionPage: the first visit rises 5 pt and fades in over 330 ms; a return visit only
-/// fades from 45 % over 150 ms. Data updates never replay it.
-struct RitmEntrance: ViewModifier {
-  @Environment(\.ritmPageActive) private var active
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var introduced = false
-  @State private var returning = false
-  var delay: Double = 0
-
-  func body(content: Content) -> some View {
-    content
-      .opacity(reduceMotion ? 1 : (introduced ? (returning ? 0.45 : 1) : 0))
-      .offset(y: introduced || reduceMotion ? 0 : 5)
-      .onAppear { enter() }
-      .onChange(of: active) { _, isActive in
-        if isActive { introduced ? returnVisit() : enter() }
-      }
-  }
-
-  private func enter() {
-    guard active, !introduced else { return }
-    withAnimation(reduceMotion ? nil : RitmMotion.ease(0.33).delay(min(delay, 0.22))) {
-      introduced = true
-    }
-  }
-
-  private func returnVisit() {
-    guard !reduceMotion else { return }
-    returning = true
-    // Let the dimmed frame render first, then fade back in on the next run loop turn.
-    Task { @MainActor in
-      withAnimation(.easeOut(duration: 0.15).delay(min(delay * 0.45, 0.1))) { returning = false }
-    }
   }
 }

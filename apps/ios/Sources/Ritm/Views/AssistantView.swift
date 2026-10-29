@@ -56,7 +56,7 @@ struct AssistantView: View {
     ZStack {
       RitmBackground()
       VStack(alignment: .leading, spacing: 0) {
-        heading.padding(.horizontal, 16)
+        heading.padding(.horizontal, 16).ritmPageReveal(index: 0)
         if let error = store.errorMessage, pending == nil {
           RitmErrorBanner(message: error).padding(.horizontal, 16).padding(.bottom, 12)
         }
@@ -65,6 +65,7 @@ struct AssistantView: View {
         chat
           .padding(.horizontal, 16)
           .padding(.bottom, 8)
+          .ritmPageReveal(index: 1)
       }
     }
     .toolbar(.hidden, for: .navigationBar)

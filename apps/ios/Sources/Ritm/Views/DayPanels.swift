@@ -5,7 +5,7 @@ import SwiftUI
 // phone: app.css .tasks-panel/.schedule-panel at max-width 760 px.
 
 private struct DayPanelSurface: ViewModifier {
-  var delay: Double
+  var reveal: Int
 
   func body(content: Content) -> some View {
     content
@@ -13,7 +13,7 @@ private struct DayPanelSurface: ViewModifier {
       .padding(.horizontal, 17)
       .frame(maxWidth: .infinity, alignment: .leading)
       .background { RitmPanelBackground(raised: true) }
-      .modifier(RitmEntrance(delay: delay))
+      .ritmPageReveal(index: reveal)
   }
 }
 
@@ -75,7 +75,7 @@ struct DayTasksPanel: View {
         .foregroundStyle(RitmTheme.text)
         .accessibilityAddTraits(.isHeader)
         Spacer(minLength: 0)
-        Text(counter).ritmFont(10).foregroundStyle(RitmTheme.muted)
+        counterText.ritmFont(10).foregroundStyle(RitmTheme.muted)
       }
       .padding(.bottom, 14)
       dayPicker.padding(.bottom, 14)
@@ -91,15 +91,23 @@ struct DayTasksPanel: View {
       list
       permission
     }
-    .modifier(DayPanelSurface(delay: 0.11))
+    .modifier(DayPanelSurface(reveal: 3))
   }
 
-  private var counter: String {
-    if summary.unknown > 0 { return DayPlan.taskCount(summary.count, language: store.language) }
-    if pending && summary.count == 0 { return store.text("Загружаем…", "Loading…") }
-    if uncertain && summary.count == 0 { return store.text("Не проверено", "Not checked") }
-    return store.text(
-      "\(summary.completed) из \(summary.count)", "\(summary.completed) of \(summary.count)")
+  /// «3 из 5» counts its first number; the other states are plain text.
+  @ViewBuilder private var counterText: some View {
+    if summary.unknown > 0 {
+      Text(DayPlan.taskCount(summary.count, language: store.language))
+    } else if pending && summary.count == 0 {
+      Text(store.text("Загружаем…", "Loading…"))
+    } else if uncertain && summary.count == 0 {
+      Text(store.text("Не проверено", "Not checked"))
+    } else {
+      let total = summary.count
+      RitmCountText(summary.completed) { done in
+        store.text("\(done) из \(total)", "\(done) of \(total)")
+      }
+    }
   }
 
   // MARK: Day switch and quick add
@@ -510,7 +518,7 @@ struct DaySchedulePanel: View {
       }
       backlogGrid
     }
-    .modifier(DayPanelSurface(delay: 0.14))
+    .modifier(DayPanelSurface(reveal: 4))
   }
 
   private var emptySchedule: some View {

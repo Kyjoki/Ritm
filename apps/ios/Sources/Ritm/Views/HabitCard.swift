@@ -97,19 +97,27 @@ struct HabitCard: View {
     return HStack(spacing: 20) {
       HStack(spacing: 5) {
         Image(systemName: "flame").font(.system(size: 13)).foregroundStyle(RitmTheme.accentColor)
-        Text(store.text("Серия", "Streak") + ": ") + Text("\(HabitSchedule.streak(habit, today: today))").foregroundColor(RitmTheme.text)
+        metaCount(store.text("Серия", "Streak"), HabitSchedule.streak(habit, today: today))
       }
       .scaleEffect(isRecord && !reduceMotion ? 1.08 : 1, anchor: .leading)
       .animation(reduceMotion ? nil : RitmMotion.ease(0.42), value: isRecord)
-      Text(store.text("Рекорд", "Record") + ": ") + Text("\(best)").foregroundColor(RitmTheme.text)
+      metaCount(store.text("Рекорд", "Record"), best)
       if let next {
-        Text(store.text("Следующая цель", "Next goal") + ": ") + Text("\(next)").foregroundColor(RitmTheme.text)
+        metaCount(store.text("Следующая цель", "Next goal"), next)
       }
     }
     .ritmFont(11)
     .foregroundStyle(RitmTheme.muted)
     .lineLimit(1)
     .minimumScaleFactor(0.8)
+  }
+
+  /// «Серия: 5»: the label stays muted, the number counts up in the text colour.
+  private func metaCount(_ title: String, _ value: Int) -> some View {
+    HStack(spacing: 0) {
+      Text(title + ": ")
+      RitmCountText(value) { "\($0)" }.foregroundStyle(RitmTheme.text)
+    }
   }
 
   private func dayButton(_ day: String) -> some View {
@@ -180,13 +188,9 @@ struct HabitCard: View {
           .ritmFont(11)
           .foregroundStyle(RitmTheme.muted)
         if scheduledToday {
-          Text(
-            habit.target.map { target in
-              "\(progress) / \(target)" + ((habit.unit ?? "").isEmpty ? "" : " " + (habit.unit ?? ""))
-            } ?? (doneToday ? store.text("Выполнено", "Completed") : store.text("Ещё не выполнено", "Not done yet"))
-          )
-          .ritmFont(12, weight: .bold)
-          .foregroundStyle(RitmTheme.text)
+          progressText(progress)
+            .ritmFont(12, weight: .bold)
+            .foregroundStyle(RitmTheme.text)
         }
       }
       Spacer(minLength: 0)
@@ -199,6 +203,16 @@ struct HabitCard: View {
           }
         }
       }
+    }
+  }
+
+  /// «3 / 8 стаканов»: the recorded count runs up to the new value.
+  @ViewBuilder private func progressText(_ progress: Int) -> some View {
+    if let target = habit.target {
+      let unit = (habit.unit ?? "").isEmpty ? "" : " " + (habit.unit ?? "")
+      RitmCountText(progress) { "\($0) / \(target)" + unit }
+    } else {
+      Text(doneToday ? store.text("Выполнено", "Completed") : store.text("Ещё не выполнено", "Not done yet"))
     }
   }
 

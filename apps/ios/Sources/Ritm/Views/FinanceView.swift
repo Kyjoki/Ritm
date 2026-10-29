@@ -132,34 +132,11 @@ struct FinanceView: View {
           "Поступления, расходы и активы — в одной ясной картине.",
           "Income, spending and assets in one clear picture.")
     ) {
-      if expanded {
-        HStack(spacing: 8) {
-          FinanceCustomizeButton(format: format(cards)) { customizing = true }
-          backPill
-        }
+      // The stack opens and collapses by tapping a card; only the card settings stay a button.
+      if !cards.isEmpty {
+        FinanceCustomizeButton(format: format(cards)) { customizing = true }
       }
     }
-  }
-
-  private var backPill: some View {
-    Button {
-      withAnimation(reduceMotion ? nil : FinanceMotion.close) { expanded = false }
-    } label: {
-      HStack(spacing: 6) {
-        Image(systemName: "arrow.left").font(.system(size: 14, weight: .medium))
-        Text(store.text("Все счета", "All accounts")).ritmFont(13, weight: .semibold)
-      }
-      .foregroundStyle(RitmTheme.accentColor)
-      .padding(.horizontal, 14)
-      .frame(minHeight: 44)
-      .background {
-        Capsule()
-          .fill(RitmTheme.glassRaised)
-          .overlay { Capsule().strokeBorder(RitmTheme.panelBorder, lineWidth: 1) }
-      }
-    }
-    .buttonStyle(RitmPressStyle())
-    .transition(.opacity)
   }
 
   @ViewBuilder private var notices: some View {
@@ -214,8 +191,7 @@ struct FinanceView: View {
       if !expanded { totals(cards, format) }
       FinanceWalletView(
         cards: cards, themes: layoutStore.themes(for: defaultCards), format: format,
-        onCustomize: { customizing = true }, expanded: $expanded, selectedID: $selectedID,
-        dragging: $walletDragging
+        expanded: $expanded, selectedID: $selectedID, dragging: $walletDragging
       )
       .padding(.horizontal, -16)
       ZStack(alignment: .top) {
@@ -245,13 +221,12 @@ struct FinanceView: View {
         .ritmFont(12)
         .foregroundStyle(RitmTheme.muted)
       if let first = totals.first {
-        Text(format.money(first.amountMinor, first.currency))
+        RitmCountText(first.amountMinor) { format.money($0, first.currency) }
           .ritmFont(34, weight: .semibold, tracking: -0.055)
           .monospacedDigit()
           .lineLimit(1)
           .minimumScaleFactor(0.6)
           .foregroundStyle(RitmTheme.titleGradient)
-          .contentTransition(.numericText())
       }
       if totals.count > 1 {
         Text(

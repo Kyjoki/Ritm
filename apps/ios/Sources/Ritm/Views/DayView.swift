@@ -144,8 +144,8 @@ struct DayView: View {
           onAsk: ask, onOpenTask: { openTask($0, nil) })
       }
       DayHabitsCard().padding(.top, 17)
-      bottomLine(today)
-      DayAssistantDock { ask(nil) }.padding(.top, 17)
+      bottomLine(today).ritmPageReveal(index: 6)
+      DayAssistantDock { ask(nil) }.padding(.top, 17).ritmPageReveal(index: 7)
     }
   }
 
@@ -201,7 +201,9 @@ struct DayView: View {
     return DayProgressCard(
       progress: today.count > 0 && today.unknown == 0
         ? Double(today.completed) / Double(today.count) : 0,
-      value: value, caption: caption, rhythm: DayPlan.rhythm(entries), footnote: footnote)
+      value: value,
+      tally: today.unknown == 0 && today.count > 0 ? (today.completed, today.count) : nil,
+      caption: caption, rhythm: DayPlan.rhythm(entries), footnote: footnote)
   }
 
   private func focusCard(_ entries: [DayOccurrence]) -> some View {

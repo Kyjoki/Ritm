@@ -51,7 +51,7 @@ struct DayHabitsCard: View {
         .overlay { shape.strokeBorder(RitmTheme.panelBorder, lineWidth: 1) }
         .shadow(color: RitmTheme.panelShadow, radius: 11, y: 7)
     }
-    .modifier(RitmEntrance(delay: 0.165))
+    .ritmPageReveal(index: 5)
   }
 
   private var heading: some View {
@@ -65,14 +65,22 @@ struct DayHabitsCard: View {
           .ritmFont(18, weight: .semibold, tracking: -0.025)
           .foregroundStyle(RitmTheme.text)
           .accessibilityAddTraits(.isHeader)
-        Text(
-          summary.planned > 0
-            ? "\(summary.completed)/\(summary.planned) " + store.text("за сегодня", "today")
-            : store.text("Нет запланированных привычек", "No habits scheduled")
-        )
-        .ritmFont(11, weight: .medium)
-        .foregroundStyle(RitmTheme.muted)
+        todaySummary(summary)
+          .ritmFont(11, weight: .medium)
+          .foregroundStyle(RitmTheme.muted)
       }
+    }
+  }
+
+  /// «2/4 за сегодня»: the completed count runs up, the rest is static.
+  @ViewBuilder private func todaySummary(_ summary: HabitDaySummary) -> some View {
+    if summary.planned > 0 {
+      let planned = summary.planned
+      RitmCountText(summary.completed) { done in
+        "\(done)/\(planned) " + store.text("за сегодня", "today")
+      }
+    } else {
+      Text(store.text("Нет запланированных привычек", "No habits scheduled"))
     }
   }
 

@@ -6,6 +6,8 @@ import SwiftUI
 struct DayProgressCard: View {
   let progress: Double
   let value: String
+  /// «3 из 5»: when set, the completed number counts up inside the value text.
+  var tally: (completed: Int, total: Int)?
   let caption: String
   let rhythm: [Double]
   let footnote: String
@@ -19,7 +21,7 @@ struct DayProgressCard: View {
       HStack(spacing: 15) {
         DayProgressRing(progress: progress)
         VStack(alignment: .leading, spacing: 5) {
-          Text(value)
+          valueText
             .ritmFont(25, weight: .semibold, tracking: -0.05)
             .lineLimit(1)
             .minimumScaleFactor(0.7)
@@ -46,7 +48,18 @@ struct DayProgressCard: View {
             .clipShape(RoundedRectangle(cornerRadius: 23, style: .circular))
         }
     }
-    .modifier(RitmEntrance(delay: 0.055))
+    .ritmPageReveal(index: 0)
+  }
+
+  /// The value text; «3 из 5» counts its first number, every other state stays static.
+  @ViewBuilder private var valueText: some View {
+    if let tally {
+      RitmCountText(tally.completed) { done in
+        store.text("\(done) из \(tally.total)", "\(done) of \(tally.total)")
+      }
+    } else {
+      Text(value)
+    }
   }
 }
 
@@ -56,21 +69,25 @@ private struct DayProgressRing: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
-    ZStack {
-      Circle().fill(RitmTheme.ringTrack)
-      Circle()
-        .trim(from: 0, to: max(0, min(1, progress)))
-        .stroke(RitmTheme.accentColor, style: StrokeStyle(lineWidth: 5, lineCap: .butt))
-        .rotationEffect(.degrees(-90))
-        .padding(2.5)
-      Circle().fill(RitmTheme.panel).padding(5)
-      Image(systemName: "sparkles")
-        .font(.system(size: 15, weight: .medium))
-        .foregroundStyle(RitmTheme.accentColor)
+    // The sweep plays once per page visit; later progress changes animate from the old arc.
+    RitmDrawGate(key: 0) { drawn in
+      ZStack {
+        Circle().fill(RitmTheme.ringTrack)
+        Circle()
+          .trim(from: 0, to: drawn ? max(0, min(1, progress)) : 0)
+          .stroke(RitmTheme.accentColor, style: StrokeStyle(lineWidth: 5, lineCap: .butt))
+          .rotationEffect(.degrees(-90))
+          .padding(2.5)
+          .animation(reduceMotion ? nil : RitmMotion.sweep, value: drawn)
+          .animation(reduceMotion ? nil : RitmMotion.easeOut(RitmMotion.countChange), value: progress)
+        Circle().fill(RitmTheme.panel).padding(5)
+        Image(systemName: "sparkles")
+          .font(.system(size: 15, weight: .medium))
+          .foregroundStyle(RitmTheme.accentColor)
+      }
     }
     .frame(width: 55, height: 55)
     .shadow(color: Color(rgb: 0x6A42A5, opacity: 0.15), radius: 10, y: 5)
-    .animation(reduceMotion ? nil : RitmMotion.ease(0.92), value: progress)
     .accessibilityHidden(true)
   }
 }
@@ -79,37 +96,39 @@ private struct DayProgressRing: View {
 private struct DayRhythmChart: View {
   let values: [Double]
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var drawn = false
 
   var body: some View {
-    VStack(spacing: 1) {
-      ZStack {
-        RhythmGrid().stroke(RitmTheme.accentColor.opacity(0.13), lineWidth: 0.8)
-        RhythmLine(values: values, closed: true)
-          .fill(RitmTheme.accentColor.opacity(0.17))
-          .opacity(drawn || reduceMotion ? 1 : 0)
-        RhythmLine(values: values, closed: false)
-          .trim(from: 0, to: drawn || reduceMotion ? 1 : 0)
-          .stroke(
-            RitmTheme.accentColor, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+    // The key is the data set: a ticked checkbox does not change it, so nothing replays.
+    RitmDrawGate(key: values) { drawn in
+      VStack(spacing: 1) {
+        ZStack {
+          RhythmGrid().stroke(RitmTheme.accentColor.opacity(0.13), lineWidth: 0.8)
+          RhythmLine(values: values, closed: true)
+            .fill(RitmTheme.accentColor.opacity(0.17))
+            .opacity(drawn ? 1 : 0)
+            .animation(reduceMotion ? nil : RitmMotion.areaFade, value: drawn)
+          RhythmLine(values: values, closed: false)
+            .trim(from: 0, to: drawn ? 1 : 0)
+            .stroke(
+              RitmTheme.accentColor,
+              style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
+            )
+            .animation(reduceMotion ? nil : RitmMotion.lineDraw, value: drawn)
+        }
+        .frame(height: 65)
+        HStack {
+          Text("9 AM")
+          Spacer()
+          Text("3 PM")
+          Spacer()
+          Text("9 PM")
+        }
+        .ritmFont(9, tracking: 0.03)
+        .foregroundStyle(RitmTheme.muted)
       }
-      .frame(height: 65)
-      HStack {
-        Text("9 AM")
-        Spacer()
-        Text("3 PM")
-        Spacer()
-        Text("9 PM")
-      }
-      .ritmFont(9, tracking: 0.03)
-      .foregroundStyle(RitmTheme.muted)
     }
     .frame(minHeight: 86, alignment: .top)
     .accessibilityHidden(true)
-    .onAppear {
-      guard !drawn else { return }
-      withAnimation(reduceMotion ? nil : RitmMotion.ease(0.92).delay(0.18)) { drawn = true }
-    }
   }
 }
 
@@ -232,7 +251,7 @@ struct DayFocusCard: View {
     }
     .buttonStyle(RitmPressStyle())
     .accessibilityElement(children: .combine)
-    .modifier(RitmEntrance(delay: 0.08))
+    .ritmPageReveal(index: 1)
   }
 }
 
@@ -282,7 +301,7 @@ struct DayAssistantCard: View {
     .padding(20)
     .frame(maxWidth: .infinity, minHeight: 110, alignment: .leading)
     .background { RitmPanelBackground(raised: true) }
-    .modifier(RitmEntrance(delay: 0.11))
+    .ritmPageReveal(index: 2)
   }
 }
 

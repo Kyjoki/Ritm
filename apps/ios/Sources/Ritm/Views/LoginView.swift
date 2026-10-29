@@ -26,7 +26,7 @@ struct LoginView: View {
             Text(store.text("Ваши дела. Ваш темп.", "Your plans. Your pace."))
               .font(.title3).foregroundStyle(.secondary)
           }
-          RitmCard {
+          RitmCard(reveal: 0) {
             VStack(alignment: .leading, spacing: 20) {
               Text(store.text("С возвращением", "Welcome back")).font(.title2.bold())
               Text(

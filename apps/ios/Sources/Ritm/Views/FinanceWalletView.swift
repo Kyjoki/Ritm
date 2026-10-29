@@ -251,8 +251,6 @@ struct FinanceWalletView: View {
   /// Card id -> theme, resolved by the caller from the default order.
   let themes: [String: FinanceCardTheme]
   let format: FinanceFormat
-  /// Opens the card settings; nil hides the button.
-  var onCustomize: (() -> Void)?
   @Binding var expanded: Bool
   @Binding var selectedID: String
   /// True while a horizontal drag owns the touch, so the page can stop scrolling.
@@ -262,6 +260,13 @@ struct FinanceWalletView: View {
   @State private var drag: CGFloat = 0
   @State private var lock: FinanceDragLock = .open
   @GestureState private var touching = false
+  /// Set once a drag has been recognised and cleared shortly after the finger lifts, so the
+  /// release of a drag is never taken for a tap on a card.
+  @State private var dragMoved = false
+  @State private var hintSeen = UserDefaults.standard.bool(forKey: FinanceWalletView.hintKey)
+
+  /// The caption under the dots disappears for good after the first collapse.
+  private static let hintKey = "ritm.finance.collapseHintSeen"
 
   private var selectedIndex: Int {
     cards.firstIndex(where: { $0.id == selectedID }) ?? 0
@@ -289,11 +294,27 @@ struct FinanceWalletView: View {
       guard !isTouching else { return }
       // A cancelled drag never reaches onEnded; a finished one has already reset the lock.
       Task { @MainActor in
+        clearDragMark()
         guard lock != .open else { return }
         lock = .open
         dragging = false
         withAnimation(reduceMotion ? nil : FinanceMotion.snap) { drag = 0 }
       }
+    }
+    .onChange(of: expanded) { was, now in
+      // The first collapse teaches the gesture; the caption stays away afterwards.
+      guard was, !now, !hintSeen else { return }
+      hintSeen = true
+      UserDefaults.standard.set(true, forKey: Self.hintKey)
+    }
+  }
+
+  /// A drag that just ended must not also count as a tap: the mark outlives the lift by a beat.
+  private func clearDragMark() {
+    guard dragMoved else { return }
+    Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(150))
+      dragMoved = false
     }
   }
 
@@ -354,19 +375,30 @@ struct FinanceWalletView: View {
     .animation(reduceMotion ? nil : FinanceMotion.snap, value: cards.map(\.id))
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(format.name(card) + ", " + balanceText(card))
-    .accessibilityHint(
-      expanded
-        ? format.text("Выбрать счёт", "Select account")
-        : format.text("Раскрыть карты", "Open the cards")
-    )
+    .accessibilityHint(tapHint(index: index))
+    .accessibilityAction(named: Text(tapHint(index: index))) { tap(index, fromGesture: false) }
     .accessibilityAddTraits(current ? AccessibilityTraits([.isButton, .isSelected]) : .isButton)
     .accessibilityHidden(place.opacity < 0.01)
   }
 
-  private func tap(_ index: Int) {
-    guard cards.indices.contains(index) else { return }
+  /// What a tap on this card does: open the stack, collapse it, or move the carousel here.
+  private func tapHint(index: Int) -> String {
+    guard expanded else { return format.text("Раскрыть карты", "Open the cards") }
+    return index == selectedIndex
+      ? format.text("Свернуть карты", "Collapse the cards")
+      : format.text("Выбрать счёт", "Select account")
+  }
+
+  /// Stacked: any card opens the carousel on itself. Carousel: the centred card collapses it,
+  /// a neighbour moves to the centre without collapsing. The release of a drag is not a tap.
+  private func tap(_ index: Int, fromGesture: Bool = true) {
+    guard cards.indices.contains(index), !(fromGesture && dragMoved) else { return }
     if expanded {
-      if index != selectedIndex { snap(to: index) }
+      if index == selectedIndex {
+        withAnimation(reduceMotion ? nil : FinanceMotion.close) { expanded = false }
+      } else {
+        snap(to: index)
+      }
     } else {
       withAnimation(reduceMotion ? nil : FinanceMotion.open) {
         selectedID = cards[index].id
@@ -391,6 +423,7 @@ struct FinanceWalletView: View {
     DragGesture(minimumDistance: 10)
       .updating($touching) { _, state, _ in state = true }
       .onChanged { value in
+        if !dragMoved { dragMoved = true }
         guard expanded, cards.count > 1 else { return }
         if lock == .open {
           lock =
@@ -400,7 +433,10 @@ struct FinanceWalletView: View {
         if !dragging { dragging = true }
         drag = resisted(value.translation.width, selected: selected, pitch: metrics.pitch)
       }
-      .onEnded { value in finish(value, metrics: metrics, selected: selected) }
+      .onEnded { value in
+        finish(value, metrics: metrics, selected: selected)
+        clearDragMark()
+      }
   }
 
   /// Edges pull back like a rubber band; one drag never moves more than one card.
@@ -426,40 +462,28 @@ struct FinanceWalletView: View {
 
   // MARK: Footer
 
+  /// Only the open carousel has a footer: the dots and, until the first collapse, a caption.
+  /// The stack itself is opened and closed by tapping a card.
   @ViewBuilder private var footer: some View {
     if expanded {
-      if cards.count > 1 { dots }
-    } else {
-      openButton
+      VStack(spacing: 0) {
+        if cards.count > 1 { dots }
+        if !hintSeen { collapseHint }
+      }
+      .transition(.opacity)
     }
   }
 
-  private var openButton: some View {
-    HStack(spacing: 8) {
-      openCardsButton
-      if let onCustomize { FinanceCustomizeButton(format: format, action: onCustomize) }
-    }
-    .padding(.horizontal, 16)
-    .transition(.opacity)
-  }
-
-  private var openCardsButton: some View {
-    Button {
-      tap(selectedIndex)
-    } label: {
-      HStack(spacing: 10) {
-        Image(systemName: "rectangle.stack").font(.system(size: 16, weight: .regular))
-        Text(format.text("Раскрыть карты", "Open the cards")).ritmFont(13, weight: .semibold)
-      }
-      .foregroundStyle(RitmTheme.accentColor)
-      .frame(maxWidth: .infinity, minHeight: 48)
-      .background {
-        Capsule()
-          .fill(RitmTheme.glassRaised)
-          .overlay { Capsule().strokeBorder(RitmTheme.panelBorder, lineWidth: 1) }
-      }
-    }
-    .buttonStyle(RitmPressStyle())
+  private var collapseHint: some View {
+    Text(format.text("Нажмите на карту, чтобы свернуть", "Tap a card to collapse"))
+      .ritmFont(11)
+      .foregroundStyle(RitmTheme.muted)
+      .multilineTextAlignment(.center)
+      .frame(maxWidth: .infinity)
+      .padding(.horizontal, 16)
+      .padding(.bottom, 4)
+      .transition(.opacity)
+      .accessibilityHidden(true)
   }
 
   private var dots: some View {
@@ -482,11 +506,10 @@ struct FinanceWalletView: View {
     }
     .frame(maxWidth: .infinity)
     .animation(reduceMotion ? nil : FinanceMotion.snap, value: selectedID)
-    .transition(.opacity)
   }
 }
 
-/// The 48 pt «Настроить карты» icon button, next to «Раскрыть карты» and in the heading.
+/// The 48 pt «Настроить карты» icon button in the page heading.
 struct FinanceCustomizeButton: View {
   let format: FinanceFormat
   let action: () -> Void

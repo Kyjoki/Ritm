@@ -60,12 +60,12 @@ struct AccountView: View {
           MutationRecoveryView()
           if baseline != nil {
             VStack(spacing: 14) {
-              languageCard
-              accountCard
-              appearanceCard
-              notificationsCard
-              connectionsCard
-              ServerAddressCard()
+              languageCard.ritmPageReveal(index: 0)
+              accountCard.ritmPageReveal(index: 1)
+              appearanceCard.ritmPageReveal(index: 2)
+              notificationsCard.ritmPageReveal(index: 3)
+              connectionsCard.ritmPageReveal(index: 4)
+              ServerAddressCard().ritmPageReveal(index: 5)
             }
             .padding(.top, 22)
             .disabled(saving)

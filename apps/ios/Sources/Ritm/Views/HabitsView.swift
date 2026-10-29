@@ -60,7 +60,8 @@ struct HabitsView: View {
             HabitsAnalytics(
               habits: visible, archived: showArchived, month: $month, offset: $offset,
               selectedDay: $selectedDay)
-            listHeading
+              .ritmPageReveal(index: 0)
+            listHeading.ritmPageReveal(index: 1)
             list
           }
           RitmPageFooter()
@@ -166,9 +167,10 @@ struct HabitsView: View {
       .padding(24)
       .frame(maxWidth: .infinity, minHeight: 145)
       .background { RitmPanelBackground(raised: true) }
+      .ritmPageReveal(index: 2)
     } else {
       VStack(spacing: 13) {
-        ForEach(visible) { habit in
+        ForEach(Array(visible.enumerated()), id: \.element.id) { index, habit in
           HabitCard(
             habit: habit, today: today, busy: busyID != nil, isRecord: recordID == habit.id,
             onEdit: {
@@ -177,7 +179,9 @@ struct HabitsView: View {
             },
             onArchive: { Task { await setArchived(habit, !(habit.archived ?? false)) } },
             onDelete: { deleting = habit },
-            onProgress: { day, count in Task { await setProgress(habit, day: day, count: count) } })
+            onProgress: { day, count in Task { await setProgress(habit, day: day, count: count) } }
+          )
+          .ritmPageReveal(index: 2 + index)
         }
       }
     }
@@ -287,6 +291,7 @@ private struct HabitsAnalytics: View {
   @Binding var offset: Int
   @Binding var selectedDay: String?
   @Environment(RitmStore.self) private var store
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private var today: String { store.today }
   private var dates: [String] { HabitsPlan.periodDates(today: today, month: month, offset: offset) }
@@ -314,7 +319,7 @@ private struct HabitsAnalytics: View {
         controls
       }
       Text(periodLabel).ritmFont(12).foregroundStyle(RitmTheme.muted).padding(.top, 5)
-      HabitGauge(percent: totals.progress)
+      HabitGauge(percent: totals.progress, key: "\(archived)-\(month)-\(offset)")
         .frame(width: 210, height: 127)
         .frame(maxWidth: .infinity)
         .padding(.top, 12)
@@ -404,27 +409,30 @@ private struct HabitsAnalytics: View {
     let days = store.text(" дн.", " d")
     return HStack(spacing: 8) {
       if todaySummary.planned > 0 {
-        kpi(store.text("Сегодня выполнено", "Done today"), value: "\(todaySummary.completed)", suffix: " / \(todaySummary.planned)")
+        kpi(store.text("Сегодня выполнено", "Done today"), count: todaySummary.completed, suffix: " / \(todaySummary.planned)")
       } else {
         kpi(store.text("Сегодня выполнено", "Done today"), empty: store.text("Нет запланированных привычек", "No habits scheduled"))
       }
-      kpi(store.text("Текущая серия", "Current streak"), value: "\(current)", suffix: days)
-      kpi(store.text("Лучшая серия", "Best streak"), value: "\(best)", suffix: days)
+      kpi(store.text("Текущая серия", "Current streak"), count: current, suffix: days)
+      kpi(store.text("Лучшая серия", "Best streak"), count: best, suffix: days)
     }
   }
 
-  private func kpi(_ title: String, value: String? = nil, suffix: String = "", empty: String? = nil)
+  private func kpi(_ title: String, count: Int? = nil, suffix: String = "", empty: String? = nil)
     -> some View
   {
     VStack(alignment: .leading, spacing: 10) {
       Text(title).ritmFont(10).foregroundStyle(RitmTheme.muted)
       if let empty {
         Text(empty).ritmFont(12, weight: .medium, lineSpacing: 3).foregroundStyle(RitmTheme.muted)
-      } else if let value {
-        (Text(value).foregroundColor(RitmTheme.text) + Text(suffix).foregroundColor(RitmTheme.muted))
-          .ritmFont(22, weight: .semibold, tracking: -0.04)
-          .lineLimit(1)
-          .minimumScaleFactor(0.7)
+      } else if let count {
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+          RitmCountText(count) { "\($0)" }.foregroundStyle(RitmTheme.text)
+          Text(suffix).foregroundStyle(RitmTheme.muted)
+        }
+        .ritmFont(22, weight: .semibold, tracking: -0.04)
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
       }
     }
     .padding(.vertical, 9)
@@ -480,8 +488,13 @@ private struct HabitsAnalytics: View {
   }
 
   private var bars: some View {
+    // Bars grow from the baseline once per period; ticking a habit only moves the bar it changes.
+    RitmDrawGate(key: dates) { drawn in barsRow(drawn: drawn) }
+  }
+
+  private func barsRow(drawn: Bool) -> some View {
     HStack(alignment: .bottom, spacing: month ? 5 : 8) {
-      ForEach(daily) { entry in
+      ForEach(Array(daily.enumerated()), id: \.element.id) { index, entry in
         Button {
           selectedDay = entry.day
         } label: {
@@ -494,7 +507,13 @@ private struct HabitsAnalytics: View {
                   topTrailingRadius: 6, style: .circular
                 )
                 .fill(RitmTheme.accentColor)
-                .frame(height: proxy.size.height * CGFloat(entry.summary.progress ?? 0) / 100)
+                .frame(
+                  height: drawn ? proxy.size.height * CGFloat(entry.summary.progress ?? 0) / 100 : 0
+                )
+                .animation(reduceMotion ? nil : RitmMotion.barGrow(index: index), value: drawn)
+                .animation(
+                  reduceMotion ? nil : RitmMotion.easeOut(RitmMotion.countChange),
+                  value: entry.summary.progress)
               }
             }
             .frame(height: 111)
@@ -524,18 +543,27 @@ private struct HabitsAnalytics: View {
         .accessibilityLabel(describe(entry.day, entry.summary, template: "EEE d MMM"))
       }
     }
-    .animation(RitmMotion.ease(0.3), value: dates)
   }
 
   private var heatmap: some View {
     let lead = dates.first.flatMap(HabitSchedule.weekday) ?? 0
     let columns = Array(repeating: GridItem(.fixed(44), spacing: 5), count: 7)
     return ScrollView(.horizontal) {
-      LazyVGrid(columns: columns, spacing: 5) {
-        ForEach(0..<lead, id: \.self) { _ in Color.clear.frame(height: 44) }
-        ForEach(daily) { entry in heatCell(entry.day, entry.summary) }
+      RitmDrawGate(key: dates) { drawn in
+        LazyVGrid(columns: columns, spacing: 5) {
+          ForEach(0..<lead, id: \.self) { _ in Color.clear.frame(height: 44) }
+          ForEach(Array(daily.enumerated()), id: \.element.id) { index, entry in
+            heatCell(entry.day, entry.summary)
+              .opacity(drawn ? 1 : 0)
+              .scaleEffect(drawn ? 1 : 0.8)
+              .animation(
+                reduceMotion
+                  ? nil : RitmMotion.easeOut(0.3).delay(Double(min(index, 24)) * 0.015),
+                value: drawn)
+          }
+        }
+        .padding(2)
       }
-      .padding(2)
     }
     .scrollIndicators(.hidden)
     .accessibilityElement(children: .contain)
@@ -635,19 +663,25 @@ private struct HabitsAnalytics: View {
 /// `.habits-gauge`: a half ring with the period's completion share.
 private struct HabitGauge: View {
   let percent: Int?
+  /// Identifies the period: the arc sweeps in again only when it changes.
+  let key: String
   @Environment(RitmStore.self) private var store
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     ZStack(alignment: .bottom) {
       HabitArc().stroke(RitmTheme.ringTrack, style: StrokeStyle(lineWidth: 13, lineCap: .round))
-      HabitArc()
-        .trim(from: 0, to: CGFloat(percent ?? 0) / 100)
-        .stroke(RitmTheme.accentColor, style: StrokeStyle(lineWidth: 13, lineCap: .round))
-        .shadow(color: Color(rgb: 0x7F4EC0, opacity: 0.16), radius: 5)
-        .animation(reduceMotion ? nil : RitmMotion.ease(0.65), value: percent)
+      RitmDrawGate(key: key) { drawn in
+        HabitArc()
+          .trim(from: 0, to: drawn ? CGFloat(percent ?? 0) / 100 : 0)
+          .stroke(RitmTheme.accentColor, style: StrokeStyle(lineWidth: 13, lineCap: .round))
+          .shadow(color: Color(rgb: 0x7F4EC0, opacity: 0.16), radius: 5)
+          .animation(reduceMotion ? nil : RitmMotion.sweep, value: drawn)
+          .animation(
+            reduceMotion ? nil : RitmMotion.easeOut(RitmMotion.countChange), value: percent)
+      }
       VStack(spacing: 1) {
-        Text(percent.map { "\($0)%" } ?? "—")
+        percentText
           .ritmFont(37, weight: .bold, tracking: -0.065)
           .foregroundStyle(RitmTheme.text)
           .monospacedDigit()
@@ -665,6 +699,14 @@ private struct HabitGauge: View {
     .accessibilityLabel(
       percent.map { store.text("Выполнено \($0) процентов", "\($0) percent done") }
         ?? store.text("Нет запланированных привычек", "No habits scheduled"))
+  }
+
+  @ViewBuilder private var percentText: some View {
+    if let percent {
+      RitmCountText(percent) { "\($0)%" }
+    } else {
+      Text("—")
+    }
   }
 }
 
