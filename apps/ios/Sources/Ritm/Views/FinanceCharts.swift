@@ -349,7 +349,8 @@ struct FinanceDonut: View {
   private var total: Int { slices.reduce(0) { $0 + $1.amountMinor } }
 
   private func name(_ slice: FinanceCategoryShare) -> String {
-    slice.name ?? format.text("Другое", "Other")
+    guard let name = slice.name else { return format.text("Другое", "Other") }
+    return format.text(name, FinanceCategories.englishName(for: name))
   }
 
   /// Start/end fractions of each slice around the ring.
@@ -407,6 +408,11 @@ struct FinanceDonut: View {
       ForEach(Array(slices.enumerated()), id: \.offset) { index, slice in
         HStack(spacing: 8) {
           Circle().fill(FinanceTone.chart(index)).frame(width: 9, height: 9)
+          Image(systemName: FinanceCategories.symbol(for: slice.name))
+            .font(.system(size: 12, weight: .regular))
+            .foregroundStyle(RitmTheme.muted)
+            .frame(width: 16)
+            .accessibilityHidden(true)
           VStack(alignment: .leading, spacing: 1) {
             Text(name(slice)).ritmFont(11, weight: .semibold).lineLimit(1)
             Text(format.money(slice.amountMinor, currency))

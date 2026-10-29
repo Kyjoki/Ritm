@@ -11,7 +11,7 @@ final class RitmNavigation {
   var habitCelebration: String?
 }
 enum RitmSection: String, CaseIterable, Hashable {
-  case day, calendar, habits, assistant, finance, settings
+  case day, calendar, habits, finance, assistant, settings
   var symbol: String {
     switch self {
     case .day: "square.grid.2x2"
@@ -25,13 +25,17 @@ enum RitmSection: String, CaseIterable, Hashable {
   /// Pages whose header scrolls with the content, as on the web. The other pages still keep
   /// their actions in the navigation bar, so their header stays pinned for now.
   var embedsHeader: Bool { [.day, .habits, .settings].contains(self) }
+  /// Tabs shown in the bottom bar, left to right; the last slot is «Ещё».
+  static let barSections: [RitmSection] = [.day, .calendar, .habits, .finance]
+  /// Pages reached through the «Ещё» panel.
+  static let moreSections: [RitmSection] = [.assistant, .settings]
 }
 struct RitmRootView: View {
   @Environment(RitmStore.self) private var store
   @Environment(\.colorScheme) private var scheme
   @State private var navigation = RitmNavigation()
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var showingMore = false
-  private let mainSections: [RitmSection] = [.day, .calendar, .habits, .assistant]
   private var visitedSections: [RitmSection] {
     RitmSection.allCases.filter { navigation.visited.contains($0) }
   }
@@ -66,17 +70,19 @@ struct RitmRootView: View {
           .background { RitmBackground() }
           .safeAreaInset(edge: .bottom, spacing: 0) {
             RitmNavigationBar(
-              sections: mainSections, current: navigation.section,
-              select: { navigation.section = $0 }, openMore: { showingMore = true })
+              sections: RitmSection.barSections, current: navigation.section,
+              select: selectTab, toggleMore: toggleMore)
           }
           FinanceNotificationOverlay(openNotice: openNotice, openSettings: openNotificationSettings)
             .zIndex(1)
-          if showingMore {
-            RitmMoreDialog(current: navigation.section) { section in
-              if let section { navigation.section = section }
-              showingMore = false
+        }
+        .overlayPreferenceValue(RitmMoreAnchorKey.self) { anchor in
+          GeometryReader { proxy in
+            if let anchor {
+              RitmMorePanel(
+                isOpen: showingMore, current: navigation.section, anchor: proxy[anchor],
+                container: proxy.size, choose: selectTab, dismiss: { setMore(false) })
             }
-            .zIndex(2)
           }
         }
         .environment(navigation)
@@ -88,11 +94,30 @@ struct RitmRootView: View {
     .foregroundStyle(RitmTheme.text)
     .preferredColorScheme(preferredScheme)
     .environment(\.locale, Locale(identifier: store.language.rawValue))
+    .onChange(of: store.notices.isOpen) { _, isOpen in
+      if isOpen { setMore(false) }
+    }
     .onChange(of: navigation.section) { _, _ in
+      setMore(false)
       store.notices.closePopover()
       UIApplication.shared.sendAction(
         #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
+  }
+
+  private func setMore(_ open: Bool) {
+    guard showingMore != open else { return }
+    withAnimation(reduceMotion ? nil : RitmMore.animation) { showingMore = open }
+  }
+
+  private func toggleMore() {
+    if !showingMore { store.notices.closePopover() }
+    setMore(!showingMore)
+  }
+
+  private func selectTab(_ section: RitmSection) {
+    setMore(false)
+    navigation.section = section
   }
 
   /// A tapped notice or banner: mark it read and land on its card in Finance.
@@ -197,21 +222,36 @@ struct RitmShellHeader: View {
   }
 }
 
-/// Web mobile navigation (navigation-glass.css): a 374 × 74 capsule 8 pt from the edges,
-/// five 72 pt columns and one 52 pt indicator that slides between them.
+/// Motion of the bottom bar (prototype shell.html): the indicator slides in 0.28 s on
+/// cubic-bezier(.2, .8, .2, 1); the «Ещё» panel opens and closes in 0.18 s.
+private enum RitmMore {
+  static let slide = Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28)
+  static let animation = Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.18)
+}
+
+/// Bounds of the «Ещё» slot in the bar, so the panel can be anchored right above it.
+private struct RitmMoreAnchorKey: PreferenceKey {
+  static var defaultValue: Anchor<CGRect>? { nil }
+  static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+    value = value ?? nextValue()
+  }
+}
+
+/// Prototype bottom navigation: an icon-only glass capsule with four section slots and «Ещё»,
+/// and one 56 × 42 indicator that slides between the slots.
 private struct RitmNavigationBar: View {
   @Environment(RitmStore.self) private var store
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   @Environment(\.colorSchemeContrast) private var contrast
-  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-  @Namespace private var indicator
   let sections: [RitmSection]
   let current: RitmSection
   let select: (RitmSection) -> Void
-  let openMore: () -> Void
+  let toggleMore: () -> Void
 
-  private var moreSelected: Bool { [.finance, .settings].contains(current) }
+  private var moreSelected: Bool { RitmSection.moreSections.contains(current) }
+  private var slotCount: Int { sections.count + 1 }
+  private var selectedIndex: Int { sections.firstIndex(of: current) ?? sections.count }
 
   var body: some View {
     HStack(spacing: 0) {
@@ -220,16 +260,28 @@ private struct RitmNavigationBar: View {
           select(section)
         }
       }
-      // «Ещё» takes the name of the open page behind it (App.tsx).
       item(
-        title: moreSelected ? current.title(store) : store.text("Ещё", "More"),
-        symbol: "ellipsis", selected: moreSelected, action: openMore)
+        title: store.text("Ещё", "More"), symbol: "ellipsis", selected: moreSelected,
+        value: moreSelected ? current.title(store) : "", action: toggleMore
+      )
+      .anchorPreference(key: RitmMoreAnchorKey.self, value: .bounds) { $0 }
     }
-    .padding(7)
+    .background {
+      GeometryReader { proxy in
+        let slot = proxy.size.width / CGFloat(slotCount)
+        activeIndicator
+          .frame(width: 56, height: 42)
+          .frame(width: slot, height: proxy.size.height)
+          .offset(x: slot * CGFloat(selectedIndex))
+      }
+      .allowsHitTesting(false)
+      .accessibilityHidden(true)
+    }
+    .animation(reduceMotion ? nil : RitmMore.slide, value: selectedIndex)
+    .padding(6)
     .background { capsule }
-    .padding(.horizontal, 8)
+    .padding(.horizontal, 16)
     .padding(.bottom, 8)
-    .animation(reduceMotion ? nil : RitmMotion.indicator, value: current)
   }
 
   private var capsule: some View {
@@ -266,44 +318,29 @@ private struct RitmNavigationBar: View {
   }
 
   private func item(
-    title: String, symbol: String, selected: Bool, action: @escaping () -> Void
+    title: String, symbol: String, selected: Bool, value: String = "", action: @escaping () -> Void
   ) -> some View {
     Button(action: action) {
-      VStack(spacing: 3) {
-        Image(systemName: symbol)
-          .font(.system(size: 21, weight: .regular))
-          .frame(height: 22)
-          .modifier(RitmIconSettle(active: selected))
-        if !dynamicTypeSize.isAccessibilitySize {
-          Text(title)
-            .ritmText(.navLabel)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .frame(height: 22)
-        }
-      }
-      .frame(maxWidth: .infinity, minHeight: 60)
-      .foregroundStyle(
-        contrast == .increased
-          ? RitmTheme.text
-          : selected
-            ? Color(light: 0x643B96, dark: 0xE2CAFF) : Color(light: 0x645275, dark: 0xC1B3D4)
-      )
-      .background {
-        if selected {
-          activeIndicator.padding(.vertical, 4)
-            .matchedGeometryEffect(id: "active", in: indicator)
-        }
-      }
-      .contentShape(Rectangle())
+      Image(systemName: symbol)
+        .font(.system(size: 22, weight: .regular))
+        .modifier(RitmIconSettle(active: selected))
+        .frame(maxWidth: .infinity, minHeight: 52)
+        .foregroundStyle(
+          contrast == .increased
+            ? RitmTheme.text
+            : selected
+              ? Color(light: 0x643B96, dark: 0xE2CAFF) : Color(light: 0x645275, dark: 0xC1B3D4)
+        )
+        .contentShape(Rectangle())
     }
-    .buttonStyle(RitmPressStyle(scale: 0.95))
+    .buttonStyle(RitmPressStyle(scale: 0.92))
     .accessibilityLabel(title)
+    .accessibilityValue(value)
     .accessibilityAddTraits(selected ? .isSelected : [])
   }
 
   private var activeIndicator: some View {
-    let shape = RoundedRectangle(cornerRadius: 14, style: .circular)
+    let shape = RoundedRectangle(cornerRadius: 16, style: .circular)
     return shape
       .fill(
         RitmTheme.linear(
@@ -342,100 +379,132 @@ private struct RitmIconSettle: ViewModifier {
   }
 }
 
-/// Web «Ещё разделы»: a centred 358 pt dialog over a dimmed backdrop.
-private struct RitmMoreDialog: View {
+/// Speech-bubble outline: a rounded rectangle whose bottom edge carries a small tail at `tailX`.
+private struct RitmBubble: Shape {
+  static let tailHeight: CGFloat = 7
+  static let radius: CGFloat = 22
+  let tailX: CGFloat
+
+  func path(in rect: CGRect) -> Path {
+    let r = Self.radius
+    let half = Self.tailHeight
+    let bodyBottom = rect.maxY - Self.tailHeight
+    let x = min(max(tailX, rect.minX + r + half), rect.maxX - r - half)
+    var path = Path()
+    path.move(to: CGPoint(x: rect.minX + r, y: rect.minY))
+    path.addArc(
+      tangent1End: CGPoint(x: rect.maxX, y: rect.minY),
+      tangent2End: CGPoint(x: rect.maxX, y: bodyBottom), radius: r)
+    path.addArc(
+      tangent1End: CGPoint(x: rect.maxX, y: bodyBottom),
+      tangent2End: CGPoint(x: x + half, y: bodyBottom), radius: r)
+    path.addLine(to: CGPoint(x: x + half, y: bodyBottom))
+    path.addLine(to: CGPoint(x: x, y: rect.maxY))
+    path.addLine(to: CGPoint(x: x - half, y: bodyBottom))
+    path.addArc(
+      tangent1End: CGPoint(x: rect.minX, y: bodyBottom),
+      tangent2End: CGPoint(x: rect.minX, y: rect.minY), radius: r)
+    path.addArc(
+      tangent1End: CGPoint(x: rect.minX, y: rect.minY),
+      tangent2End: CGPoint(x: rect.maxX, y: rect.minY), radius: r)
+    path.closeSubpath()
+    return path
+  }
+}
+
+/// «Ещё»: a compact panel above the bar, its tail pointing at the «Ещё» slot. It stays in the
+/// tree and animates (scale + fade from the tail) so it can also close smoothly.
+private struct RitmMorePanel: View {
+  private static let tileWidth: CGFloat = 108
+  private static let padding: CGFloat = 10
+  private static let spacing: CGFloat = 8
+  private static let panelWidth = tileWidth * 2 + spacing + padding * 2
+
   @Environment(RitmStore.self) private var store
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var shown = false
+  let isOpen: Bool
   let current: RitmSection
-  let close: (RitmSection?) -> Void
+  let anchor: CGRect
+  let container: CGSize
+  let choose: (RitmSection) -> Void
+  let dismiss: () -> Void
+
+  private var barTop: CGFloat { anchor.minY - 6 }
+  private var edgeInset: CGFloat { 16 }
+  /// Tail position inside the panel, measured from its leading edge.
+  private var tailX: CGFloat { Self.panelWidth - (container.width - edgeInset - anchor.midX) }
 
   var body: some View {
-    ZStack {
-      Color(rgb: 0x190E2D, opacity: 0.5)
-        .ignoresSafeArea()
-        .opacity(shown ? 1 : 0)
-        .onTapGesture { dismiss(nil) }
-        .accessibilityHidden(true)
-      VStack(alignment: .leading, spacing: 0) {
-        HStack {
-          Text(store.text("Ещё разделы", "More sections"))
-            .ritmText(.sectionTitle)
-            .foregroundStyle(RitmTheme.text)
-            .accessibilityAddTraits(.isHeader)
-          Spacer()
-          Button {
-            dismiss(nil)
-          } label: {
-            Image(systemName: "xmark")
-              .font(.system(size: 17))
-              .foregroundStyle(RitmTheme.muted)
-              .frame(width: 44, height: 44)
-          }
-          .buttonStyle(RitmPressStyle())
+    ZStack(alignment: .top) {
+      if isOpen {
+        // Taps above the bar close the panel; the bar itself stays live.
+        Color.clear
+          .contentShape(Rectangle())
+          .onTapGesture(perform: dismiss)
+          .frame(maxWidth: .infinity)
+          .frame(height: max(0, barTop))
+          .accessibilityElement()
           .accessibilityLabel(store.text("Закрыть", "Close"))
-        }
-        .padding(.bottom, 12)
-        VStack(spacing: 10) {
-          ForEach([RitmSection.finance, .settings], id: \.self) { section in
-            row(section)
-          }
-        }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 4)
+          .accessibilityAddTraits(.isButton)
       }
-      .padding(20)
-      .frame(maxWidth: 358)
-      .background {
-        let shape = RoundedRectangle(cornerRadius: 22, style: .circular)
-        shape.fill(RitmTheme.glassDense)
-          .overlay { shape.strokeBorder(RitmTheme.panelBorder, lineWidth: 1) }
-          .shadow(color: Color(rgb: 0x1A0D2D, opacity: 0.3), radius: 45, y: 32)
-      }
-      .padding(.horizontal, 16)
-      .scaleEffect(shown || reduceMotion ? 1 : 0.955)
-      .opacity(shown ? 1 : 0)
-      .accessibilityAddTraits(.isModal)
+      panel
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        .padding(.trailing, edgeInset)
+        .padding(.bottom, max(0, container.height - barTop + 8))
     }
-    .onAppear {
-      withAnimation(reduceMotion ? nil : RitmMotion.dialogIn) { shown = true }
-    }
+    .frame(width: container.width, height: container.height)
   }
 
-  private func row(_ section: RitmSection) -> some View {
+  private var panel: some View {
+    HStack(spacing: Self.spacing) {
+      ForEach(RitmSection.moreSections, id: \.self) { tile($0) }
+    }
+    .padding(Self.padding)
+    .padding(.bottom, RitmBubble.tailHeight)
+    .background {
+      let bubble = RitmBubble(tailX: tailX)
+      bubble.fill(RitmTheme.glassDense)
+        .overlay { bubble.stroke(RitmTheme.panelBorder, lineWidth: 1) }
+        .shadow(color: Color(rgb: 0x1A0D2D, opacity: 0.3), radius: 24, y: 12)
+    }
+    .scaleEffect(
+      isOpen ? 1 : 0.82,
+      anchor: UnitPoint(x: min(max(tailX / Self.panelWidth, 0), 1), y: 1))
+    .opacity(isOpen ? 1 : 0)
+    .allowsHitTesting(isOpen)
+    .accessibilityHidden(!isOpen)
+    .accessibilityAddTraits(.isModal)
+    .accessibilityAction(.escape, dismiss)
+  }
+
+  private func tile(_ section: RitmSection) -> some View {
     let selected = section == current
     return Button {
-      dismiss(section)
+      choose(section)
     } label: {
-      HStack(spacing: 12) {
-        Image(systemName: section.symbol).font(.system(size: 22)).frame(width: 26)
-        Text(section.title(store)).font(.system(size: 16))
-        Spacer()
-        if selected {
-          Image(systemName: "checkmark").font(.system(size: 18)).accessibilityHidden(true)
-        }
+      VStack(spacing: 6) {
+        Image(systemName: section.symbol)
+          .font(.system(size: 22))
+          .foregroundStyle(selected ? RitmTheme.accentColor : RitmTheme.muted)
+        Text(section.title(store))
+          .font(.system(size: 12, weight: .semibold))
+          .lineLimit(1)
+          .minimumScaleFactor(0.8)
       }
       .foregroundStyle(selected ? RitmTheme.accentColor : RitmTheme.text)
-      .padding(.vertical, 12).padding(.horizontal, 14)
-      .frame(maxWidth: .infinity, minHeight: 56)
+      .padding(.vertical, 8).padding(.horizontal, 6)
+      .frame(width: Self.tileWidth)
+      .frame(minHeight: 72)
       .background {
         let shape = RoundedRectangle(cornerRadius: 16, style: .circular)
-        shape.fill(RitmTheme.soft)
+        shape.fill(selected ? RitmTheme.soft : RitmTheme.panel)
           .overlay {
             shape.strokeBorder(selected ? RitmTheme.accentColor : RitmTheme.line, lineWidth: 1)
           }
       }
+      .contentShape(Rectangle())
     }
-    .buttonStyle(RitmPressStyle())
+    .buttonStyle(RitmPressStyle(scale: 0.95))
     .accessibilityAddTraits(selected ? .isSelected : [])
-  }
-
-  private func dismiss(_ section: RitmSection?) {
-    withAnimation(reduceMotion ? nil : RitmMotion.dialogOut) { shown = false }
-    Task { @MainActor in
-      try? await Task.sleep(for: .milliseconds(reduceMotion ? 120 : 180))
-      close(section)
-    }
   }
 }
 

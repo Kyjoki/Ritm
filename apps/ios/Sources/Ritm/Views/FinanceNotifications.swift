@@ -146,9 +146,14 @@ struct FinanceNoticeLine {
 
 extension FinanceNoticeCenter {
   func line(for notice: FinanceNotice, store: RitmStore) -> FinanceNoticeLine {
+    // The title is the category, else the note; only a known category earns its own icon.
+    let known =
+      (notice.kind == .income || notice.kind == .expense) && FinanceCategories.isKnown(notice.title)
     let title =
       notice.title.isEmpty
-      ? FinanceDisplay.title(notice.kind, language: store.language) : notice.title
+      ? FinanceDisplay.title(notice.kind, language: store.language)
+      : known ? store.text(notice.title, FinanceCategories.englishName(for: notice.title))
+      : notice.title
     let money = FinanceDisplay.money(
       notice.amountMinor, currency: notice.currency, language: store.language)
     let sign = notice.kind == .income ? "+" : notice.kind == .expense ? "\u{2212}" : ""
@@ -157,7 +162,9 @@ extension FinanceNoticeCenter {
       createdAt: notice.createdAt, now: store.now, timeZone: store.timeZone,
       language: store.language)
     return FinanceNoticeLine(
-      symbol: FinanceDisplay.symbol(notice.kind), title: title, amount: sign + money,
+      symbol: known
+        ? FinanceCategories.symbol(for: notice.title) : FinanceDisplay.symbol(notice.kind),
+      title: title, amount: sign + money,
       subtitle: [title, card].compactMap { $0 }.joined(separator: " · "),
       detail: [card, time.isEmpty ? nil : time].compactMap { $0 }.joined(separator: " · "))
   }

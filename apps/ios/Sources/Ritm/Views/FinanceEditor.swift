@@ -77,7 +77,7 @@ struct FinanceEditor: View {
             TextField(store.text("Название", "Name"), text: $name)
           }
           if kind == .income || kind == .expense {
-            TextField(store.text("Категория", "Category"), text: $category)
+            categoryPicker
           }
           if kind != .stock || quantity.isEmpty {
             TextField(
@@ -139,6 +139,33 @@ struct FinanceEditor: View {
         toID = ""
       }
     }
+  }
+  private var categoryTiles: [FinanceCategory] {
+    let list = kind == .income ? FinanceCategories.income : FinanceCategories.expense
+    let stored = (entry?.category ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !stored.isEmpty, !list.contains(where: { $0.label == stored }) else { return list }
+    // A category saved elsewhere stays selectable, so editing the record does not lose it.
+    return list + [
+      FinanceCategory(label: stored, english: stored, symbol: FinanceCategories.symbol(for: stored))
+    ]
+  }
+  private var categoryPicker: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text(store.text("Категория", "Category"))
+        .ritmFont(12, weight: .semibold)
+        .foregroundStyle(RitmTheme.muted)
+      LazyVGrid(
+        columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8
+      ) {
+        ForEach(categoryTiles, id: \.label) { item in
+          FinanceCategoryTile(
+            symbol: item.symbol, title: store.text(item.label, item.english),
+            selected: category == item.label
+          ) { category = item.label }
+        }
+      }
+    }
+    .padding(.vertical, 4)
   }
   private var stockFields: some View {
     Section {
@@ -274,5 +301,34 @@ struct FinanceEditor: View {
       await onSave()
       dismiss()
     }
+  }
+}
+
+private struct FinanceCategoryTile: View {
+  let symbol: String
+  let title: String
+  let selected: Bool
+  let action: () -> Void
+
+  var body: some View {
+    let shape = RoundedRectangle(cornerRadius: 12, style: .circular)
+    Button(action: action) {
+      VStack(spacing: 4) {
+        Image(systemName: symbol).font(.system(size: 19, weight: .regular)).frame(height: 22)
+        Text(title).ritmFont(10, weight: .medium).lineLimit(1).minimumScaleFactor(0.7)
+      }
+      .foregroundStyle(selected ? RitmTheme.accentColor : RitmTheme.text)
+      .frame(maxWidth: .infinity, minHeight: 56)
+      .padding(.horizontal, 2)
+      .background(selected ? RitmTheme.soft : Color.clear, in: shape)
+      .overlay {
+        shape.strokeBorder(
+          selected ? RitmTheme.accentColor : RitmTheme.line, lineWidth: selected ? 1.5 : 1)
+      }
+      .contentShape(shape)
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(title)
+    .accessibilityAddTraits(selected ? .isSelected : [])
   }
 }

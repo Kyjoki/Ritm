@@ -35,8 +35,14 @@ struct FinanceView: View {
   @State private var followUp: FinanceFollowUp?
   @State private var deleting: FinanceEntry?
   @State private var drawLog = FinanceDrawLog()
+  @State private var layoutStore = FinanceCardLayoutStore()
+  @State private var customizing = false
 
-  private var cards: [FinanceCard] { FinanceWallet.cards(store.financeEntries, today: store.today) }
+  /// The wallet in its default order; colours are resolved against it so they survive reordering.
+  private var defaultCards: [FinanceCard] {
+    FinanceWallet.cards(store.financeEntries, today: store.today)
+  }
+  private var cards: [FinanceCard] { layoutStore.ordered(defaultCards) }
 
   private func format(_ cards: [FinanceCard]) -> FinanceFormat {
     FinanceFormat(language: store.language, zone: store.timeZone, cards: cards)
@@ -70,6 +76,10 @@ struct FinanceView: View {
     .onChange(of: store.financeFocus) { _, _ in consumeFocus() }
     .onChange(of: store.financeLoaded) { _, _ in consumeFocus() }
     .onChange(of: cards.isEmpty) { _, isEmpty in if isEmpty { expanded = false } }
+    .sheet(isPresented: $customizing) {
+      FinanceCardSettingsSheet(
+        defaultCards: defaultCards, layoutStore: layoutStore, format: format(defaultCards))
+    }
     .sheet(item: $editing) { route in
       FinanceEditor(
         entry: route.entry, kind: route.kind, currency: route.currency,
@@ -122,7 +132,12 @@ struct FinanceView: View {
           "Поступления, расходы и активы — в одной ясной картине.",
           "Income, spending and assets in one clear picture.")
     ) {
-      if expanded { backPill }
+      if expanded {
+        HStack(spacing: 8) {
+          FinanceCustomizeButton(format: format(cards)) { customizing = true }
+          backPill
+        }
+      }
     }
   }
 
@@ -198,7 +213,8 @@ struct FinanceView: View {
     return VStack(alignment: .leading, spacing: 14) {
       if !expanded { totals(cards, format) }
       FinanceWalletView(
-        cards: cards, format: format, expanded: $expanded, selectedID: $selectedID,
+        cards: cards, themes: layoutStore.themes(for: defaultCards), format: format,
+        onCustomize: { customizing = true }, expanded: $expanded, selectedID: $selectedID,
         dragging: $walletDragging
       )
       .padding(.horizontal, -16)

@@ -70,7 +70,7 @@ struct FinanceFormat {
     switch entry.type {
     case .income, .expense:
       let category = (entry.category ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-      if !category.isEmpty { return category }
+      if !category.isEmpty { return text(category, FinanceCategories.englishName(for: category)) }
       let note = entry.note.trimmingCharacters(in: .whitespacesAndNewlines)
       return note.isEmpty ? typeName(entry.type) : note
     case .transfer: return typeName(.transfer)
@@ -172,17 +172,18 @@ struct FinanceOperationRow: View {
     .accessibilityElement(children: .combine)
   }
 
-  private var symbol: String {
+  private var symbol: String { FinanceDetailStyle.symbol(entry) }
+}
+
+enum FinanceDetailStyle {
+  /// Income and expense show their category icon; the rest keep the transfer or asset symbol.
+  static func symbol(_ entry: FinanceEntry) -> String {
     switch entry.type {
-    case .income: "arrow.down.left"
-    case .expense: "arrow.up.right"
+    case .income, .expense: FinanceCategories.symbol(for: entry.category)
     case .transfer: "arrow.left.arrow.right"
     default: FinanceDisplay.symbol(entry.type)
     }
   }
-}
-
-enum FinanceDetailStyle {
   static func accent(_ kind: FinanceEntryKind) -> Color {
     switch kind {
     case .income: FinanceTone.income
@@ -241,13 +242,7 @@ struct FinanceDetailSheet: View {
 
   private func header(_ entry: FinanceEntry, _ format: FinanceFormat) -> some View {
     HStack(alignment: .center, spacing: 14) {
-      Image(
-        systemName: entry.type == .income
-          ? "arrow.down.left"
-          : entry.type == .expense
-            ? "arrow.up.right"
-            : entry.type == .transfer ? "arrow.left.arrow.right" : FinanceDisplay.symbol(entry.type)
-      )
+      Image(systemName: FinanceDetailStyle.symbol(entry))
       .font(.system(size: 20, weight: .medium))
       .foregroundStyle(FinanceDetailStyle.accent(entry.type))
       .frame(width: 52, height: 52)
@@ -287,7 +282,9 @@ struct FinanceDetailSheet: View {
           row(store.text("Счёт", "Account"), account)
         }
         if let category = entry.category, !category.isEmpty {
-          row(store.text("Категория", "Category"), category)
+          row(
+            store.text("Категория", "Category"),
+            store.text(category, FinanceCategories.englishName(for: category)))
         }
         if let name = entry.name, entry.type == .deposit || entry.type == .stock {
           row(store.text("Название", "Name"), name)

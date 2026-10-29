@@ -78,34 +78,43 @@ struct FinanceCardStyle {
   let glow: Color
   let symbol: String
 
-  private static func make(_ a: UInt32, _ b: UInt32, _ c: UInt32, glow: UInt32, symbol: String)
-    -> FinanceCardStyle
-  {
-    FinanceCardStyle(
-      colors: [Color(rgb: a), Color(rgb: b), Color(rgb: c)], glow: Color(rgb: glow), symbol: symbol)
+  /// A card's gradient stops, the same in light and dark (the card is a dark object on both
+  /// backgrounds). Colours follow the prototype tokens `--k-*`; the glow is their light tint.
+  private static func palette(_ theme: FinanceCardTheme) -> (UInt32, UInt32, UInt32, UInt32) {
+    switch theme {
+    case .violet: (0x55309F, 0x6D46C2, 0x8860DA, 0xDDB9FF)
+    case .indigo: (0x263891, 0x4058BD, 0x5E78E0, 0xBCC8FF)
+    case .plum: (0x66217F, 0x96418F, 0xBB5FA8, 0xF0B8F2)
+    case .teal: (0x08505A, 0x1C7D6E, 0x2C9580, 0xA8F0E0)
+    case .graphite: (0x232F48, 0x44588A, 0x6279AE, 0xB9C7E8)
+    case .rose: (0x7D1F45, 0xAE3F6B, 0xCF6A8F, 0xFFC0D4)
+    case .sand: (0x6B4A22, 0x97702F, 0xB88B49, 0xF2D9A8)
+    case .forest: (0x123F28, 0x236A46, 0x388A5C, 0xB0EBC6)
+    }
   }
 
-  private static let accounts = [
-    make(0x44306B, 0x6B49A0, 0x8A65B7, glow: 0xDDB9FF, symbol: "wallet.pass"),
-    make(0x2F2C78, 0x4E4BB5, 0x7A78D8, glow: 0xC4C2FF, symbol: "wallet.pass"),
-  ]
-  private static let deposits = [
-    make(0x27316F, 0x3F4FA8, 0x6678CF, glow: 0xBCC8FF, symbol: "building.columns"),
-    make(0x53245F, 0x83428E, 0xB070B3, glow: 0xF0B8F2, symbol: "building.columns"),
-    make(0x14505F, 0x1F7F86, 0x49AFA0, glow: 0xA8F0E0, symbol: "building.columns"),
-  ]
-  private static let stocks = make(
-    0x1B3558, 0x2B64A0, 0x4F95CB, glow: 0xB4DDFF, symbol: "chart.line.uptrend.xyaxis")
+  private static func symbol(_ kind: FinanceCard.Kind) -> String {
+    switch kind {
+    case .account: "wallet.pass"
+    case .deposit: "building.columns"
+    case .stocks: "chart.line.uptrend.xyaxis"
+    }
+  }
 
-  static func style(for card: FinanceCard, among cards: [FinanceCard]) -> FinanceCardStyle {
-    func rank(_ kind: FinanceCard.Kind) -> Int {
-      cards.filter { $0.kind == kind }.firstIndex(where: { $0.id == card.id }) ?? 0
-    }
-    switch card.kind {
-    case .account: return accounts[rank(.account) % accounts.count]
-    case .deposit: return deposits[rank(.deposit) % deposits.count]
-    case .stocks: return stocks
-    }
+  static func style(theme: FinanceCardTheme, kind: FinanceCard.Kind) -> FinanceCardStyle {
+    let p = palette(theme)
+    return FinanceCardStyle(
+      colors: [Color(rgb: p.0), Color(rgb: p.1), Color(rgb: p.2)], glow: Color(rgb: p.3),
+      symbol: symbol(kind))
+  }
+
+  /// The swatch and mini-preview fill: the card gradient at the prototype's 140 degrees.
+  var gradient: LinearGradient {
+    RitmTheme.linear(
+      [
+        .init(color: colors[0], location: 0), .init(color: colors[1], location: 0.6),
+        .init(color: colors[2], location: 1),
+      ], cssAngle: 140)
   }
 }
 
@@ -237,8 +246,13 @@ private enum FinanceDragLock { case open, horizontal, vertical }
 /// cards with stable ids: each card's centre, scale and opacity are computed from the state
 /// (stacked or expanded, selected index, live drag), so there are no clones to hide afterwards.
 struct FinanceWalletView: View {
+  /// In the owner's order.
   let cards: [FinanceCard]
+  /// Card id -> theme, resolved by the caller from the default order.
+  let themes: [String: FinanceCardTheme]
   let format: FinanceFormat
+  /// Opens the card settings; nil hides the button.
+  var onCustomize: (() -> Void)?
   @Binding var expanded: Bool
   @Binding var selectedID: String
   /// True while a horizontal drag owns the touch, so the page can stop scrolling.
@@ -324,7 +338,7 @@ struct FinanceWalletView: View {
     let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
     return FinanceCardFace(
       name: format.name(card), balance: balanceText(card), caption: caption(card),
-      style: FinanceCardStyle.style(for: card, among: cards),
+      style: FinanceCardStyle.style(theme: themes[card.id] ?? .violet, kind: card.kind),
       compact: !expanded && index > 0, selected: current, width: metrics.cardWidth
     )
     .contentShape(shape)
@@ -337,6 +351,7 @@ struct FinanceWalletView: View {
     .allowsHitTesting(place.opacity > 0.01)
     .zIndex(Double(cards.count - index))
     .animation(reduceMotion ? nil : moveAnimation(index: index, selected: selected), value: expanded)
+    .animation(reduceMotion ? nil : FinanceMotion.snap, value: cards.map(\.id))
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(format.name(card) + ", " + balanceText(card))
     .accessibilityHint(
@@ -420,6 +435,15 @@ struct FinanceWalletView: View {
   }
 
   private var openButton: some View {
+    HStack(spacing: 8) {
+      openCardsButton
+      if let onCustomize { FinanceCustomizeButton(format: format, action: onCustomize) }
+    }
+    .padding(.horizontal, 16)
+    .transition(.opacity)
+  }
+
+  private var openCardsButton: some View {
     Button {
       tap(selectedIndex)
     } label: {
@@ -436,8 +460,6 @@ struct FinanceWalletView: View {
       }
     }
     .buttonStyle(RitmPressStyle())
-    .padding(.horizontal, 16)
-    .transition(.opacity)
   }
 
   private var dots: some View {
@@ -461,5 +483,28 @@ struct FinanceWalletView: View {
     .frame(maxWidth: .infinity)
     .animation(reduceMotion ? nil : FinanceMotion.snap, value: selectedID)
     .transition(.opacity)
+  }
+}
+
+/// The 48 pt «Настроить карты» icon button, next to «Раскрыть карты» and in the heading.
+struct FinanceCustomizeButton: View {
+  let format: FinanceFormat
+  let action: () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      Image(systemName: "slider.horizontal.3")
+        .font(.system(size: 16, weight: .regular))
+        .foregroundStyle(RitmTheme.accentColor)
+        .frame(width: 48, height: 48)
+        .background {
+          Circle()
+            .fill(RitmTheme.glassRaised)
+            .overlay { Circle().strokeBorder(RitmTheme.panelBorder, lineWidth: 1) }
+        }
+        .contentShape(Circle())
+    }
+    .buttonStyle(RitmPressStyle())
+    .accessibilityLabel(format.text("Настроить карты", "Customize cards"))
   }
 }
