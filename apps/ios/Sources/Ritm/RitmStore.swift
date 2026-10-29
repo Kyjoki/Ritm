@@ -25,6 +25,8 @@ final class RitmStore {
   private(set) var pendingTheme: Theme?
   /// When a feature-specific limit (for example the idea review) allows the next retry.
   private(set) var featureRetryAt: Date?
+  /// The API failure behind errorMessage, for screens that explain it in place (the assistant).
+  private(set) var lastFailure: APIError?
 
   @ObservationIgnored private let client: APIClient?
   @ObservationIgnored private let vault = SessionVault()
@@ -309,6 +311,7 @@ final class RitmStore {
     let ticket = generation
     isMutating = true
     errorMessage = nil
+    lastFailure = nil
     var result: Value?
     do { result = try await operation(client) } catch {
       guard ticket == generation else {
@@ -429,6 +432,7 @@ final class RitmStore {
 
   private func present(_ error: Error) async {
     if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+    lastFailure = error as? APIError
     if let failure = error as? APIError {
       if failure.requiresAuthentication {
         await clearAccount()
