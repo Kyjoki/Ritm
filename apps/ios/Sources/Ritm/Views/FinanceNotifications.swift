@@ -27,7 +27,7 @@ final class FinanceNoticeCenter {
 
   private static let baselineKey = "ritm.finance.notices.baseline"
   private static let readKey = "ritm.finance.notices.read"
-  private static let bannerSeconds = 4.5
+  private static let bannerSeconds = 2.0
 
   init(defaults: UserDefaults = .standard) {
     self.defaults = defaults
@@ -309,12 +309,12 @@ struct FinanceNotificationOverlay: View {
   }
 
   /// The banner inflates from its own centre like the popover (0.30 s, about 3 % overshoot) and
-  /// shrinks back into it while fading in 0.20 s.
+  /// shrinks back into it while fading, slowly and evenly (0.46 s ease-in-out), after 2 s on screen.
   private func bannerMotion(arriving: Bool) -> Animation {
     if reduceMotion { return .easeOut(duration: 0.12) }
     return arriving
       ? .timingCurve(0.34, 1.32, 0.5, 1, duration: 0.30)
-      : .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.20)
+      : .timingCurve(0.65, 0, 0.35, 1, duration: 0.46)
   }
 
   var body: some View {
