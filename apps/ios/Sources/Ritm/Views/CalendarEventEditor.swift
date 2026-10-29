@@ -169,7 +169,8 @@ struct CalendarEventEditor: View {
   @State private var date = ""
   @State private var time = "09:00"
   @State private var allDay = false
-  @State private var duration = 60
+  /// GoogleEventDialog starts a new entry at 30 minutes.
+  @State private var duration = 30
   @State private var recurrence: TaskRepeat = .none
   @State private var colorID = ""
   @State private var extendedColors = false

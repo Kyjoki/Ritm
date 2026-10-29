@@ -15,6 +15,9 @@ final class RitmStore {
   private(set) var calendarStatusText = ""
   private(set) var calendarReady = false
   private(set) var calendarPartial = false
+  private(set) var calendarFailed = false
+  private(set) var googleStatus: GoogleCalendarStatus?
+  private(set) var googleTasks: GoogleTasksStatus?
   private(set) var lastSyncedAt: Date?
   private(set) var isOffline = false
   private(set) var uncertainWrite = false
@@ -51,6 +54,21 @@ final class RitmStore {
     return formatter.string(from: now)
   }
   func text(_ ru: String, _ en: String) -> String { language == .ru ? ru : en }
+
+  var googleConnected: Bool { googleStatus?.status == .connected }
+  /// App.tsx `googlePending`: the status or the first schedule is still on its way.
+  var googlePending: Bool {
+    !calendarFailed && (googleStatus == nil || (googleConnected && !calendarReady))
+  }
+  /// App.tsx `googleUncertain`: connected, but the schedule is missing, failed or partial.
+  var googleUncertain: Bool {
+    googleConnected && (!calendarReady || calendarPartial || calendarFailed)
+  }
+  /// The current wall-clock minute in the account zone.
+  var minuteOfDay: Int {
+    let calendar = FeatureDate.calendar(timeZone)
+    return calendar.component(.hour, from: now) * 60 + calendar.component(.minute, from: now)
+  }
 
   func requestNotificationPermission() async -> Bool {
     let allowed = await notifications.requestPermission()
@@ -372,10 +390,13 @@ final class RitmStore {
     do {
       let status = try await client.googleStatus()
       guard ticket == generation, isSignedIn, !Task.isCancelled else { return }
+      googleStatus = status
       guard status.status == .connected else {
         todayEvents = []
+        googleTasks = nil
         calendarReady = false
         calendarPartial = false
+        calendarFailed = false
         calendarStatusText = text(
           "Подключите Google Calendar в веб-версии Ritm.",
           "Connect Google Calendar in Ritm on the web.")
@@ -387,8 +408,10 @@ final class RitmStore {
       todayEvents = result.events.sorted {
         ($0.start.dateTime ?? $0.start.date ?? "") < ($1.start.dateTime ?? $1.start.date ?? "")
       }
+      googleTasks = result.tasks
       calendarReady = true
       calendarPartial = result.partial
+      calendarFailed = false
       calendarStatusText =
         result.partial
         ? text("Google вернул часть расписания.", "Google returned a partial schedule.")
@@ -396,6 +419,7 @@ final class RitmStore {
     } catch {
       guard ticket == generation, !Task.isCancelled else { return }
       calendarReady = false
+      calendarFailed = true
       calendarStatusText = text(
         "Не удалось обновить расписание. Показаны последние полученные события.",
         "Could not refresh the schedule. Showing the last received events.")
@@ -456,6 +480,9 @@ final class RitmStore {
     calendarStatusText = ""
     calendarReady = false
     calendarPartial = false
+    calendarFailed = false
+    googleStatus = nil
+    googleTasks = nil
     lastSyncedAt = nil
     isOffline = false
     uncertainWrite = false

@@ -69,7 +69,7 @@ public enum CalendarEventPolicy {
     return String(format: "%02d:%02d", parts.hour ?? 0, parts.minute ?? 0)
   }
 
-  private static func instant(_ value: String?) -> Date? {
+  static func instant(_ value: String?) -> Date? {
     guard let value else { return nil }
     let formatter = ISO8601DateFormatter()
     formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -78,7 +78,7 @@ public enum CalendarEventPolicy {
     return formatter.date(from: value)
   }
 
-  private static func isAmbiguous(_ instant: Date, zone: TimeZone) -> Bool {
+  static func isAmbiguous(_ instant: Date, zone: TimeZone) -> Bool {
     let calendar = calendar(zone)
     let components: Set<Calendar.Component> = [.year, .month, .day, .hour, .minute, .second]
     let current = calendar.dateComponents(components, from: instant)

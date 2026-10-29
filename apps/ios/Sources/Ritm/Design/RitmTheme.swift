@@ -62,6 +62,23 @@ enum RitmTheme {
   static func accent(_ scheme: ColorScheme) -> Color { accentColor }
   static func surface(_ scheme: ColorScheme) -> Color { panel }
 
+  /// `color-mix(in srgb, color share, base)`, resolved per theme.
+  static func mix(_ color: Color, _ share: Double, into base: Color) -> Color {
+    Color(
+      uiColor: UIColor { traits in
+        let top = UIColor(color).resolvedColor(with: traits)
+        let bottom = UIColor(base).resolvedColor(with: traits)
+        var (r1, g1, b1, a1): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+        var (r2, g2, b2, a2): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+        top.getRed(&r1, green: &g1, blue: &b1, alpha: &a1)
+        bottom.getRed(&r2, green: &g2, blue: &b2, alpha: &a2)
+        let amount = CGFloat(share)
+        return UIColor(
+          red: r1 * amount + r2 * (1 - amount), green: g1 * amount + g2 * (1 - amount),
+          blue: b1 * amount + b2 * (1 - amount), alpha: a1 * amount + a2 * (1 - amount))
+      })
+  }
+
   /// Start and end points of a CSS `linear-gradient(<angle>deg, …)` in a unit box.
   static func points(cssAngle degrees: Double) -> (start: UnitPoint, end: UnitPoint) {
     let radians = degrees * .pi / 180
@@ -196,23 +213,43 @@ enum RitmTextRole {
   }
 }
 
-private struct RitmTextModifier: ViewModifier {
-  let role: RitmTextRole
+private struct RitmFontModifier: ViewModifier {
+  let size: CGFloat
+  let weight: Font.Weight
+  /// Letter spacing in em.
+  let tracking: CGFloat
+  let lineSpacing: CGFloat
+  let style: UIFont.TextStyle
   @Environment(\.dynamicTypeSize) private var typeSize
 
   func body(content: Content) -> some View {
     let traits = UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(typeSize))
-    let size = UIFontMetrics(forTextStyle: role.textStyle)
-      .scaledValue(for: role.size, compatibleWith: traits)
+    let scaled = UIFontMetrics(forTextStyle: style).scaledValue(for: size, compatibleWith: traits)
     content
-      .font(.system(size: size, weight: role.weight))
-      .tracking(size * role.tracking)
-      .lineSpacing(role.lineSpacing * size / role.size)
+      .font(.system(size: scaled, weight: weight))
+      .tracking(scaled * tracking)
+      .lineSpacing(lineSpacing * scaled / size)
   }
 }
 
 extension View {
-  func ritmText(_ role: RitmTextRole) -> some View { modifier(RitmTextModifier(role: role)) }
+  func ritmText(_ role: RitmTextRole) -> some View {
+    modifier(
+      RitmFontModifier(
+        size: role.size, weight: role.weight, tracking: role.tracking,
+        lineSpacing: role.lineSpacing, style: role.textStyle))
+  }
+
+  /// A one-off web size that has no shared role, scaled with Dynamic Type like the roles.
+  func ritmFont(
+    _ size: CGFloat, weight: Font.Weight = .regular, tracking: CGFloat = 0,
+    lineSpacing: CGFloat = 0
+  ) -> some View {
+    modifier(
+      RitmFontModifier(
+        size: size, weight: weight, tracking: tracking, lineSpacing: lineSpacing,
+        style: size >= 20 ? .title2 : size >= 13 ? .subheadline : .caption1))
+  }
 }
 
 // MARK: - Surfaces
@@ -351,6 +388,21 @@ struct RitmPrimaryButtonStyle: ButtonStyle {
       .opacity(isEnabled ? 1 : 0.6)
       .scaleEffect(configuration.isPressed && !reduceMotion ? 0.955 : 1)
       .animation(reduceMotion ? nil : RitmMotion.press, value: configuration.isPressed)
+  }
+}
+
+/// `.text-button`: accent label without a surface; 44 pt tall on phones (app.css 2030).
+struct RitmTextButtonStyle: ButtonStyle {
+  var size: CGFloat = 11
+  @Environment(\.isEnabled) private var isEnabled
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .ritmFont(size, weight: .medium)
+      .foregroundStyle(RitmTheme.accentColor)
+      .frame(minHeight: 44, alignment: .leading)
+      .contentShape(Rectangle())
+      .opacity(isEnabled ? (configuration.isPressed ? 0.6 : 1) : 0.5)
   }
 }
 
