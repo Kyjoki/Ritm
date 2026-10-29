@@ -197,13 +197,61 @@ final class FinanceWalletTests: XCTestCase {
   func testYearSeriesUsesMonthEndsThenToday() throws {
     let series = FinanceWallet.balanceSeries(
       entries, card: try card("kzt-main"), period: .year, today: today)
+    // Nothing before the 1 Sep snapshot: the series starts on that day, then month ends.
+    XCTAssertEqual(series.map(\.date), ["2026-09-01", "2026-09-30", "2026-10-29"])
+    XCTAssertEqual(series.map(\.valueMinor), [1_000_000, 985_000, 1_250_000])
+    XCTAssertEqual(series.map(\.date), ["2026-09-01", "2026-09-30", "2026-10-29"])
+    XCTAssertEqual(series.map(\.valueMinor), [1_000_000, 985_000, 1_250_000])
+    let older = snapshot("old", .account, 50_000, asOf: "2025-06-10", created: "c")
+    let wide = FinanceWallet.cards([older], today: today)[0]
+    let wideDates = FinanceWallet.balanceSeries([older], card: wide, period: .year, today: today)
+      .map(\.date)
     XCTAssertEqual(
-      series.map(\.date),
+      wideDates,
       [
         "2025-12-31", "2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30", "2026-05-31",
         "2026-06-30", "2026-07-31", "2026-08-31", "2026-09-30", "2026-10-29",
       ])
-    XCTAssertEqual(series.map(\.valueMinor), Array(repeating: 0, count: 9) + [985_000, 1_250_000])
+  }
+
+  func testSeriesStartAtTheSnapshotInsideTheInterval() throws {
+    let account = snapshot("a", .account, 80_000, asOf: "2026-10-27", created: "c0")
+    let spend = operation("e", .expense, 5_000, "2026-10-28", category: "Food", created: "c1")
+    let all = [account, spend]
+    let main = try XCTUnwrap(FinanceWallet.cards(all, today: today).first)
+    XCTAssertEqual(
+      FinanceWallet.balanceSeries(all, card: main, period: .week, today: today),
+      [
+        FinancePoint(date: "2026-10-27", valueMinor: 80_000),
+        FinancePoint(date: "2026-10-28", valueMinor: 75_000),
+        FinancePoint(date: "2026-10-29", valueMinor: 75_000),
+      ])
+    XCTAssertEqual(
+      FinanceWallet.overviewSeries(all, currency: .KZT, period: .week, today: today).map(\.date),
+      ["2026-10-27", "2026-10-28", "2026-10-29"])
+    let snapshotToday = snapshot("t", .account, 10, asOf: today, created: "c")
+    let card = FinanceWallet.cards([snapshotToday], today: today)[0]
+    XCTAssertEqual(
+      FinanceWallet.balanceSeries([snapshotToday], card: card, period: .month, today: today)
+        .map(\.date),
+      [today])
+  }
+
+  func testOverviewStatsStartAtTheAccountSnapshot() {
+    let account = snapshot("a", .account, 80_000, asOf: "2026-10-10", created: "c0")
+    let before = operation("b", .income, 9_000, "2026-10-05", category: "Old", created: "c1")
+    let after = operation("c", .expense, 3_000, "2026-10-12", category: "Food", created: "c2")
+    XCTAssertEqual(
+      FinanceWallet.overviewStats(
+        [account, before, after], currency: .KZT, period: .month, today: today),
+      FinancePeriodStats(expenseMinor: 3_000))
+    XCTAssertEqual(
+      FinanceWallet.overviewStats([before, after], currency: .KZT, period: .month, today: today),
+      .zero, "no account in this currency")
+    let later = snapshot("l", .account, 1, asOf: "2026-11-01", created: "c3")
+    XCTAssertEqual(
+      FinanceWallet.overviewStats([later, after], currency: .KZT, period: .month, today: today),
+      .zero, "account not started")
   }
 
   func testOverviewSeriesSumsOneCurrencyOnly() {

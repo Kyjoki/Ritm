@@ -89,7 +89,8 @@ final class RejectRedirects: NSObject, URLSessionTaskDelegate, Sendable {
 }
 
 public actor APIClient {
-  public static let productionURL = URL(string: "https://ritm-eta-hazel.vercel.app")!
+  /// The default server; the app may configure another one (see ServerAddress).
+  public static let productionURL = ServerAddress.production.url
   private static let cookieName = "__Host-ritm_session"
   private static let sessionLifetime: TimeInterval = 8 * 60 * 60
   public nonisolated let baseURL: URL
@@ -109,16 +110,11 @@ public actor APIClient {
   }
 
   static func validatedBaseURL(_ url: URL) throws -> URL {
-    guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-      components.scheme == "https", components.host == productionURL.host,
-      components.port == nil || components.port == 443,
-      components.user == nil, components.password == nil,
-      components.query == nil, components.fragment == nil,
-      components.path.isEmpty || components.path == "/"
-    else {
+    // The configured host is the only host this client ever talks to or sends a cookie to.
+    guard case .success(let address) = ServerAddress.validate(url.absoluteString) else {
       throw APIError(message: "Разрешён только защищённый адрес Ritm.", code: "INVALID_SERVER")
     }
-    return productionURL
+    return address.url
   }
 
   public func setLanguage(_ language: Language) { self.language = language }

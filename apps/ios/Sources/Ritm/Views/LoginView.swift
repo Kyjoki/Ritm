@@ -5,6 +5,7 @@ struct LoginView: View {
   @Environment(\.scenePhase) private var scenePhase
   @State private var login = ""
   @State private var password = ""
+  @State private var showingServer = false
   @FocusState private var focusedField: Field?
   private enum Field { case login, password }
   private var busy: Bool { store.isLoading || store.isMutating }
@@ -78,6 +79,13 @@ struct LoginView: View {
               "Общее пространство на ваших устройствах", "One workspace across your devices"),
             systemImage: "lock.shield"
           )
+          .font(.footnote).foregroundStyle(.secondary)
+          // Without this a server that is down or moved would lock the owner out of Settings.
+          DisclosureGroup(
+            store.text("Адрес сервера", "Server address"), isExpanded: $showingServer
+          ) {
+            ServerAddressCard().padding(.top, 10)
+          }
           .font(.footnote).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 22)

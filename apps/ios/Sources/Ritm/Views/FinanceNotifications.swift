@@ -23,6 +23,7 @@ final class FinanceNoticeCenter {
   @ObservationIgnored private var seenIDs: Set<String> = []
   @ObservationIgnored private var primed = false
   @ObservationIgnored private var bannerTask: Task<Void, Never>?
+  @ObservationIgnored private var ownWriteActive = false
 
   private static let baselineKey = "ritm.finance.notices.baseline"
   private static let readKey = "ritm.finance.notices.read"
@@ -48,6 +49,11 @@ final class FinanceNoticeCenter {
     readIDs.formUnion(ids)
     persistRead()
   }
+
+  /// RitmStore.write brackets every confirmed write with these, including the reload that
+  /// follows it, so the owner's own saved operation never raises a banner or an unread badge.
+  func beginOwnWrite() { ownWriteActive = true }
+  func endOwnWrite() { ownWriteActive = false }
 
   func dismissBanner() {
     bannerTask?.cancel()
@@ -78,7 +84,13 @@ final class FinanceNoticeCenter {
       return
     }
     let fresh = FinanceNotices.notices(entries, since: baseline, cards: cards)
-    let arrival = primed ? fresh.first { !seenIDs.contains($0.id) } : nil
+    let unseen = primed ? fresh.filter { !seenIDs.contains($0.id) } : []
+    // Entries that arrive during the app's own write are the owner's own: no banner, no badge.
+    if ownWriteActive, !unseen.isEmpty {
+      readIDs.formUnion(unseen.map(\.id))
+      persistRead()
+    }
+    let arrival = ownWriteActive ? nil : unseen.first
     seenIDs = ids
     primed = true
     notices = fresh
@@ -107,6 +119,9 @@ final class FinanceNoticeCenter {
     guard !isOpen else { return }
     banner = notice
     bannerTask?.cancel()
+    bannerTask = nil
+    // VoiceOver users need time to reach the banner: it stays until dismissed or opened.
+    guard !UIAccessibility.isVoiceOverRunning else { return }
     bannerTask = Task { [weak self] in
       try? await Task.sleep(for: .seconds(Self.bannerSeconds))
       guard !Task.isCancelled else { return }
@@ -161,34 +176,49 @@ extension FinanceNoticeCenter {
   }
 }
 
-enum FinanceNoticeTime {
+@MainActor enum FinanceNoticeTime {
+  private static let clock: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "h:mm a"
+    return formatter
+  }()
+  private static let short = DateFormatter()
+  private static var shortLocaleID = ""
+  private static let fractionalISO: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
+  }()
+  private static let plainISO = ISO8601DateFormatter()
+
   /// «Сейчас», today's clock time, «Вчера, 6:24 PM» or a short date. Times use AM/PM.
+  /// The formatters are shared; zone and locale are only reassigned when they change.
   static func text(createdAt: String, now: Date, timeZone: String, language: Language) -> String {
     guard let date = parse(createdAt) else { return "" }
     let ru = language == .ru
     let age = now.timeIntervalSince(date)
     if age > -300 && age < 90 { return ru ? "Сейчас" : "Now" }
-    let clock = DateFormatter()
-    clock.locale = Locale(identifier: "en_US_POSIX")
-    clock.timeZone = TimeZone(identifier: timeZone) ?? .current
-    clock.dateFormat = "h:mm a"
+    let zone = TimeZone(identifier: timeZone) ?? .current
+    if clock.timeZone != zone { clock.timeZone = zone }
     let today = HabitSchedule.dateKey(now, timeZone: timeZone)
     let day = HabitSchedule.dateKey(date, timeZone: timeZone)
     if day == today { return clock.string(from: date) }
     if day == HabitSchedule.addDays(to: today, days: -1) {
       return (ru ? "Вчера, " : "Yesterday, ") + clock.string(from: date)
     }
-    let short = DateFormatter()
-    short.locale = Locale(identifier: ru ? "ru_RU" : "en_US")
-    short.timeZone = clock.timeZone
-    short.setLocalizedDateFormatFromTemplate("d MMM")
+    let localeID = ru ? "ru_RU" : "en_US"
+    if shortLocaleID != localeID {
+      shortLocaleID = localeID
+      short.locale = Locale(identifier: localeID)
+      short.setLocalizedDateFormatFromTemplate("d MMM")
+    }
+    if short.timeZone != zone { short.timeZone = zone }
     return short.string(from: date)
   }
 
   private static func parse(_ value: String) -> Date? {
-    let fractional = ISO8601DateFormatter()
-    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+    fractionalISO.date(from: value) ?? plainISO.date(from: value)
   }
 }
 
@@ -433,19 +463,36 @@ private struct FinancePopover: View {
     .buttonStyle(RitmPressStyle())
     .disabled(unread == 0)
     .opacity(unread == 0 ? 0.5 : 1)
+    let closeButton = Button {
+      center.closePopover()
+    } label: {
+      Image(systemName: "xmark")
+        .font(.system(size: 14, weight: .semibold))
+        .foregroundStyle(RitmTheme.muted)
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(RitmPressStyle())
+    .accessibilityLabel(store.text("Закрыть уведомления", "Close notifications"))
     return ViewThatFits(in: .horizontal) {
-      HStack(spacing: 8) {
+      HStack(spacing: 4) {
         title
-        Spacer(minLength: 8)
+        Spacer(minLength: 4)
         readAll
+        closeButton
       }
-      VStack(alignment: .leading, spacing: 4) {
-        title
+      VStack(alignment: .leading, spacing: 0) {
+        HStack(spacing: 4) {
+          title
+          Spacer(minLength: 4)
+          closeButton
+        }
         readAll
       }
     }
-    .padding(.horizontal, 16)
-    .padding(.vertical, 6)
+    .padding(.leading, 16)
+    .padding(.trailing, 6)
+    .padding(.vertical, 2)
   }
 
   @ViewBuilder private func list(_ center: FinanceNoticeCenter) -> some View {
@@ -583,7 +630,8 @@ private struct FinanceBanner: View {
     let kicker = store.text("Операция добавлена", "Transaction added")
     let spoken = [kicker, line.amount, line.subtitle].joined(separator: ", ")
     let shape = RoundedRectangle(cornerRadius: 22, style: .circular)
-    ZStack(alignment: .topTrailing) {
+    // The close control has its own column, so the rest of the banner is one tap target.
+    HStack(alignment: .top, spacing: 0) {
       Button(action: open) {
         HStack(spacing: 12) {
           FinanceNoticeIcon(symbol: line.symbol, size: 48)
@@ -592,7 +640,6 @@ private struct FinanceBanner: View {
               .ritmFont(11, weight: .medium)
               .foregroundStyle(RitmTheme.muted)
               .lineLimit(2)
-              .padding(.trailing, 92)
             Text(line.amount)
               .ritmFont(20, weight: .semibold, tracking: -0.02)
               .foregroundStyle(RitmTheme.text)
@@ -608,17 +655,21 @@ private struct FinanceBanner: View {
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(RitmTheme.muted)
         }
-        .padding(12)
+        .padding(.vertical, 12)
+        .padding(.leading, 12)
+        .padding(.trailing, 4)
         .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
         .contentShape(Rectangle())
       }
       .buttonStyle(RitmPressStyle(scale: 0.985))
       .accessibilityLabel(spoken)
       .accessibilityHint(store.text("Открыть в разделе «Финансы»", "Open in Finance"))
-      HStack(spacing: 0) {
+      VStack(alignment: .trailing, spacing: 0) {
         Text(store.text("Сейчас", "Now"))
           .ritmFont(11)
           .foregroundStyle(RitmTheme.muted)
+          .padding(.top, 8)
+          .padding(.trailing, 10)
           .accessibilityHidden(true)
         Button(action: close) {
           Image(systemName: "xmark")
@@ -633,6 +684,7 @@ private struct FinanceBanner: View {
         .accessibilityLabel(store.text("Закрыть", "Close"))
       }
       .padding(.trailing, 2)
+      .padding(.bottom, 4)
     }
     .background {
       shape.fill(RitmTheme.glassDense)

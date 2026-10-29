@@ -6,10 +6,20 @@ import Security
 /// sign-in below. Both stay in the Keychain, this device only.
 struct SessionVault {
   private let service = "app.ritm.personal.session"
-  private let account = "ritm-eta-hazel.vercel.app"
+  /// Keychain account = the server (host[:port]). A session or saved login is only ever read for,
+  /// and so sent to, the server it was created on.
+  private let account: String
   // A non-secret tombstone prevents restoring a logged-out session even if Keychain
   // deletion temporarily fails (for example while the device is locked).
-  private let disabledKey = "ritm.session.restoreDisabled"
+  private let disabledKey: String
+
+  init(server: ServerAddress) {
+    account = server.account
+    // The default server keeps the original key so an existing tombstone still applies.
+    disabledKey =
+      server == .production
+      ? "ritm.session.restoreDisabled" : "ritm.session.restoreDisabled." + server.account
+  }
 
   private var query: [String: Any] {
     [

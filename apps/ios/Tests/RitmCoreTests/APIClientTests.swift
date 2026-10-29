@@ -76,18 +76,42 @@ final class APIClientTests: XCTestCase {
   }
 
   func testRejectsUntrustedAndNonHTTPSOriginsBeforeAnyTransportCanReceiveCredentials() async {
+    // The host is now configurable, so a different host is allowed; the origin must still be a
+    // plain https origin with no credentials, path, query or fragment.
     let denied = [
-      "http://ritm-eta-hazel.vercel.app", "https://evil.example",
-      "https://ritm-eta-hazel.vercel.app.evil.example",
-      "https://ritm-eta-hazel.vercel.app:444", "https://owner:password@ritm-eta-hazel.vercel.app",
+      "http://ritm-eta-hazel.vercel.app", "http://laptop.tailnet.ts.net:8443",
+      "https://ritm-eta-hazel.vercel.app:0", "https://owner:password@ritm-eta-hazel.vercel.app",
       "https://ritm-eta-hazel.vercel.app/path", "https://ritm-eta-hazel.vercel.app?forward=evil",
+      "https://ritm-eta-hazel.vercel.app/#fragment", "ftp://evil.example",
     ]
     for raw in denied {
-      XCTAssertThrowsError(try APIClient(baseURL: URL(string: raw)!, transport: StubTransport([])))
-      { error in
-        XCTAssertEqual((error as? APIError)?.code, "INVALID_SERVER")
+      guard let url = URL(string: raw) else { continue }
+      XCTAssertThrowsError(try APIClient(baseURL: url, transport: StubTransport([]))) { error in
+        XCTAssertEqual((error as? APIError)?.code, "INVALID_SERVER", raw)
       }
     }
+  }
+
+  func testConfiguredHostIsUsedForRequestsOriginAndRedirectRefusal() async throws {
+    let base = URL(string: "https://laptop.tailnet.ts.net:8443")!
+    let transport = StubTransport([
+      StubReply(json: sessionJSON),
+      StubReply(json: sessionJSON, responseURL: URL(string: "https://evil.example/api/session")),
+      StubReply(json: sessionJSON, responseURL: APIClient.productionURL.appendingPathComponent("x")),
+    ])
+    let client = try APIClient(baseURL: base, transport: transport)
+    XCTAssertEqual(client.baseURL.absoluteString, "https://laptop.tailnet.ts.net:8443")
+    _ = try await client.session()
+    for _ in 0..<2 {
+      do {
+        _ = try await client.session()
+        XCTFail("Response from another host accepted")
+      } catch let error as APIError { XCTAssertEqual(error.code, "REDIRECT_BLOCKED") }
+    }
+    let requests = await transport.requests()
+    XCTAssertEqual(requests[0].url?.absoluteString, "https://laptop.tailnet.ts.net:8443/api/session")
+    XCTAssertEqual(
+      requests[0].value(forHTTPHeaderField: "Origin"), "https://laptop.tailnet.ts.net:8443")
   }
 
   func testLoginStoresOnlyValidatedPrivateCookieAndSendsExactOrigin() async throws {

@@ -65,6 +65,7 @@ struct AccountView: View {
               appearanceCard
               notificationsCard
               connectionsCard
+              ServerAddressCard()
             }
             .padding(.top, 22)
             .disabled(saving)
@@ -116,7 +117,7 @@ struct AccountView: View {
         }
       }
     ) {
-      IntegrationBrowser(onDismiss: { showingBrowser = false })
+      IntegrationBrowser(server: store.serverAddress, onDismiss: { showingBrowser = false })
     }
     .sheet(item: $secretEditor, onDismiss: { Task { await loadIntegrations() } }) { kind in
       IntegrationSecretEditor(kind: kind, googleSetup: googleSetup)

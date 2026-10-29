@@ -174,15 +174,19 @@ public enum FinanceWallet {
       transfersOutMinor: transfersOut)
   }
 
-  /// Income and expense of one currency in the interval; transfers are left out.
+  /// Income and expense of one currency in the interval, from the main account's snapshot date
+  /// on; transfers are left out. Without a started account the stats are zero.
   public static func overviewStats(
     _ entries: [FinanceEntry], currency: FinanceCurrency, period: FinancePeriod, today: String
   ) -> FinancePeriodStats {
+    guard let asOf = entries.first(where: { $0.type == .account && $0.currency == currency })?.asOf,
+      asOf <= today
+    else { return .zero }
     let range = interval(period, today: today)
     var income = 0
     var expense = 0
     for entry in entries where entry.currency == currency {
-      guard isDated(entry, from: range.start, to: range.end) else { continue }
+      guard isDated(entry, from: max(range.start, asOf), to: range.end) else { continue }
       switch entry.type {
       case .income: income += entry.amountMinor ?? 0
       case .expense: expense += entry.amountMinor ?? 0
@@ -193,13 +197,13 @@ public enum FinanceWallet {
   }
 
   /// End-of-day balances starting with the day before the interval and ending today; the year
-  /// has month ends, then today. Before the card's snapshot the balance counts as 0. A card
-  /// without a balance has no series.
+  /// has month ends, then today. Nothing is drawn before the card's snapshot date, where the
+  /// series starts instead. A card that has not started has no series.
   public static func balanceSeries(
     _ entries: [FinanceEntry], card: FinanceCard, period: FinancePeriod, today: String
   ) -> [FinancePoint] {
-    guard card.balanceMinor != nil else { return [] }
-    return seriesDates(period, today: today).map {
+    guard card.balanceMinor != nil, let asOf = card.asOf, asOf <= today else { return [] }
+    return seriesDates(period, today: today, from: asOf).map {
       FinancePoint(date: $0, valueMinor: balance(of: card, in: entries, on: $0))
     }
   }
@@ -211,8 +215,8 @@ public enum FinanceWallet {
     let own = cards(entries, today: today).filter {
       $0.currency == currency && $0.balanceMinor != nil
     }
-    guard !own.isEmpty else { return [] }
-    return seriesDates(period, today: today).map { day in
+    guard let asOf = own.compactMap(\.asOf).min() else { return [] }
+    return seriesDates(period, today: today, from: asOf).map { day in
       FinancePoint(
         date: day, valueMinor: own.reduce(0) { $0 + balance(of: $1, in: entries, on: day) })
     }
@@ -386,11 +390,17 @@ extension FinanceWallet {
     }
   }
 
-  private static func seriesDates(_ period: FinancePeriod, today: String) -> [String] {
+  /// The day before the interval, then the points of the period, without anything before
+  /// `asOf`; when the snapshot falls inside the interval the series starts on that day.
+  private static func seriesDates(_ period: FinancePeriod, today: String, from asOf: String)
+    -> [String]
+  {
     guard HabitSchedule.isValidDate(today) else { return [] }
     let start = interval(period, today: today).start
     guard let before = HabitSchedule.addDays(to: start, days: -1) else { return [] }
-    return [before] + (period == .year ? monthEnds(from: start, today: today) : days(from: start, to: today))
+    let points = period == .year ? monthEnds(from: start, today: today) : days(from: start, to: today)
+    let kept = ([before] + points).filter { $0 >= asOf }
+    return asOf > before && kept.first != asOf ? [asOf] + kept : kept
   }
 
   private static func days(from start: String, to end: String) -> [String] {

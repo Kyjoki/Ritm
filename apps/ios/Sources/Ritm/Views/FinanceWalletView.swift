@@ -241,6 +241,8 @@ struct FinanceWalletView: View {
   let format: FinanceFormat
   @Binding var expanded: Bool
   @Binding var selectedID: String
+  /// True while a horizontal drag owns the touch, so the page can stop scrolling.
+  @Binding var dragging: Bool
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var width: CGFloat = 390
   @State private var drag: CGFloat = 0
@@ -275,6 +277,7 @@ struct FinanceWalletView: View {
       Task { @MainActor in
         guard lock != .open else { return }
         lock = .open
+        dragging = false
         withAnimation(reduceMotion ? nil : FinanceMotion.snap) { drag = 0 }
       }
     }
@@ -333,7 +336,6 @@ struct FinanceWalletView: View {
     .opacity(place.opacity)
     .allowsHitTesting(place.opacity > 0.01)
     .zIndex(Double(cards.count - index))
-    .animation(reduceMotion ? nil : FinanceMotion.snap, value: selectedID)
     .animation(reduceMotion ? nil : moveAnimation(index: index, selected: selected), value: expanded)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(format.name(card) + ", " + balanceText(card))
@@ -351,8 +353,10 @@ struct FinanceWalletView: View {
     if expanded {
       if index != selectedIndex { snap(to: index) }
     } else {
-      selectedID = cards[index].id
-      withAnimation(reduceMotion ? nil : FinanceMotion.open) { expanded = true }
+      withAnimation(reduceMotion ? nil : FinanceMotion.open) {
+        selectedID = cards[index].id
+        expanded = true
+      }
     }
   }
 
@@ -378,6 +382,7 @@ struct FinanceWalletView: View {
             abs(value.translation.width) > abs(value.translation.height) ? .horizontal : .vertical
         }
         guard lock == .horizontal else { return }
+        if !dragging { dragging = true }
         drag = resisted(value.translation.width, selected: selected, pitch: metrics.pitch)
       }
       .onEnded { value in finish(value, metrics: metrics, selected: selected) }
@@ -391,7 +396,10 @@ struct FinanceWalletView: View {
 
   /// Snap by distance (18 % of the card) or by a flick (a fraction of the predicted run-out).
   private func finish(_ value: DragGesture.Value, metrics: FinanceWalletMetrics, selected: Int) {
-    defer { lock = .open }
+    defer {
+      lock = .open
+      dragging = false
+    }
     guard lock == .horizontal else { return }
     let travel = value.translation.width
     let momentum = value.predictedEndTranslation.width - travel
@@ -413,7 +421,7 @@ struct FinanceWalletView: View {
 
   private var openButton: some View {
     Button {
-      tap(0)
+      tap(selectedIndex)
     } label: {
       HStack(spacing: 10) {
         Image(systemName: "rectangle.stack").font(.system(size: 16, weight: .regular))
@@ -442,7 +450,7 @@ struct FinanceWalletView: View {
           Capsule()
             .fill(active ? RitmTheme.accentColor : RitmTheme.accentColor.opacity(0.28))
             .frame(width: active ? 18 : 6, height: 6)
-            .frame(width: 30, height: 40)
+            .frame(width: 44, height: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

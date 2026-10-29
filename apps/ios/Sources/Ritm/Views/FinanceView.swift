@@ -27,6 +27,7 @@ struct FinanceView: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var expanded = false
   @State private var selectedID = ""
+  @State private var walletDragging = false
   @State private var period: FinancePeriod = .month
   @State private var overviewCurrency: FinanceCurrency?
   @State private var editing: FinanceEditing?
@@ -58,6 +59,7 @@ struct FinanceView: View {
         .frame(maxWidth: .infinity)
       }
       .scrollIndicators(.hidden)
+      .scrollDisabled(walletDragging)
       .refreshable { await store.reloadFinance() }
     }
     .toolbar(.hidden, for: .navigationBar)
@@ -196,7 +198,8 @@ struct FinanceView: View {
     return VStack(alignment: .leading, spacing: 14) {
       if !expanded { totals(cards, format) }
       FinanceWalletView(
-        cards: cards, format: format, expanded: $expanded, selectedID: $selectedID
+        cards: cards, format: format, expanded: $expanded, selectedID: $selectedID,
+        dragging: $walletDragging
       )
       .padding(.horizontal, -16)
       ZStack(alignment: .top) {
@@ -260,8 +263,10 @@ struct FinanceView: View {
       currency: Binding(get: { current }, set: { overviewCurrency = $0 }),
       period: $period, log: drawLog, actions: actions,
       openCard: { id in
-        selectedID = id
-        withAnimation(reduceMotion ? nil : FinanceMotion.open) { expanded = true }
+        withAnimation(reduceMotion ? nil : FinanceMotion.open) {
+          selectedID = id
+          expanded = true
+        }
       })
   }
 
@@ -296,8 +301,10 @@ struct FinanceView: View {
     guard let focus = store.financeFocus, store.financeLoaded else { return }
     store.financeFocus = nil
     if cards.contains(where: { $0.id == focus.cardID }) {
-      selectedID = focus.cardID
-      withAnimation(reduceMotion ? nil : FinanceMotion.open) { expanded = true }
+      withAnimation(reduceMotion ? nil : FinanceMotion.open) {
+        selectedID = focus.cardID
+        expanded = true
+      }
     }
     if let id = focus.entryID, store.financeEntries.contains(where: { $0.id == id }) {
       detail = FinanceDetailRoute(entryID: id)

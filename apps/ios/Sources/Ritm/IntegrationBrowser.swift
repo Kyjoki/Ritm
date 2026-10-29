@@ -1,9 +1,12 @@
+import RitmCore
 import SafariServices
 import SwiftUI
 
 /// OAuth runs in the system browser so its HttpOnly state cookie stays with the
 /// callback. No Ritm session is injected into Safari or included in a URL.
 struct IntegrationBrowser: UIViewControllerRepresentable {
+  /// The configured Ritm server; only its own settings page is ever opened.
+  let server: ServerAddress
   var onDismiss: () -> Void = {}
 
   func makeCoordinator() -> Coordinator { Coordinator(onDismiss: onDismiss) }
@@ -11,7 +14,7 @@ struct IntegrationBrowser: UIViewControllerRepresentable {
   func makeUIViewController(context: Context) -> SFSafariViewController {
     // The only internal integration entrypoint. Caller-supplied destinations
     // cannot change the OAuth host or smuggle credentials through query data.
-    let safe = URL(string: "https://ritm-eta-hazel.vercel.app/#settings")!
+    let safe = URL(string: server.origin + "/#settings")!
     let controller = SFSafariViewController(url: safe)
     controller.delegate = context.coordinator
     controller.preferredControlTintColor = UIColor(RitmTheme.lavender)

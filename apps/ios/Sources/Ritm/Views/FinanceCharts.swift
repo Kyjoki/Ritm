@@ -48,7 +48,8 @@ private struct FinanceScale {
     var high = Double(values.max() ?? 0)
     if high - low < 1 {
       let pad = max(abs(high) * 0.1, 10_000)
-      low -= pad
+      // A zero or positive series never shows a negative axis: pad upward from 0.
+      low = low >= 0 ? max(0, low - pad) : low - pad
       high += pad
     }
     let step = Self.niceStep((high - low) / 3)

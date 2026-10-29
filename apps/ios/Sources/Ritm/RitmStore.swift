@@ -41,8 +41,10 @@ final class RitmStore {
   var financeFocus: FinanceFocus?
   let notices = FinanceNoticeCenter()
 
-  @ObservationIgnored private let client: APIClient?
-  @ObservationIgnored private let vault = SessionVault()
+  /// The Ritm server this device talks to. Changed only through `changeServer(to:)`.
+  private(set) var serverAddress: ServerAddress
+  @ObservationIgnored private var client: APIClient?
+  @ObservationIgnored private var vault: SessionVault
   @ObservationIgnored private let notifications = LocalNotifications()
   @ObservationIgnored private var started = false
   @ObservationIgnored private var active = true
@@ -53,7 +55,38 @@ final class RitmStore {
   @ObservationIgnored private var nextAllowedRead = Date.distantPast
   @ObservationIgnored private var connectionErrorShown = false
 
-  init() { client = try? APIClient() }
+  init() {
+    let address = ServerAddressStore.load()
+    serverAddress = address
+    client = try? APIClient(baseURL: address.url)
+    vault = SessionVault(server: address)
+  }
+
+  /// Switches this device to another server and signs it out first. The session and the saved
+  /// login belong to one server (the Keychain account is the host), so the old ones are erased and
+  /// nothing from the previous server can reach the new one. The old session is not revoked over
+  /// the network, so an unreachable old server cannot block the switch; it expires on its own.
+  @discardableResult
+  func changeServer(to address: ServerAddress) async -> Bool {
+    guard !isMutating, !isLoading, address != serverAddress,
+      let newClient = try? APIClient(baseURL: address.url)
+    else { return false }
+    isMutating = true
+    generation += 1
+    pollTask?.cancel()
+    vault.forgetLogin()
+    await clearAccount()
+    let newVault = SessionVault(server: address)
+    newVault.forgetLogin()
+    try? newVault.delete()
+    client = newClient
+    vault = newVault
+    serverAddress = address
+    ServerAddressStore.save(address)
+    errorMessage = nil
+    isMutating = false
+    return true
+  }
 
   var language: Language {
     bootstrap?.settings.language
@@ -252,8 +285,17 @@ final class RitmStore {
 
   /// GET /finance through the shared read boundary; updates entries, then the notice centre.
   func reloadFinance() async {
-    guard let fresh = await read({ client in try await client.finance() }) else {
-      if !financeLoaded { financeFailed = true }
+    // `read` also returns nil when it is paused, cancelled or signed out; only a thrown request
+    // counts as a failed load.
+    var requestFailed = false
+    let loaded = await read { client in
+      do { return try await client.finance() } catch {
+        requestFailed = true
+        throw error
+      }
+    }
+    guard let fresh = loaded else {
+      if requestFailed { financeFailed = true }
       return
     }
     applyFinance(fresh)
@@ -357,6 +399,8 @@ final class RitmStore {
     generation += 1  // A read started before this write cannot overwrite newer UI state.
     let ticket = generation
     isMutating = true
+    notices.beginOwnWrite()
+    defer { notices.endOwnWrite() }
     errorMessage = nil
     lastFailure = nil
     var result: Value?
