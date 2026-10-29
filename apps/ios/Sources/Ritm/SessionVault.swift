@@ -2,7 +2,8 @@ import Foundation
 import RitmCore
 import Security
 
-/// Stores only this device's revocable session. Passwords are never persisted.
+/// Stores this device's revocable session and, for the single owner's own iPhone, the saved
+/// sign-in below. Both stay in the Keychain, this device only.
 struct SessionVault {
   private let service = "app.ritm.personal.session"
   private let account = "ritm-eta-hazel.vercel.app"
@@ -70,4 +71,54 @@ struct SessionVault {
   }
 
   enum VaultError: Error { case status(OSStatus) }
+
+  // MARK: Saved sign-in
+
+  /// The owner's login and password, kept only on this iPhone so the app can sign in again by
+  /// itself when the 8-hour server session ends. It is never synced, backed up or logged, and
+  /// leaves the Keychain only on «Выйти из аккаунта» or when the server rejects it.
+  struct SavedLogin: Codable {
+    let login: String
+    let password: String
+  }
+
+  private var loginQuery: [String: Any] {
+    [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: "app.ritm.personal.login",
+      kSecAttrAccount as String: account,
+      kSecAttrSynchronizable as String: false,
+    ]
+  }
+
+  func loadLogin() -> SavedLogin? {
+    var attributes = loginQuery
+    attributes[kSecReturnData as String] = true
+    attributes[kSecMatchLimit as String] = kSecMatchLimitOne
+    var result: CFTypeRef?
+    guard SecItemCopyMatching(attributes as CFDictionary, &result) == errSecSuccess,
+      let data = result as? Data
+    else { return nil }
+    return try? JSONDecoder().decode(SavedLogin.self, from: data)
+  }
+
+  func saveLogin(_ value: SavedLogin) throws {
+    let data = try JSONEncoder().encode(value)
+    let values: [String: Any] = [
+      kSecValueData as String: data,
+      // Readable after the first unlock, so a background refresh can sign in again.
+      kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+    ]
+    let status = SecItemUpdate(loginQuery as CFDictionary, values as CFDictionary)
+    if status == errSecItemNotFound {
+      var attributes = loginQuery
+      values.forEach { attributes[$0.key] = $0.value }
+      let insertion = SecItemAdd(attributes as CFDictionary, nil)
+      guard insertion == errSecSuccess else { throw VaultError.status(insertion) }
+    } else if status != errSecSuccess {
+      throw VaultError.status(status)
+    }
+  }
+
+  func forgetLogin() { SecItemDelete(loginQuery as CFDictionary) }
 }

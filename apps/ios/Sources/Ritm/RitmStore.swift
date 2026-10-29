@@ -181,7 +181,8 @@ final class RitmStore {
     }
     do {
       if let credential = try vault.load() { try await client.restoreCredential(credential) }
-      let session = try await client.session()
+      var session = try await client.session()
+      if !session.authenticated, await signInAgain() { session = try await client.session() }
       guard session.authenticated else {
         await clearAccount()
         return
@@ -216,6 +217,8 @@ final class RitmStore {
         return
       }
       try vault.save(credential)
+      // Remembered on this iPhone only, so the app signs in again by itself (see SessionVault).
+      try? vault.saveLogin(.init(login: login, password: password))
       isSignedIn = true
       isOffline = false
       nextAllowedRead = .distantPast
@@ -356,6 +359,7 @@ final class RitmStore {
     pollTask?.cancel()
     var revokeFailed = false
     do { try await client.logout() } catch { revokeFailed = true }
+    vault.forgetLogin()
     await clearAccount()
     isMutating = false
     if revokeFailed {
@@ -430,11 +434,39 @@ final class RitmStore {
     }
   }
 
+  /// Signs in with the login saved on this iPhone. A rejected login is forgotten, so the sign-in
+  /// screen appears and the owner enters the new password once.
+  private func signInAgain() async -> Bool {
+    guard let client, let saved = vault.loadLogin() else { return false }
+    do {
+      let session = try await client.login(login: saved.login, password: saved.password)
+      guard session.authenticated, let credential = await client.sessionCredential() else {
+        return false
+      }
+      try vault.save(credential)
+      isSignedIn = true
+      isOffline = false
+      return true
+    } catch {
+      if let failure = error as? APIError, failure.status == 401 || failure.status == 403 {
+        vault.forgetLogin()
+      }
+      return false
+    }
+  }
+
   private func present(_ error: Error) async {
     if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
     lastFailure = error as? APIError
     if let failure = error as? APIError {
       if failure.requiresAuthentication {
+        // The 8-hour session ended: sign in again with the saved login. The action that hit
+        // it is not retried (writes never are); the next read or tap works.
+        if await signInAgain() {
+          errorMessage = nil
+          Task { await refresh() }
+          return
+        }
         await clearAccount()
         errorMessage = text(
           "Сессия завершилась. Войдите снова.", "Your session has expired. Sign in again.")
