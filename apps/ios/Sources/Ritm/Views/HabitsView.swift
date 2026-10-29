@@ -1,844 +1,705 @@
-import Charts
 import RitmCore
 import SwiftUI
 
+/// Surfaces shared by the habits page (visual-refresh.css `.ritm-glass` habit rules).
+enum HabitStyle {
+  /// Day tiles, heat cells, the stepper and award chips.
+  static var tile: Color { RitmTheme.mix(RitmTheme.soft, 0.09, into: RitmTheme.glassRaised) }
+  /// A done day, a partly done heat cell, an earned award.
+  static var chosen: Color { RitmTheme.mix(RitmTheme.accentColor, 0.19, into: RitmTheme.glassRaised) }
+  static var chosenBorder: Color {
+    RitmTheme.mix(RitmTheme.accentColor, 0.68, into: RitmTheme.panelBorder)
+  }
+}
+
+private struct HabitEditTarget: Identifiable {
+  let habit: Habit?
+  var id: String { habit?.id ?? "create" }
+}
+
+/// «Привычки»: src/features/HabitsPage.tsx at 390 px.
 struct HabitsView: View {
-  @Environment(RitmNavigation.self) private var navigation
   @Environment(RitmStore.self) private var store
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var showingCreate = false
-  @State private var showingArchive = false
-  @State private var editingHabit: Habit?
-  @State private var period = 0
-  @State private var anchor = ""
-  @State private var visible = false
-  @State private var chartsIntroduced = false
-  @State private var selectedAnalysisDay: String?
-  private var scoped: [Habit] { store.habits.filter { ($0.archived == true) == showingArchive } }
-  private var dates: [String] {
-    let day = anchor.isEmpty ? store.today : anchor
-    if period == 0 { return HabitSchedule.week(containing: day) }
-    let calendar = FeatureDate.calendar("UTC")
-    guard let range = calendar.range(of: .day, in: .month, for: FeatureDate.date(day, zone: "UTC"))
-    else { return [] }
-    return range.map { String(day.prefix(7)) + String(format: "-%02d", $0) }
-  }
-  private var summary: HabitDaySummary {
-    HabitSchedule.periodSummary(scoped, dates: dates, today: store.today)
-  }
-  private var todaySummary: HabitDaySummary { HabitSchedule.daySummary(scoped, on: store.today) }
-  private var comparisonText: String? {
-    guard let first = dates.first, let previousEnd = HabitSchedule.addDays(to: first, days: -1)
-    else { return nil }
-    let previous =
-      period == 0
-      ? HabitSchedule.week(containing: previousEnd)
-      : TaskSchedule.monthDates(containing: previousEnd)
-    let available = dates.filter { $0 <= store.today }
-    let length = min(available.count, previous.count)
-    guard
-      let current = HabitSchedule.periodSummary(
-        scoped, dates: Array(available.prefix(length)), today: store.today
-      ).percent,
-      let old = HabitSchedule.periodSummary(
-        scoped, dates: Array(previous.prefix(length)), today: store.today
-      ).percent
-    else { return nil }
-    let difference = current - old
-    return (difference > 0 ? "+" : "") + "\(difference) "
-      + store.text(
-        "п.п. к такому же отрезку прошлого периода",
-        "pp versus the same portion of the previous period")
-  }
-  private var consistencyText: String? {
-    let past = dates.filter { $0 < store.today }
-    let ranked = scoped.compactMap { habit -> (Habit, Int, Int)? in
-      let summary = HabitSchedule.periodSummary([habit], dates: past, today: store.today)
-      return summary.planned >= 3 ? (habit, summary.completed, summary.planned) : nil
-    }.sorted {
-      Double($0.1) / Double($0.2) == Double($1.1) / Double($1.2)
-        ? $0.1 > $1.1 : Double($0.1) / Double($0.2) > Double($1.1) / Double($1.2)
-    }
-    guard let value = ranked.first else { return nil }
-    return store.text("Самая устойчивая привычка: ", "Most consistent habit: ") + value.0.title
-      + " · \(value.1)/\(value.2)"
-  }
-  private var missedWeekday: String? {
-    let values = (0..<7).compactMap { weekday -> (Int, Int, Int)? in
-      let relevant = dates.filter { $0 < store.today && HabitSchedule.weekday($0) == weekday }
-      let summary = HabitSchedule.periodSummary(scoped, dates: relevant, today: store.today)
-      return summary.planned >= 2 ? (weekday, summary.completed, summary.planned) : nil
-    }.sorted { Double($0.1) / Double($0.2) < Double($1.1) / Double($1.2) }
-    guard let value = values.first, value.1 < value.2 else { return nil }
-    return store.text("Чаще пропускается: ", "Most often missed: ")
-      + weekdayName(value.0, russian: store.language == .ru)
-  }
+  @State private var editing: HabitEditTarget?
+  @State private var deleting: Habit?
+  @State private var showArchived = false
+  @State private var month = false
+  @State private var offset = 0
+  @State private var selectedDay: String?
+  @State private var busyID: String?
+  @State private var celebration: String?
+  @State private var recordID: String?
+
+  private var today: String { store.today }
+  private var visible: [Habit] { store.habits.filter { ($0.archived == true) == showArchived } }
+  private var archivedCount: Int { store.habits.filter { $0.archived == true }.count }
+  private var dates: [String] { HabitsPlan.periodDates(today: today, month: month, offset: offset) }
+
   var body: some View {
-    ZStack {
+    ZStack(alignment: .bottomTrailing) {
       RitmBackground()
       ScrollView {
-        VStack(alignment: .leading, spacing: 18) {
-          RitmShellHeader().padding(.bottom, -18)
-          HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 8) {
-              Text(store.text("RITM · Ежедневные привычки", "RITM · Daily habits")).font(
-                .caption.weight(.semibold)
-              ).foregroundStyle(.tint)
-              Text(store.text("Привычки", "Habits")).font(.largeTitle.bold())
-              Text(
-                store.text(
-                  "Маленькие действия складываются в устойчивый ритм.",
-                  "Small actions build a lasting rhythm.")
-              ).font(.subheadline).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 4)
-            Button {
-              showingCreate = true
-            } label: {
-              Image(systemName: "plus").font(.title2).frame(width: 48, height: 48)
-            }
-            .background(RitmTheme.lavender.opacity(0.22), in: RoundedRectangle(cornerRadius: 16))
-            .buttonStyle(RitmPressStyle()).disabled(!store.canWrite)
-            .accessibilityLabel(store.text("Создать привычку", "Create habit"))
+        VStack(alignment: .leading, spacing: 0) {
+          RitmShellHeader()
+          heading
+          if let message = store.errorMessage {
+            RitmErrorBanner(message: message).padding(.bottom, 16)
           }
-          SyncStatusView()
-          if let message = navigation.habitCelebration {
-            HStack {
-              Label(message, systemImage: "sparkles").font(.subheadline)
-              Spacer()
-              Button {
-                navigation.habitCelebration = nil
-              } label: {
-                Image(systemName: "xmark").frame(width: 44, height: 44)
-              }.accessibilityLabel(store.text("Закрыть достижение", "Dismiss achievement"))
-            }.padding(12).background(
-              RitmTheme.lavender.opacity(0.16), in: RoundedRectangle(cornerRadius: 16))
-          }
-          if let error = store.errorMessage { RitmErrorBanner(message: error) }
           MutationRecoveryView()
-          if store.bootstrap != nil { analytics }
-          HStack {
-            Text(
-              showingArchive
-                ? store.text("Архив привычек", "Archived habits")
-                : store.text("Ваши привычки", "Your habits")
-            ).font(.title3.bold())
-            Spacer()
-            Button {
-              showingArchive.toggle()
-            } label: {
-              Label(
-                showingArchive ? store.text("Активные", "Active") : store.text("Архив", "Archive"),
-                systemImage: showingArchive ? "checklist" : "archivebox"
-              ).font(.subheadline).frame(minHeight: 44)
-            }.buttonStyle(RitmPressStyle())
-          }
-          if scoped.isEmpty {
-            RitmCard {
-              RitmEmptyState(
-                symbol: showingArchive ? "archivebox" : "leaf",
-                title: showingArchive
-                  ? store.text("Архив пуст", "Archive is empty")
-                  : store.text("Начните с одной привычки", "Start with one habit"),
-                message: showingArchive
-                  ? store.text(
-                    "Здесь можно восстановить привычку и посмотреть её историю.",
-                    "Restore a habit and review its history here.")
-                  : store.text(
-                    "Выберите действие, дни недели и цель. Прогресс появится после ваших отметок.",
-                    "Choose an action, weekdays and a target. Your marks will build the progress."))
+          if store.bootstrap == nil {
+            HStack(spacing: 9) {
+              ProgressView().tint(RitmTheme.accentColor)
+              Text(store.text("Загружаем…", "Loading…"))
             }
-          }
-          ForEach(scoped) { habit in
-            HabitDetailCard(habit: habit, dates: dates, onEdit: { editingHabit = habit })
+            .ritmFont(12)
+            .foregroundStyle(RitmTheme.muted)
+            .frame(maxWidth: .infinity, minHeight: 145)
+            .background { RitmPanelBackground() }
+          } else {
+            HabitsAnalytics(
+              habits: visible, archived: showArchived, month: $month, offset: $offset,
+              selectedDay: $selectedDay)
+            listHeading
+            list
           }
           RitmPageFooter()
-        }.padding(.horizontal, 16).padding(.bottom, 28).frame(maxWidth: 700)
-          .frame(maxWidth: .infinity)
-      }.refreshable { await store.refresh() }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 28)
+        .frame(maxWidth: 700)
+        .frame(maxWidth: .infinity)
+      }
+      .refreshable { await store.refresh() }
+      .scrollDismissesKeyboard(.interactively)
+      if let celebration { celebrationToast(celebration) }
     }
     .toolbar(.hidden, for: .navigationBar)
-    .onAppear { visible = navigation.section == .habits }.onDisappear { visible = false }
-    .onChange(of: navigation.section) { _, value in visible = value == .habits }
-    .onChange(of: visible, initial: true) { _, value in
-      if value && !chartsIntroduced { chartsIntroduced = true }
-    }
-    .sheet(isPresented: $showingCreate) { HabitEditor() }
-    .sheet(item: $editingHabit) { HabitEditor(habit: $0) }
-    .sheet(
-      isPresented: Binding(
-        get: { selectedAnalysisDay != nil }, set: { if !$0 { selectedAnalysisDay = nil } })
-    ) { HabitDayReview(habits: scoped, date: selectedAnalysisDay ?? store.today) }
-    .onChange(of: period) { _, _ in anchor = "" }
-  }
-  private var analytics: some View {
-    RitmCard {
-      VStack(alignment: .leading, spacing: 20) {
-        Text(
-          showingArchive
-            ? store.text("История архивных привычек", "Archived habit history")
-            : store.text("История активных привычек", "Active habit history")
-        ).font(.caption).foregroundStyle(.secondary)
-        Text(store.text("Прогресс привычек", "Habit progress")).font(.title2.bold())
-        HStack(spacing: 10) {
-          Picker(store.text("Период", "Period"), selection: $period) {
-            Text(store.text("Неделя", "Week")).tag(0)
-            Text(store.text("Месяц", "Month")).tag(1)
-          }.pickerStyle(.segmented)
-          Button {
-            shift(-1)
-          } label: {
-            Image(systemName: "chevron.left").frame(width: 44, height: 44)
-          }.accessibilityLabel(store.text("Предыдущий период", "Previous period"))
-          Button {
-            shift(1)
-          } label: {
-            Image(systemName: "chevron.right").frame(width: 44, height: 44)
-          }.disabled((dates.last ?? store.today) >= store.today).accessibilityLabel(
-            store.text("Следующий период", "Next period"))
-        }.buttonStyle(RitmPressStyle())
-        Text(periodLabel).font(.subheadline).foregroundStyle(.secondary)
-        HabitProgressArc(percent: summary.percent, animate: visible).frame(height: 155).padding(
-          .top, 8)
-        if let comparisonText { Text(comparisonText).font(.caption).foregroundStyle(.secondary) }
-        ViewThatFits(in: .horizontal) {
-          HStack(spacing: 8) { metrics }
-          VStack(spacing: 8) { metrics }
-        }
-        Divider()
-        Text(store.text("Выполнение по дням", "Daily completion")).font(.headline)
-        Chart(dates, id: \.self) { day in
-          let daily = HabitSchedule.daySummary(scoped, on: day, today: store.today)
-          BarMark(
-            x: .value("Date", day), y: .value("Percent", chartsIntroduced ? daily.percent ?? 0 : 0)
-          )
-          .foregroundStyle(
-            day == store.today ? RitmTheme.lavender : RitmTheme.lavender.opacity(0.48)
-          ).cornerRadius(4)
-          .accessibilityLabel(dateLabel(day)).accessibilityValue(
-            daily.planned > 0
-              ? "\(daily.completed) / \(daily.planned)"
-              : store.text("Не запланировано", "Not scheduled"))
-        }
-        .chartYScale(domain: 0...100)
-        .chartYAxis {
-          AxisMarks(values: [0, 50, 100]) {
-            AxisValueLabel()
-            AxisGridLine().foregroundStyle(Color.secondary.opacity(0.12))
-          }
-        }
-        .chartXAxis {
-          AxisMarks(
-            values: dates.enumerated().filter { period == 0 || $0.offset % 5 == 0 }.map(\.element)
-          ) { value in
-            if let key = value.as(String.self) {
-              AxisValueLabel { Text(String(Int(key.suffix(2)) ?? 0)).font(.caption2) }
-            }
-          }
-        }
-        .frame(height: 140).animation(
-          visible && !reduceMotion ? .easeInOut(duration: 0.35) : nil, value: store.habits
-        )
-        .animation(
-          visible && !reduceMotion ? .easeOut(duration: 0.4) : nil, value: chartsIntroduced)
-        Text(store.text("Регулярность", "Consistency")).font(.headline)
-        ScrollView(.horizontal) {
-          LazyVGrid(
-            columns: Array(repeating: GridItem(.fixed(44), spacing: 6), count: 7), spacing: 6
-          ) {
-            ForEach(dates, id: \.self) { date in
-              let daily = HabitSchedule.daySummary(scoped, on: date, today: store.today)
-              Button {
-                selectedAnalysisDay = date
-              } label: {
-                VStack(spacing: 3) {
-                  Text(String(Int(date.suffix(2)) ?? 0)).font(.caption.weight(.medium))
-                  Text(daily.planned > 0 ? "\(daily.completed)/\(daily.planned)" : "—").font(
-                    .system(size: 9))
-                }.frame(maxWidth: .infinity, minHeight: 44)
-                  .background(
-                    RitmTheme.lavender.opacity(
-                      daily.planned == 0 ? 0.04 : 0.10 + Double(daily.percent ?? 0) * 0.004),
-                    in: RoundedRectangle(cornerRadius: 9))
-              }.buttonStyle(RitmPressStyle())
-                .accessibilityLabel(dateLabel(date))
-                .accessibilityValue(
-                  daily.planned > 0
-                    ? "\(daily.completed) / \(daily.planned)"
-                    : store.text("Не запланировано", "Not scheduled"))
-            }
-          }
-        }.scrollIndicators(.hidden)
-        if let consistencyText { Text(consistencyText).font(.caption).foregroundStyle(.tint) }
-        if let missedWeekday { Text(missedWeekday).font(.caption).foregroundStyle(.secondary) }
-        if consistencyText == nil && missedWeekday == nil && comparisonText == nil {
-          Text(
-            store.text(
-              "Истории пока мало для выводов. Продолжайте отмечать привычки.",
-              "There is not enough history for insights yet. Keep marking your habits.")
-          ).font(.caption).foregroundStyle(.secondary)
-        }
-        Text(
-          store.text(
-            "Проценты учитывают только запланированные дни, не позднее сегодняшнего.",
-            "Percentages include only scheduled days up to today.")
-        ).font(.caption).foregroundStyle(.secondary)
-      }
-    }
-  }
-  @ViewBuilder private var metrics: some View {
-    HabitMetric(
-      title: store.text("Сегодня выполнено", "Done today"),
-      value: "\(todaySummary.completed) / \(todaySummary.planned)")
-    HabitMetric(
-      title: store.text("Текущая серия", "Current streak"),
-      value: "\(scoped.map { HabitSchedule.streak($0, today: store.today) }.max() ?? 0) "
-        + store.text("дн.", "days"))
-    HabitMetric(
-      title: store.text("Лучшая серия", "Best streak"),
-      value: "\(scoped.map { HabitSchedule.bestStreak($0, today: store.today) }.max() ?? 0) "
-        + store.text("дн.", "days"))
-  }
-  private var periodLabel: String {
-    guard let first = dates.first, let last = dates.last else { return "" }
-    return dateLabel(first) + " – " + dateLabel(last)
-  }
-  private func dateLabel(_ date: String) -> String {
-    FeatureDate.label(date, zone: store.timeZone, language: store.language, template: "d MMM")
-  }
-  private func shift(_ direction: Int) {
-    let current = anchor.isEmpty ? store.today : anchor
-    if period == 0 {
-      anchor = HabitSchedule.addDays(to: current, days: 7 * direction) ?? current
-    } else if let shifted = FeatureDate.calendar("UTC").date(
-      byAdding: .month, value: direction, to: FeatureDate.date(current, zone: "UTC"))
-    {
-      anchor = HabitSchedule.dateKey(shifted, timeZone: "UTC")
-    }
-  }
-}
-struct HabitProgressArc: View {
-  @Environment(RitmStore.self) private var store
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  let percent: Int?
-  var animate = true
-  @State private var displayed: CGFloat = 0
-  @State private var introduced = false
-  var body: some View {
-    ZStack(alignment: .bottom) {
-      HalfArc().stroke(
-        RitmTheme.lavender.opacity(0.13), style: StrokeStyle(lineWidth: 16, lineCap: .round))
-      HalfArc().trim(from: 0, to: displayed).stroke(
-        RitmTheme.lavender.gradient, style: StrokeStyle(lineWidth: 16, lineCap: .round))
-      VStack(spacing: 4) {
-        Text(percent.map { "\($0)%" } ?? "—").font(
-          .system(.largeTitle, design: .rounded).weight(.bold)
-        ).monospacedDigit()
-        Text(store.text("выполнено за период", "completed in period")).font(.caption)
-          .foregroundStyle(.secondary)
-      }.padding(.bottom, 4)
-    }.padding(.horizontal, 22).accessibilityElement(children: .combine)
-      .onAppear { if animate { update() } }
-      .onChange(of: animate) { _, active in if active && !introduced { update() } }
-      .onChange(of: percent) { _, _ in update() }
-  }
-  private func update() {
-    withAnimation(animate && !reduceMotion ? .spring(response: 0.55, dampingFraction: 1) : nil) {
-      displayed = CGFloat(percent ?? 0) / 100
-      introduced = true
-    }
-  }
-}
-private struct HalfArc: Shape {
-  func path(in rect: CGRect) -> Path {
-    var path = Path()
-    path.addArc(
-      center: CGPoint(x: rect.midX, y: rect.maxY), radius: min(rect.width / 2, rect.height),
-      startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false)
-    return path
-  }
-}
-private struct HabitMetric: View {
-  let title: String
-  let value: String
-  var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text(title).font(.caption).foregroundStyle(.secondary).fixedSize(
-        horizontal: false, vertical: true)
-      Text(value).font(.title3.bold()).monospacedDigit().fixedSize(
-        horizontal: true, vertical: false)
-    }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
-      .background(RitmTheme.lavender.opacity(0.08), in: RoundedRectangle(cornerRadius: 15))
-      .overlay(
-        RoundedRectangle(cornerRadius: 15).strokeBorder(
-          RitmTheme.lavender.opacity(0.16), lineWidth: 1))
-  }
-}
-private struct HabitDetailCard: View {
-  @Environment(RitmNavigation.self) private var navigation
-  @Environment(RitmStore.self) private var store
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  let habit: Habit
-  let dates: [String]
-  let onEdit: () -> Void
-  @State private var progressDate: String?
-  @State private var deleteConfirmation = false
-  private var complete: Bool { HabitSchedule.isComplete(habit, on: store.today) }
-  var body: some View {
-    RitmCard {
-      VStack(alignment: .leading, spacing: 16) {
-        HStack(alignment: .top) {
-          Image(systemName: habitSymbol(habit.icon)).font(.title3).foregroundStyle(.tint).frame(
-            width: 44, height: 44
-          ).background(RitmTheme.lavender.opacity(0.13), in: RoundedRectangle(cornerRadius: 13))
-          VStack(alignment: .leading, spacing: 5) {
-            Text(habit.title).font(.headline).textSelection(.enabled)
-            Text(
-              store.text("Серия: ", "Streak: ")
-                + "\(HabitSchedule.streak(habit, today: store.today))"
-            ).font(.caption).foregroundStyle(.secondary)
-          }.frame(maxWidth: .infinity, alignment: .leading)
-          Menu {
-            Button(store.text("Редактировать", "Edit"), systemImage: "pencil", action: onEdit)
-            Button(store.text("История отметок", "Mark history"), systemImage: "calendar") {
-              progressDate = store.today
-            }
-            Button(
-              habit.archived == true
-                ? store.text("Восстановить", "Restore") : store.text("В архив", "Archive"),
-              systemImage: "archivebox"
-            ) {
-              var input = habit.input
-              input.archived = habit.archived != true
-              Task {
-                _ = await store.write {
-                  try await $0.updateHabit(
-                    id: habit.id, habit: input, expectedUpdatedAt: habit.updatedAt)
-                }
-              }
-            }
-            Button(
-              store.text("Удалить навсегда", "Delete permanently"), systemImage: "trash",
-              role: .destructive
-            ) { deleteConfirmation = true }
-          } label: {
-            Image(systemName: "ellipsis").frame(width: 44, height: 44).contentShape(Rectangle())
-          }
-          .disabled(!store.canWrite).accessibilityLabel(
-            store.text("Действия с привычкой", "Habit actions"))
-        }
-        ScrollView(.horizontal) {
-          HStack(spacing: 4) {
-            ForEach(dates, id: \.self) { date in
-              HabitDayButton(habit: habit, date: date) { progressDate = date }
-            }
-          }
-        }.scrollIndicators(.hidden)
-        if habit.archived != true {
-          HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 5) {
-              Text(store.habitProgressText(habit)).font(.subheadline.weight(.semibold))
-              if let target = habit.target {
-                ProgressView(
-                  value: min(
-                    Double(HabitSchedule.progress(habit, on: store.today)) / Double(max(target, 1)),
-                    1)
-                ).tint(RitmTheme.lavender)
-                  .animation(
-                    reduceMotion ? nil : .easeInOut(duration: 0.25), value: habit.progressByDate)
-              }
-            }.frame(maxWidth: .infinity, alignment: .leading)
-            if habit.target != nil {
-              Button {
-                progressDate = store.today
-              } label: {
-                Image(systemName: "plusminus").frame(width: 48, height: 48)
-              }
-              .disabled(
-                !store.canWrite
-                  || !HabitSchedule.canMark(habit, on: store.today, today: store.today)
-              ).accessibilityLabel(store.text("Изменить количество", "Change quantity"))
-            } else {
-              Button {
-                Task { await toggle() }
-              } label: {
-                Image(systemName: complete ? "checkmark.circle.fill" : "circle").font(
-                  .system(size: 30)
-                ).frame(width: 48, height: 48)
-              }.disabled(
-                !store.canWrite
-                  || !HabitSchedule.canMark(habit, on: store.today, today: store.today)
-              )
-              .accessibilityLabel(
-                complete
-                  ? store.text("Отменить выполнение", "Mark incomplete")
-                  : store.text("Выполнить сегодня", "Complete today"))
-            }
-          }.buttonStyle(RitmPressStyle())
-        }
-        if !(habit.achievements ?? []).isEmpty {
-          Label(
-            (habit.achievements ?? []).sorted().map(String.init).joined(separator: " · ")
-              + store.text(" дней", " days"), systemImage: "medal"
-          ).font(.caption).foregroundStyle(.tint)
-        }
-      }
-    }
-    .sensoryFeedback(.success, trigger: complete) { _, new in new }
-    .sheet(
-      isPresented: Binding(get: { progressDate != nil }, set: { if !$0 { progressDate = nil } })
-    ) { HabitProgressEditor(habit: habit, initialDate: progressDate ?? store.today) }
+    .sheet(item: $editing) { target in HabitEditor(habit: target.habit) }
     .confirmationDialog(
-      store.text("Удалить привычку и её историю?", "Delete this habit and its history?"),
-      isPresented: $deleteConfirmation, titleVisibility: .visible
+      store.text("Удалить привычку?", "Delete habit?"),
+      isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+      titleVisibility: .visible
     ) {
-      Button(store.text("Удалить навсегда", "Delete permanently"), role: .destructive) {
-        Task {
-          _ = await store.performMutation {
-            try await $0.deleteHabit(id: habit.id, expectedUpdatedAt: habit.updatedAt)
-          }
-        }
+      Button(store.text("Удалить привычку", "Delete habit"), role: .destructive) {
+        Task { await remove() }
       }
-    }
-  }
-  private func toggle() async {
-    if let updated = await store.write({
-      try await $0.setHabitDay(
-        id: habit.id, date: store.today, completed: !complete, expectedUpdatedAt: habit.updatedAt)
-    }) {
-      announceHabitAchievement(
-        previous: habit, updated: updated, store: store, navigation: navigation)
+      Button(store.text("Отмена", "Cancel"), role: .cancel) {}
+    } message: {
+      Text(store.text("История отметок этой привычки будет удалена.", "This habit's history will be deleted."))
     }
   }
 
-}
-struct HabitDayButton: View {
-  @Environment(RitmStore.self) private var store
-  @ScaledMetric(relativeTo: .caption) private var scaledHeight: CGFloat = 58
-  let habit: Habit
-  let date: String
-  var height: CGFloat? = nil
-  let onTap: () -> Void
-  private var completed: Bool { HabitSchedule.isComplete(habit, on: date) }
-  private var scheduled: Bool { HabitSchedule.isScheduled(habit, on: date) }
-  var body: some View {
-    Button(action: onTap) {
-      VStack(spacing: 7) {
-        Text(String(Int(date.suffix(2)) ?? 0)).font(.caption2)
-        Image(
-          systemName: completed ? "checkmark.circle.fill" : scheduled ? "circle" : "minus.circle"
-        ).font(.system(size: 23)).opacity(scheduled ? 1 : 0.28)
-      }.frame(width: 44, height: height ?? scaledHeight)
-        .background(
-          date == store.today ? RitmTheme.lavender.opacity(0.12) : .clear,
-          in: RoundedRectangle(cornerRadius: 11)
-        ).contentShape(Rectangle())
-    }.buttonStyle(RitmPressStyle()).disabled(
-      !store.canWrite || !HabitSchedule.canMark(habit, on: date, today: store.today)
-    )
-    .accessibilityLabel(
-      habit.title + ", " + FeatureDate.label(date, zone: store.timeZone, language: store.language)
-    )
-    .accessibilityValue(
-      completed
-        ? store.text("Выполнено", "Completed")
-        : scheduled
-          ? store.text("Не выполнено", "Incomplete")
-          : store.text("Не запланировано", "Not scheduled"))
-  }
-}
-struct HabitEditor: View {
-  @Environment(RitmStore.self) private var store
-  @Environment(\.dismiss) private var dismiss
-  let habit: Habit?
-  @State private var title: String
-  @State private var icon: HabitIcon
-  @State private var weekdays: Set<Int>
-  @State private var quantitative: Bool
-  @State private var target: String
-  @State private var unit: String
-  @State private var busy = false
-  init(habit: Habit? = nil) {
-    self.habit = habit
-    _title = State(initialValue: habit?.title ?? "")
-    _icon = State(initialValue: habit?.icon ?? .sparkles)
-    _weekdays = State(initialValue: Set(habit?.weekdays ?? Array(0...6)))
-    _quantitative = State(initialValue: habit?.target != nil)
-    _target = State(initialValue: String(habit?.target ?? 1))
-    _unit = State(initialValue: habit?.unit ?? "")
-  }
-  private var valid: Bool {
-    !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && title.utf16.count <= 80
-      && !weekdays.isEmpty && unit.utf16.count <= 24
-      && (!quantitative || (1...10_000).contains(Int(target) ?? 0))
-  }
-  var body: some View {
-    NavigationStack {
-      Form {
-        Section(store.text("Название", "Name")) {
-          TextField(
-            store.text("Например, чтение", "For example, reading"), text: $title, axis: .vertical
-          ).lineLimit(2...4)
-          Text("\(title.utf16.count) / 80").font(.caption).foregroundStyle(
-            title.utf16.count > 80 ? Color.red : Color.secondary)
-        }
-        Section(store.text("Значок", "Icon")) {
-          ScrollView(.horizontal) {
-            HStack {
-              ForEach(HabitIcon.allCases, id: \.self) { value in
-                Button {
-                  icon = value
-                } label: {
-                  Image(systemName: habitSymbol(value)).frame(width: 44, height: 44).background(
-                    icon == value ? RitmTheme.lavender.opacity(0.23) : .clear,
-                    in: RoundedRectangle(cornerRadius: 10))
-                }.buttonStyle(.plain).accessibilityLabel(value.rawValue).accessibilityAddTraits(
-                  icon == value ? .isSelected : [])
-              }
-            }
-          }.scrollIndicators(.hidden)
-        }
-        Section(store.text("Дни недели", "Weekdays")) {
-          ForEach(0..<7) { day in
-            Toggle(
-              weekdayName(day, russian: store.language == .ru),
-              isOn: Binding(
-                get: { weekdays.contains(day) },
-                set: { if $0 { weekdays.insert(day) } else { weekdays.remove(day) } }))
-          }
-          if weekdays.isEmpty {
-            Text(store.text("Выберите хотя бы один день.", "Choose at least one day."))
-              .foregroundStyle(.red)
-          }
-        }
-        Section {
-          Toggle(store.text("Количественная цель", "Quantity target"), isOn: $quantitative)
-          if quantitative {
-            TextField(store.text("Цель (1–10000)", "Target (1–10000)"), text: $target).keyboardType(
-              .numberPad)
-            TextField(
-              store.text("Единица: минуты, стаканы…", "Unit: minutes, glasses…"), text: $unit)
-          }
-        } footer: {
-          Text(
-            store.text(
-              "Изменение расписания не переписывает прошлые отметки.",
-              "Schedule changes preserve historical marks."))
-        }
-        if let message = store.errorMessage { Section { RitmErrorBanner(message: message) } }
-        if store.uncertainWrite {
-          Section {
-            Button(store.text("Закрыть и проверить список", "Close and check list")) {
-              dismiss()
-            }
-          }
-        }
-      }.scrollDismissesKeyboard(.interactively)
-        .navigationTitle(
-          habit == nil
-            ? store.text("Новая привычка", "New habit")
-            : store.text("Изменить привычку", "Edit habit")
-        ).navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-          ToolbarItem(placement: .cancellationAction) {
-            Button(store.text("Отмена", "Cancel")) { dismiss() }.disabled(busy)
-          }
-          ToolbarItem(placement: .confirmationAction) {
-            Button(store.text("Сохранить", "Save")) { Task { await save() } }.disabled(
-              !valid || busy || !store.canWrite)
-          }
-        }.interactiveDismissDisabled(busy)
-    }
-  }
-  private func save() async {
-    busy = true
-    defer { busy = false }
-    let input = HabitInput(
-      title: title.trimmingCharacters(in: .whitespacesAndNewlines), icon: icon,
-      weekdays: weekdays.sorted(), target: quantitative ? Int(target) : nil,
-      unit: quantitative ? unit.trimmingCharacters(in: .whitespacesAndNewlines) : "",
-      archived: habit?.archived ?? false)
-    let result: Habit?
-    if let habit {
-      result = await store.write {
-        try await $0.updateHabit(id: habit.id, habit: input, expectedUpdatedAt: habit.updatedAt)
-      }
-    } else {
-      result = await store.write { try await $0.createHabit(input) }
-    }
-    if result != nil { dismiss() }
-  }
-}
-struct HabitProgressEditor: View {
-  @Environment(RitmNavigation.self) private var navigation
-  @Environment(RitmStore.self) private var store
-  @Environment(\.dismiss) private var dismiss
-  let habit: Habit
-  @State private var date: String
-  @State private var count: String
-  @State private var busy = false
-  init(habit: Habit, initialDate: String) {
-    self.habit = habit
-    _date = State(initialValue: initialDate)
-    _count = State(initialValue: String(HabitSchedule.progress(habit, on: initialDate)))
-  }
-  private var current: Habit { store.habits.first(where: { $0.id == habit.id }) ?? habit }
-  private var valid: Bool {
-    HabitSchedule.canMark(current, on: date, today: store.today)
-      && (0...HabitSchedule.target(current)).contains(Int(count) ?? -1)
-  }
-  var body: some View {
-    NavigationStack {
-      Form {
-        Section {
-          Text(current.title).font(.headline).textSelection(.enabled)
-          DateKeyPicker(title: store.text("Дата", "Date"), value: $date, zone: store.timeZone)
-        }
-        Section {
-          if current.target != nil {
-            TextField(store.text("Количество", "Quantity"), text: $count).keyboardType(.numberPad)
-            Text(
-              store.text("Цель: ", "Target: ")
-                + "\(HabitSchedule.target(current)) \(current.unit ?? "")"
-            ).foregroundStyle(.secondary)
-            HStack {
-              Button(store.text("Выполнить цель", "Complete target")) {
-                count = String(HabitSchedule.target(current))
-              }.frame(minHeight: 44)
-              Spacer()
-              Button(store.text("Сбросить", "Reset")) { count = "0" }.frame(minHeight: 44)
-            }
-            Stepper(
-              store.text("Изменить количество", "Adjust quantity"),
-              value: Binding(get: { Int(count) ?? 0 }, set: { count = String($0) }),
-              in: 0...HabitSchedule.target(current))
-          } else {
-            Toggle(
-              store.text("Выполнено", "Completed"),
-              isOn: Binding(get: { (Int(count) ?? 0) > 0 }, set: { count = $0 ? "1" : "0" }))
-          }
-          if !HabitSchedule.canMark(current, on: date, today: store.today) {
-            Text(
-              store.text(
-                "В этот день отметка недоступна: проверьте расписание, дату и архив.",
-                "This day cannot be marked. Check the schedule, date and archive.")
-            ).font(.caption).foregroundStyle(.secondary)
-          }
-        }
-        if let error = store.errorMessage { Section { RitmErrorBanner(message: error) } }
-        if store.uncertainWrite { Section { MutationRecoveryView() } }
-      }
-      .onChange(of: date) { _, value in count = String(HabitSchedule.progress(current, on: value)) }
-      .navigationTitle(store.text("Отметка привычки", "Habit mark")).navigationBarTitleDisplayMode(
-        .inline
+  // MARK: Heading and list
+
+  /// On a phone the web stacks the title and puts the 44 pt «+» under it.
+  private var heading: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      RitmPageHeading(
+        eyebrow: "RITM · " + store.text("Ежедневные привычки", "Daily habits"),
+        title: store.text("Привычки", "Habits"),
+        description: store.text(
+          "Маленькие действия складываются в устойчивый ритм.",
+          "Small actions add up to a steady rhythm.")
       )
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button(store.text("Отмена", "Cancel")) { dismiss() }.disabled(busy)
+      .padding(.bottom, -24)
+      RitmIconCTA(symbol: "plus", label: store.text("Новая привычка", "New habit")) {
+        store.errorMessage = nil
+        editing = HabitEditTarget(habit: nil)
+      }
+      .padding(.top, 36)
+    }
+    .padding(.bottom, 24)
+  }
+
+  private var listHeading: some View {
+    HStack(alignment: .center, spacing: 18) {
+      VStack(alignment: .leading, spacing: 5) {
+        Text(store.text("Ваши действия", "Your actions")).ritmFont(10, weight: .medium)
+          .foregroundStyle(RitmTheme.muted)
+        Text(showArchived ? store.text("Архив", "Archive") : store.text("Мои привычки", "My habits"))
+          .ritmFont(20, weight: .semibold, tracking: -0.035)
+          .foregroundStyle(RitmTheme.text)
+          .accessibilityAddTraits(.isHeader)
+      }
+      Spacer(minLength: 0)
+      Button {
+        showArchived.toggle()
+        selectedDay = nil
+      } label: {
+        Label {
+          Text(
+            showArchived
+              ? store.text("К активным", "Back to active")
+                + (archivedCount > 0 ? " (\(archivedCount))" : "")
+              : store.text("Архив", "Archive"))
+        } icon: {
+          Image(systemName: showArchived ? "arrow.counterclockwise" : "archivebox")
+            .font(.system(size: 14))
         }
-        ToolbarItem(placement: .confirmationAction) {
-          Button(store.text("Сохранить", "Save")) { Task { await save() } }.disabled(
-            !store.canWrite || busy || !valid)
+        .ritmFont(11, weight: .semibold)
+        .padding(.horizontal, 10)
+      }
+      .buttonStyle(RitmSecondaryButtonStyle())
+    }
+    .padding(.top, 28)
+    .padding(.bottom, 14)
+  }
+
+  @ViewBuilder private var list: some View {
+    if visible.isEmpty {
+      VStack(spacing: 9) {
+        Text(showArchived ? store.text("Архив пуст", "The archive is empty") : store.text("Пока нет привычек", "No habits yet"))
+          .ritmFont(16, weight: .semibold)
+          .foregroundStyle(RitmTheme.text)
+        Text(
+          showArchived
+            ? store.text("Здесь появятся сохранённые привычки.", "Saved habits will appear here.")
+            : store.text(
+              "Добавьте первую привычку, которую хотите повторять каждый день.",
+              "Add the first habit you want to repeat every day.")
+        )
+        .ritmFont(12, lineSpacing: 4)
+        .foregroundStyle(RitmTheme.muted)
+      }
+      .multilineTextAlignment(.center)
+      .padding(24)
+      .frame(maxWidth: .infinity, minHeight: 145)
+      .background { RitmPanelBackground(raised: true) }
+    } else {
+      VStack(spacing: 13) {
+        ForEach(visible) { habit in
+          HabitCard(
+            habit: habit, today: today, busy: busyID != nil, isRecord: recordID == habit.id,
+            onEdit: {
+              store.errorMessage = nil
+              editing = HabitEditTarget(habit: habit)
+            },
+            onArchive: { Task { await setArchived(habit, !(habit.archived ?? false)) } },
+            onDelete: { deleting = habit },
+            onProgress: { day, count in Task { await setProgress(habit, day: day, count: count) } })
         }
-      }.interactiveDismissDisabled(busy)
+      }
     }
   }
-  private func save() async {
-    guard let value = Int(count) else { return }
-    busy = true
-    defer { busy = false }
-    let latest = current
-    let result = await store.write {
-      try await $0.setHabitProgress(
-        id: latest.id, date: date, count: value, expectedUpdatedAt: latest.updatedAt)
+
+  private func celebrationToast(_ text: String) -> some View {
+    Label {
+      Text(text)
+    } icon: {
+      Image(systemName: "sparkles").font(.system(size: 16))
     }
-    if let result {
-      announceHabitAchievement(
-        previous: latest, updated: result, store: store, navigation: navigation)
-      dismiss()
+    .ritmFont(13, weight: .bold)
+    .foregroundStyle(RitmTheme.accentColor)
+    .padding(.vertical, 13)
+    .padding(.horizontal, 17)
+    .background(RitmTheme.glassRaised, in: RoundedRectangle(cornerRadius: 18, style: .circular))
+    .overlay {
+      RoundedRectangle(cornerRadius: 18, style: .circular)
+        .strokeBorder(RitmTheme.mix(RitmTheme.accentColor, 0.48, into: RitmTheme.panelBorder), lineWidth: 1)
+    }
+    .shadow(color: Color(rgb: 0x3C1E5F, opacity: 0.18), radius: 21, y: 18)
+    .padding(16)
+    .transition(.opacity.combined(with: .move(edge: .bottom)))
+    .accessibilityAddTraits(.isStaticText)
+  }
+
+  // MARK: Writes
+
+  private func setProgress(_ habit: Habit, day: String, count: Int) async {
+    guard busyID == nil, HabitSchedule.canMark(habit, on: day, today: today) else { return }
+    let target = HabitSchedule.target(habit)
+    let next = max(0, min(target, count))
+    let wasComplete = HabitSchedule.isComplete(habit, on: day)
+    busyID = habit.id
+    defer { busyID = nil }
+    let saved = await store.write { client -> Habit in
+      if habit.target == nil {
+        return try await client.setHabitDay(
+          id: habit.id, date: day, completed: next > 0, expectedUpdatedAt: habit.updatedAt)
+      }
+      return try await client.setHabitProgress(
+        id: habit.id, date: day, count: next, expectedUpdatedAt: habit.updatedAt)
+    }
+    guard let saved, !wasComplete, next >= target else { return }
+    if HabitSchedule.bestStreak(saved, today: today) > HabitSchedule.bestStreak(habit, today: today) {
+      flashRecord(habit.id)
+    }
+    if let milestone = HabitsPlan.newMilestone(previous: habit, updated: saved) {
+      celebrate(
+        store.text(
+          "\(habit.title): достижение \(milestone) дней", "\(habit.title): \(milestone)-day achievement"))
+    }
+  }
+
+  private func setArchived(_ habit: Habit, _ archived: Bool) async {
+    guard busyID == nil else { return }
+    busyID = habit.id
+    defer { busyID = nil }
+    var input = habit.input
+    input.archived = archived
+    _ = await store.write {
+      try await $0.updateHabit(id: habit.id, habit: input, expectedUpdatedAt: habit.updatedAt)
+    }
+  }
+
+  private func remove() async {
+    guard let habit = deleting, busyID == nil else { return }
+    busyID = habit.id
+    defer {
+      busyID = nil
+      deleting = nil
+    }
+    _ = await store.performMutation {
+      try await $0.deleteHabit(id: habit.id, expectedUpdatedAt: habit.updatedAt)
+    }
+  }
+
+  private func flashRecord(_ id: String) {
+    recordID = id
+    Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(1050))
+      if recordID == id { recordID = nil }
+    }
+  }
+
+  private func celebrate(_ text: String) {
+    withAnimation(reduceMotion ? nil : RitmMotion.ease(0.33)) { celebration = text }
+    Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(2600))
+      guard celebration == text else { return }
+      withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { celebration = nil }
     }
   }
 }
-func habitSymbol(_ icon: HabitIcon?) -> String {
-  switch icon ?? .sparkles {
-  case .sparkles: "sparkles"
-  case .book: "book"
-  case .activity: "waveform.path.ecg"
-  case .droplet: "drop"
-  case .moon: "moon"
-  case .target: "target"
-  }
+
+private struct HabitDayEntry: Identifiable {
+  let day: String
+  let summary: HabitDaySummary
+  var id: String { day }
 }
-private func weekdayName(_ day: Int, russian: Bool) -> String {
-  (russian
-    ? ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"]
-    : ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"])[day]
-}
-private struct HabitDayReview: View {
-  @Environment(RitmStore.self) private var store
-  @Environment(\.dismiss) private var dismiss
+
+/// `.habits-analytics`: the period switch, gauge, KPIs, daily bars, heatmap and insights.
+private struct HabitsAnalytics: View {
   let habits: [Habit]
-  let date: String
-  @State private var selected: Habit?
-  private var planned: [Habit] { habits.filter { HabitSchedule.isScheduled($0, on: date) } }
+  let archived: Bool
+  @Binding var month: Bool
+  @Binding var offset: Int
+  @Binding var selectedDay: String?
+  @Environment(RitmStore.self) private var store
+
+  private var today: String { store.today }
+  private var dates: [String] { HabitsPlan.periodDates(today: today, month: month, offset: offset) }
+  private var daily: [HabitDayEntry] {
+    dates.map { HabitDayEntry(day: $0, summary: HabitSchedule.daySummary(habits, on: $0, today: today)) }
+  }
+
   var body: some View {
-    NavigationStack {
-      List {
-        Section {
-          Text(FeatureDate.label(date, zone: store.timeZone, language: store.language)).font(
-            .headline)
-          let summary = HabitSchedule.daySummary(habits, on: date, today: store.today)
+    let totals = HabitSchedule.periodSummary(habits, dates: dates, today: today)
+    return VStack(alignment: .leading, spacing: 0) {
+      VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 5) {
           Text(
-            date > store.today
-              ? store.text("Будущий день", "Future day")
-              : "\(summary.completed) / \(summary.planned)"
-          ).foregroundStyle(.secondary)
+            archived
+              ? store.text("История архивных привычек", "Archived habit history")
+              : store.text("История активных привычек", "Active habit history")
+          )
+          .ritmFont(10, weight: .medium)
+          .foregroundStyle(RitmTheme.muted)
+          Text(store.text("Прогресс привычек", "Habit progress"))
+            .ritmFont(20, weight: .semibold, tracking: -0.035)
+            .foregroundStyle(RitmTheme.text)
+            .accessibilityAddTraits(.isHeader)
         }
-        ForEach(planned) { habit in
+        controls
+      }
+      Text(periodLabel).ritmFont(12).foregroundStyle(RitmTheme.muted).padding(.top, 5)
+      HabitGauge(percent: totals.progress)
+        .frame(width: 210, height: 127)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 12)
+      kpis.padding(.top, 4)
+      if totals.planned > 0 {
+        graphs
+        if let selectedDay, let entry = daily.first(where: { $0.day == selectedDay }) {
+          Text(describe(entry.day, entry.summary, template: "EEEE d MMMM"))
+            .ritmFont(12)
+            .foregroundStyle(RitmTheme.accentColor)
+            .padding(.top, 12)
+        }
+        insights
+      } else {
+        HStack(spacing: 15) {
+          Image(systemName: "sparkles").font(.system(size: 22)).foregroundStyle(RitmTheme.accentColor)
+          Text(store.text("Нет запланированных привычек", "No habits scheduled")).ritmFont(13)
+            .foregroundStyle(RitmTheme.muted)
+        }
+        .frame(maxWidth: .infinity, minHeight: 100, alignment: .leading)
+      }
+    }
+    .padding(18)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background { RitmPanelBackground() }
+  }
+
+  private var periodLabel: String {
+    guard let first = dates.first else { return "" }
+    if month {
+      return FeatureDate.label(first, zone: store.timeZone, language: store.language, template: "LLLL yyyy")
+    }
+    return FeatureDate.label(first, zone: store.timeZone, language: store.language, template: "d MMM") + " – "
+      + FeatureDate.label(dates.last ?? first, zone: store.timeZone, language: store.language, template: "d MMM")
+  }
+
+  private var controls: some View {
+    HStack(spacing: 6) {
+      HStack(spacing: 2) {
+        ForEach([false, true], id: \.self) { value in
           Button {
-            selected = habit
+            month = value
+            offset = 0
+            selectedDay = nil
           } label: {
-            HStack {
-              Image(
-                systemName: HabitSchedule.isComplete(habit, on: date)
-                  ? "checkmark.circle.fill" : "circle")
-              VStack(alignment: .leading, spacing: 4) {
-                Text(habit.title)
-                Text(
-                  "\(HabitSchedule.progress(habit, on: date)) / \(HabitSchedule.target(habit)) \(habit.unit ?? "")"
-                ).font(.caption).foregroundStyle(.secondary)
+            Text(value ? store.text("Месяц", "Month") : store.text("Неделя", "Week"))
+              .ritmFont(12, weight: .semibold)
+              .foregroundStyle(month == value ? RitmTheme.accentColor : RitmTheme.muted)
+              .padding(.horizontal, 13)
+              .frame(minHeight: 44)
+              .background {
+                if month == value {
+                  RoundedRectangle(cornerRadius: 8, style: .circular).fill(RitmTheme.glassRaised)
+                    .shadow(color: Color(rgb: 0x3E236B, opacity: 0.09), radius: 5, y: 3)
+                }
               }
-              Spacer()
-              if HabitSchedule.canMark(habit, on: date, today: store.today) {
-                Image(systemName: "pencil").font(.caption)
-              }
-            }.frame(minHeight: 44)
-          }.disabled(!HabitSchedule.canMark(habit, on: date, today: store.today))
-        }
-        if planned.isEmpty {
-          Text(
-            store.text(
-              "На эту дату привычки не запланированы.", "No habits are scheduled on this date.")
-          ).foregroundStyle(.secondary)
+              .contentShape(Rectangle())
+          }
+          .buttonStyle(RitmPressStyle(scale: 0.97))
+          .accessibilityAddTraits(month == value ? .isSelected : [])
         }
       }
-      .navigationTitle(store.text("Привычки за день", "Habits for this day"))
-      .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .confirmationAction) {
-          Button(store.text("Готово", "Done")) { dismiss() }
-        }
+      .padding(3)
+      .background(RitmTheme.soft.opacity(0.74), in: RoundedRectangle(cornerRadius: 11, style: .circular))
+      .overlay {
+        RoundedRectangle(cornerRadius: 11, style: .circular).strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
       }
-      .sheet(item: $selected) { HabitProgressEditor(habit: $0, initialDate: date) }
+      .padding(.trailing, 5)
+      .accessibilityElement(children: .contain)
+      .accessibilityLabel(store.text("Период аналитики", "Analytics period"))
+      HabitIconButton(symbol: "chevron.left", label: store.text("Предыдущий период", "Previous period")) {
+        offset -= 1
+        selectedDay = nil
+      }
+      HabitIconButton(symbol: "chevron.right", label: store.text("Следующий период", "Next period")) {
+        offset += 1
+        selectedDay = nil
+      }
+      .disabled(offset == 0)
     }
   }
+
+  private var kpis: some View {
+    let todaySummary = HabitSchedule.daySummary(habits, on: today, today: today)
+    let current = habits.map { HabitSchedule.streak($0, today: today) }.max() ?? 0
+    let best = habits.map { HabitSchedule.bestStreak($0, today: today) }.max() ?? 0
+    let days = store.text(" дн.", " d")
+    return HStack(spacing: 8) {
+      if todaySummary.planned > 0 {
+        kpi(store.text("Сегодня выполнено", "Done today"), value: "\(todaySummary.completed)", suffix: " / \(todaySummary.planned)")
+      } else {
+        kpi(store.text("Сегодня выполнено", "Done today"), empty: store.text("Нет запланированных привычек", "No habits scheduled"))
+      }
+      kpi(store.text("Текущая серия", "Current streak"), value: "\(current)", suffix: days)
+      kpi(store.text("Лучшая серия", "Best streak"), value: "\(best)", suffix: days)
+    }
+  }
+
+  private func kpi(_ title: String, value: String? = nil, suffix: String = "", empty: String? = nil)
+    -> some View
+  {
+    VStack(alignment: .leading, spacing: 10) {
+      Text(title).ritmFont(10).foregroundStyle(RitmTheme.muted)
+      if let empty {
+        Text(empty).ritmFont(12, weight: .medium, lineSpacing: 3).foregroundStyle(RitmTheme.muted)
+      } else if let value {
+        (Text(value).foregroundColor(RitmTheme.text) + Text(suffix).foregroundColor(RitmTheme.muted))
+          .ritmFont(22, weight: .semibold, tracking: -0.04)
+          .lineLimit(1)
+          .minimumScaleFactor(0.7)
+      }
+    }
+    .padding(.vertical, 9)
+    .padding(.horizontal, 6)
+    .frame(maxWidth: .infinity, minHeight: 70, alignment: .leading)
+    .background(RitmTheme.glassRaised.opacity(0.88), in: RoundedRectangle(cornerRadius: 15, style: .circular))
+    .overlay {
+      RoundedRectangle(cornerRadius: 15, style: .circular).strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
+    }
+    .accessibilityElement(children: .combine)
+  }
+
+  private var graphs: some View {
+    VStack(alignment: .leading, spacing: 22) {
+      VStack(alignment: .leading, spacing: 13) {
+        Text(store.text("Выполнение по дням", "Completion by day"))
+          .ritmFont(13, weight: .semibold, tracking: -0.01)
+          .foregroundStyle(RitmTheme.text)
+        if month {
+          ScrollView(.horizontal) { bars.frame(width: CGFloat(daily.count) * 49) }
+            .scrollIndicators(.hidden)
+        } else {
+          bars
+        }
+      }
+      VStack(alignment: .leading, spacing: 13) {
+        Text(store.text("Регулярность", "Consistency"))
+          .ritmFont(13, weight: .semibold, tracking: -0.01)
+          .foregroundStyle(RitmTheme.text)
+        heatmap
+        HStack(spacing: 5) {
+          Spacer()
+          Text(store.text("Меньше", "Less"))
+          ForEach(0..<3, id: \.self) { level in
+            RoundedRectangle(cornerRadius: 3, style: .circular)
+              .fill(level == 0 ? HabitStyle.tile : level == 1 ? HabitStyle.chosen : RitmTheme.accentColor)
+              .overlay {
+                RoundedRectangle(cornerRadius: 3, style: .circular)
+                  .strokeBorder(level == 0 ? RitmTheme.panelBorder : RitmTheme.accentColor, lineWidth: 1)
+              }
+              .frame(width: 11, height: 11)
+          }
+          Text(store.text("Больше", "More"))
+        }
+        .ritmFont(10)
+        .foregroundStyle(RitmTheme.muted)
+        .accessibilityHidden(true)
+      }
+    }
+    .padding(.top, 22)
+    .overlay(alignment: .top) { Rectangle().fill(RitmTheme.panelBorder).frame(height: 1) }
+    .padding(.top, 17)
+  }
+
+  private var bars: some View {
+    HStack(alignment: .bottom, spacing: month ? 5 : 8) {
+      ForEach(daily) { entry in
+        Button {
+          selectedDay = entry.day
+        } label: {
+          VStack(spacing: 8) {
+            GeometryReader { proxy in
+              VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                UnevenRoundedRectangle(
+                  topLeadingRadius: 6, bottomLeadingRadius: 3, bottomTrailingRadius: 3,
+                  topTrailingRadius: 6, style: .circular
+                )
+                .fill(RitmTheme.accentColor)
+                .frame(height: proxy.size.height * CGFloat(entry.summary.progress ?? 0) / 100)
+              }
+            }
+            .frame(height: 111)
+            .background(
+              RitmTheme.mix(RitmTheme.soft, 0.78, into: RitmTheme.glassRaised),
+              in: UnevenRoundedRectangle(
+                topLeadingRadius: 6, bottomLeadingRadius: 3, bottomTrailingRadius: 3,
+                topTrailingRadius: 6, style: .circular)
+            )
+            .clipShape(
+              UnevenRoundedRectangle(
+                topLeadingRadius: 6, bottomLeadingRadius: 3, bottomTrailingRadius: 3,
+                topTrailingRadius: 6, style: .circular)
+            )
+            .padding(2)
+            .overlay {
+              if selectedDay == entry.day {
+                RoundedRectangle(cornerRadius: 8, style: .circular).strokeBorder(RitmTheme.accentColor, lineWidth: 2)
+              }
+            }
+            Text("\(Int(entry.day.suffix(2)) ?? 0)").ritmFont(10).foregroundStyle(RitmTheme.muted)
+          }
+          .frame(maxWidth: .infinity, minHeight: 135)
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(RitmPressStyle(scale: 0.97))
+        .accessibilityLabel(describe(entry.day, entry.summary, template: "EEE d MMM"))
+      }
+    }
+    .animation(RitmMotion.ease(0.3), value: dates)
+  }
+
+  private var heatmap: some View {
+    let lead = dates.first.flatMap(HabitSchedule.weekday) ?? 0
+    let columns = Array(repeating: GridItem(.fixed(44), spacing: 5), count: 7)
+    return ScrollView(.horizontal) {
+      LazyVGrid(columns: columns, spacing: 5) {
+        ForEach(0..<lead, id: \.self) { _ in Color.clear.frame(height: 44) }
+        ForEach(daily) { entry in heatCell(entry.day, entry.summary) }
+      }
+      .padding(2)
+    }
+    .scrollIndicators(.hidden)
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel(store.text("Календарь выполнения", "Completion calendar"))
+  }
+
+  private func heatCell(_ day: String, _ summary: HabitDaySummary) -> some View {
+    let level = HabitsPlan.heatLevel(summary, day: day, today: today)
+    let selected = selectedDay == day
+    let fill: Color
+    let ink: Color
+    switch level {
+    case .full:
+      fill = RitmTheme.accentColor
+      ink = RitmTheme.accentInk
+    case .some:
+      fill = HabitStyle.chosen
+      ink = RitmTheme.accentColor
+    default:
+      fill = HabitStyle.tile
+      ink = RitmTheme.muted
+    }
+    let border = selected || level == .full || level == .some ? HabitStyle.chosenBorder : RitmTheme.panelBorder
+    return Button {
+      selectedDay = day
+    } label: {
+      Text("\(Int(day.suffix(2)) ?? 0)")
+        .ritmFont(10)
+        .foregroundStyle(ink)
+        .frame(width: 44, height: 44)
+        .background(fill, in: RoundedRectangle(cornerRadius: 7, style: .circular))
+        .overlay { RoundedRectangle(cornerRadius: 7, style: .circular).strokeBorder(border, lineWidth: 1) }
+        .shadow(color: level == .full ? Color(rgb: 0x764DB7, opacity: 0.14) : .clear, radius: 7, y: 5)
+        .opacity(level == .future || level == .none ? 0.45 : 1)
+        .offset(y: selected ? -2 : 0)
+    }
+    .buttonStyle(RitmPressStyle(scale: 0.97))
+    .accessibilityLabel(describe(day, summary, template: "EEE d MMM"))
+  }
+
+  @ViewBuilder private var insights: some View {
+    let steady = HabitsPlan.steadiest(habits, dates: dates, today: today)
+    let weak = HabitsPlan.weakestWeekday(habits, dates: dates, today: today)
+    let change = HabitsPlan.comparison(habits, today: today, month: month, offset: offset)
+    VStack(alignment: .leading, spacing: 8) {
+      if let steady {
+        insight("sparkles", store.text("Самая стабильная: ", "Steadiest: ") + "\(steady.habit.title) (\(steady.percent)%)")
+      }
+      if let weak, let day = dates.first(where: { HabitSchedule.weekday($0) == weak }) {
+        insight(
+          "target",
+          store.text("Чаще пропускается: ", "Most often missed: ")
+            + FeatureDate.label(day, zone: store.timeZone, language: store.language, template: "EEEE"))
+      }
+      if let change {
+        let delta = change.current - change.previous
+        insight(
+          "waveform.path.ecg",
+          store.text("К прошлому периоду: ", "Versus the last period: ") + (delta > 0 ? "+" : "")
+            + "\(delta) " + store.text("п. п.", "pp"))
+      }
+      if steady == nil && weak == nil && change == nil {
+        Text(
+          store.text(
+            "Истории пока мало для выводов. Продолжайте отмечать привычки.",
+            "There is not enough history yet. Keep marking your habits.")
+        )
+        .ritmFont(11, lineSpacing: 3)
+        .foregroundStyle(RitmTheme.muted)
+      }
+    }
+    .padding(.top, 17)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .overlay(alignment: .top) { Rectangle().fill(RitmTheme.panelBorder).frame(height: 1) }
+    .padding(.top, 21)
+  }
+
+  private func insight(_ symbol: String, _ text: String) -> some View {
+    HStack(spacing: 7) {
+      Image(systemName: symbol).font(.system(size: 13)).foregroundStyle(RitmTheme.accentColor)
+        .accessibilityHidden(true)
+      Text(text).ritmFont(11).foregroundStyle(RitmTheme.muted)
+    }
+  }
+
+  private func describe(_ day: String, _ summary: HabitDaySummary, template: String) -> String {
+    let label = FeatureDate.label(day, zone: store.timeZone, language: store.language, template: template)
+    if day > today { return label + ". " + store.text("Будущий день", "Future day") }
+    if summary.planned > 0 {
+      return store.text(
+        "\(label): \(summary.completed) из \(summary.planned)", "\(label): \(summary.completed) of \(summary.planned)")
+    }
+    return label + ". " + store.text("Нет запланированных привычек", "No habits scheduled")
+  }
 }
-@MainActor private func announceHabitAchievement(
-  previous: Habit, updated: Habit, store: RitmStore, navigation: RitmNavigation
-) {
-  let added = Set(updated.achievements ?? []).subtracting(previous.achievements ?? [])
-  guard let milestone = added.max() else { return }
-  navigation.habitCelebration =
-    updated.title + store.text(": достижение ", ": achievement of ") + "\(milestone) "
-    + store.text("дней", "days")
+
+/// `.habits-gauge`: a half ring with the period's completion share.
+private struct HabitGauge: View {
+  let percent: Int?
+  @Environment(RitmStore.self) private var store
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  var body: some View {
+    ZStack(alignment: .bottom) {
+      HabitArc().stroke(RitmTheme.ringTrack, style: StrokeStyle(lineWidth: 13, lineCap: .round))
+      HabitArc()
+        .trim(from: 0, to: CGFloat(percent ?? 0) / 100)
+        .stroke(RitmTheme.accentColor, style: StrokeStyle(lineWidth: 13, lineCap: .round))
+        .shadow(color: Color(rgb: 0x7F4EC0, opacity: 0.16), radius: 5)
+        .animation(reduceMotion ? nil : RitmMotion.ease(0.65), value: percent)
+      VStack(spacing: 1) {
+        Text(percent.map { "\($0)%" } ?? "—")
+          .ritmFont(37, weight: .bold, tracking: -0.065)
+          .foregroundStyle(RitmTheme.text)
+          .monospacedDigit()
+        Text(
+          percent == nil
+            ? store.text("Нет запланированных привычек", "No habits scheduled")
+            : store.text("выполнено за период", "done this period")
+        )
+        .ritmFont(11)
+        .foregroundStyle(RitmTheme.muted)
+      }
+      .padding(.bottom, 4)
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(
+      percent.map { store.text("Выполнено \($0) процентов", "\($0) percent done") }
+        ?? store.text("Нет запланированных привычек", "No habits scheduled"))
+  }
+}
+
+/// `M 12 92 A 78 78 0 0 1 168 92` in a 180 × 104 box, fitted into the top 111 pt.
+private struct HabitArc: Shape {
+  func path(in rect: CGRect) -> Path {
+    let scale = min(rect.width / 180, 111 / 104)
+    let originX = rect.midX - 90 * scale
+    var path = Path()
+    path.addArc(
+      center: CGPoint(x: originX + 90 * scale, y: 92 * scale), radius: 78 * scale,
+      startAngle: .degrees(180), endAngle: .degrees(360), clockwise: false)
+    return path
+  }
+}
+
+struct HabitIconButton: View {
+  let symbol: String
+  let label: String
+  let action: () -> Void
+  @Environment(\.isEnabled) private var isEnabled
+
+  var body: some View {
+    Button(action: action) {
+      Image(systemName: symbol)
+        .font(.system(size: 15, weight: .medium))
+        .foregroundStyle(RitmTheme.muted)
+        .frame(width: 44, height: 44)
+        .background(RitmTheme.glassRaised, in: RoundedRectangle(cornerRadius: 12, style: .circular))
+        .overlay {
+          RoundedRectangle(cornerRadius: 12, style: .circular).strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
+        }
+        .opacity(isEnabled ? 1 : 0.45)
+    }
+    .buttonStyle(RitmPressStyle())
+    .accessibilityLabel(label)
+  }
 }
