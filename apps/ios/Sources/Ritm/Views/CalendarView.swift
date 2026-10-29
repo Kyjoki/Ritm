@@ -2,32 +2,27 @@ import RitmCore
 import SwiftUI
 
 private enum NativeCalendarMode: String, CaseIterable { case day, week, month }
-private struct CalendarItem: Identifiable {
-  let id: String
-  let title: String
-  let date: String
-  let start: Int?
-  let end: Int?
-  let task: RitmTask?
-  let event: GoogleCalendarEvent?
-  let completed: Bool
-  var clockChange = false
-  var intervalLabel: String? = nil
-  var color: Color { CalendarPalette.color(task?.colorId ?? event?.colorId) }
-}
+
 private struct CalendarSheet: Identifiable {
   let id = UUID()
-  let item: CalendarItem?
-  let newEvent: Bool
-}
-private struct CalendarMove: Identifiable {
-  let id = UUID()
-  let item: CalendarItem
-  let date: String
-  let minute: Int
-  var duration: Int? = nil
+  var event: GoogleCalendarEvent?
+  var task: RitmTask?
+  var draft: CalendarDraft?
 }
 
+private struct CalendarDraft {
+  let date: String
+  let time: String?
+  let duration: Int
+}
+
+private struct CalendarPick: Identifiable {
+  let date: String
+  let keys: [String]
+  var id: String { date + keys.joined() }
+}
+
+/// «Календарь» as the mobile web shows it (src/features/CalendarPage.tsx at 390 px).
 struct CalendarView: View {
   @Environment(RitmStore.self) private var store
   @Environment(RitmNavigation.self) private var navigation
@@ -38,150 +33,73 @@ struct CalendarView: View {
   @State private var status: GoogleCalendarStatus?
   @State private var partial = false
   @State private var loading = false
+  @State private var failed = false
+  @State private var fetchedAt: String?
   @State private var readID = UUID()
   @State private var sheet: CalendarSheet?
-  @State private var moving: CalendarMove?
-  @State private var chooseDate = false
-  @State private var didAutoScroll = false
-  @State private var clockJump = 0
+  @State private var pick: CalendarPick?
+  @State private var backlogOpen = false
+  @State private var nowJump = 0
 
   private var selected: String { date.isEmpty ? store.today : date }
-  private var days: [String] {
+  private var weekDays: [String] { HabitSchedule.week(containing: selected) }
+  private var periodDays: [String] { mode == .week ? weekDays : [selected] }
+  /// `calendarRange`: the Google read covers the visible period.
+  private var range: (from: String, to: String) {
     switch mode {
-    case .day: return [selected]
-    case .week: return HabitSchedule.week(containing: selected)
+    case .day: return (selected, HabitSchedule.addDays(to: selected, days: 1) ?? selected)
+    case .week:
+      let start = weekDays.first ?? selected
+      return (start, HabitSchedule.addDays(to: start, days: 7) ?? start)
     case .month:
-      let dates = TaskSchedule.monthDates(containing: selected)
-      guard let first = dates.first, let last = dates.last,
-        let start = HabitSchedule.week(containing: first).first,
-        let end = HabitSchedule.week(containing: last).last
-      else { return dates }
-      var values = [start]
-      while let next = HabitSchedule.addDays(to: values.last!, days: 1), next <= end {
-        values.append(next)
-      }
-      return values
+      let start = CalendarPlan.monthDays(containing: selected).first ?? selected
+      return (start, HabitSchedule.addDays(to: start, days: 42) ?? start)
     }
   }
-  private var rangeKey: String { (days.first ?? selected) + "/" + (days.last ?? selected) }
-  private var calendarTasks: [RitmTask] {
-    (store.bootstrap?.tasks ?? []).filter { $0.calendarEntry != false }
+  private var connected: Bool { status?.status == .connected }
+  private var needsReauth: Bool { status?.status == .reauthRequired }
+  private var uncertain: Bool {
+    (loading && fetchedAt == nil) || failed || partial || needsReauth || (connected && fetchedAt == nil)
   }
-  private var quickTasks: [RitmTask] {
-    (store.bootstrap?.tasks ?? []).filter {
-      $0.calendarEntry == false && ($0.date == nil || TaskSchedule.occursOn($0, date: selected))
-    }
+  private var warning: Bool { failed || partial || needsReauth }
+  /// The web calendar shows Google events; dated Ritm tasks move to Google from the web app.
+  private var undatedTasks: [RitmTask] {
+    (store.bootstrap?.tasks ?? []).filter { $0.date == nil && !$0.completed }
+  }
+
+  private func entries(_ day: String) -> [DayOccurrence] {
+    DayPlan.occurrences(
+      tasks: [], events: events, date: day, timeZone: store.timeZone, language: store.language)
   }
 
   var body: some View {
     ZStack {
       RitmBackground()
-      ScrollViewReader { proxy in
-        VStack(spacing: 0) {
-          header.padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 8)
+      VStack(spacing: 0) {
+        toolbar.padding(.horizontal, 12)
+        GeometryReader { proxy in
           ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-              if let message = store.errorMessage { RitmErrorBanner(message: message) }
+            VStack(alignment: .leading, spacing: 4) {
+              if let message = store.errorMessage {
+                RitmErrorBanner(message: message).padding(.bottom, 8)
+              }
               MutationRecoveryView()
-              if let status, status.status != .connected {
-                RitmCard {
-                  VStack(alignment: .leading, spacing: 10) {
-                    Text(
-                      store.text("Google Calendar не подключён", "Google Calendar is not connected")
-                    )
-                    .font(.headline)
-                    Button(store.text("Открыть настройки", "Open settings")) {
-                      navigation.section = .settings
-                    }.frame(minHeight: 44)
-                  }
-                }
-              }
-              if partial {
-                Label(
-                  store.text(
-                    "Показаны не все события. Обновите календарь.",
-                    "Some events are unavailable. Refresh the calendar."),
-                  systemImage: "exclamationmark.triangle"
-                ).font(.caption).foregroundStyle(.secondary)
-              }
-              if loading {
-                ProgressView().frame(maxWidth: .infinity).accessibilityLabel(
-                  store.text("Обновление календаря", "Refreshing calendar"))
-              }
-              if mode == .month {
-                monthGrid
-                agenda(selected)
-              } else {
-                timeline
-              }
-              quickTasksCard
-              Text(
-                store.text(
-                  "Перетащите редактируемую запись на время и подтвердите перенос. Защищённые и повторяющиеся события Google доступны для просмотра.",
-                  "Drag an editable entry onto a time and confirm the move. Protected and recurring Google entries remain read-only."
-                )
-              )
-              .font(.caption).foregroundStyle(.secondary)
-            }.padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 28)
-          }.refreshable {
+              panel.frame(height: max(320, proxy.size.height - 8))
+              secondary
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 16)
+          }
+          .scrollIndicators(.hidden)
+          .refreshable {
             await store.refresh()
             await reload()
           }
         }
-        .task {
-          // Run only once when the retained calendar screen is first laid out.
-          // Background refreshes must not reset the owner's scroll position.
-          await Task.yield()
-          guard !didAutoScroll, navigation.section == .calendar, mode != .month else { return }
-          didAutoScroll = true
-          scrollToCurrentHour(proxy, animated: false)
-        }
-        .onChange(of: clockJump) { _, _ in
-          Task {
-            await Task.yield()
-            scrollToCurrentHour(proxy, animated: true)
-          }
-        }
-        .onChange(of: mode) { previous, next in
-          if previous == .month && next != .month {
-            Task {
-              await Task.yield()
-              scrollToCurrentHour(proxy, animated: false)
-            }
-          }
-        }
       }
     }
-    .navigationTitle(store.text("Календарь", "Calendar"))
-    .navigationBarTitleDisplayMode(.inline)
-    .toolbar {
-      ToolbarItem(placement: .topBarTrailing) {
-        Button {
-          date = store.today
-          if mode == .month { mode = .day }
-          clockJump += 1
-        } label: {
-          Image(systemName: "clock").frame(width: 44, height: 44)
-        }
-        .accessibilityLabel(store.text("Перейти к текущему часу", "Jump to the current hour"))
-      }
-      ToolbarItem(placement: .topBarTrailing) {
-        Menu {
-          Button(
-            store.text("Событие Google Calendar", "Google Calendar event"),
-            systemImage: "calendar.badge.plus"
-          ) { sheet = CalendarSheet(item: nil, newEvent: true) }.disabled(
-            status?.status != .connected)
-          Button(store.text("Задача Ritm", "Ritm task"), systemImage: "checkmark.circle") {
-            sheet = CalendarSheet(item: nil, newEvent: false)
-          }
-        } label: {
-          Image(systemName: "plus").frame(minWidth: 44, minHeight: 44)
-        }
-        .accessibilityLabel(store.text("Добавить запись", "Add entry")).disabled(!store.canWrite)
-      }
-    }
-    .task(id: rangeKey) { await reload() }
+    .toolbar(.hidden, for: .navigationBar)
+    .task(id: range.from + range.to) { await reload() }
     .onChange(of: navigation.section) { _, section in
       if section == .calendar { Task { await reload() } }
     }
@@ -189,551 +107,560 @@ struct CalendarView: View {
       if navigation.section == .calendar { Task { await reload() } }
     }
     .sheet(item: $sheet) { route in
-      if let event = route.item?.event {
+      if let event = route.event {
         CalendarEventDetail(event: event) { await reload() }
-      } else if route.newEvent {
-        CalendarEventEditor(initialDate: selected) { await reload() }
-      } else {
-        NativeTaskEditor(
-          task: route.item?.task, initialDate: selected, occurrenceDate: route.item?.date
+      } else if let task = route.task {
+        NativeTaskEditor(task: task, initialDate: selected, occurrenceDate: nil) { await reload() }
+      } else if let draft = route.draft {
+        CalendarEventEditor(
+          initialDate: draft.date, initialTime: draft.time, initialDuration: draft.duration
         ) { await reload() }
       }
     }
-    .sheet(isPresented: $chooseDate) {
-      NavigationStack {
-        DatePicker(
-          store.text("Дата", "Date"),
-          selection: Binding(
-            get: { FeatureDate.date(selected, zone: store.timeZone) },
-            set: { date = HabitSchedule.dateKey($0, timeZone: store.timeZone) }),
-          displayedComponents: .date
-        )
-        .datePickerStyle(.graphical).padding().environment(
-          \.timeZone, TimeZone(identifier: store.timeZone) ?? .current
-        )
-        .toolbar {
-          ToolbarItem(placement: .confirmationAction) {
-            Button(store.text("Готово", "Done")) { chooseDate = false }
-          }
-        }
-      }.presentationDetents([.medium, .large])
-    }
-    .confirmationDialog(
-      store.text(
-        moving?.duration == nil ? "Перенести запись?" : "Изменить длительность?",
-        moving?.duration == nil ? "Move this entry?" : "Change duration?"),
-      isPresented: Binding(get: { moving != nil }, set: { if !$0 { moving = nil } }),
-      titleVisibility: .visible
-    ) {
-      if let move = moving {
-        Button(store.text("Подтвердить", "Confirm")) { Task { await commitMove(move) } }
-        Button(store.text("Отмена", "Cancel"), role: .cancel) {}
-      }
-    } message: {
-      if let move = moving {
-        Text(
-          move.item.title + "\n"
-            + FeatureDate.label(move.date, zone: store.timeZone, language: store.language) + ", "
-            + FeatureDate.clock(TaskSchedule.minuteTime(move.minute))
-            + (move.duration.map { " · \($0) " + store.text("мин", "min") } ?? ""))
-      }
+    .sheet(item: $pick) { value in
+      CalendarOverlapPicker(
+        date: value.date, entries: entries(value.date).filter { value.keys.contains($0.key) }
+      ) { entry in open(entry) }
+      .presentationDetents([.medium, .large])
     }
   }
 
-  private var header: some View {
-    VStack(spacing: 12) {
-      HStack {
-        Button {
-          shift(-1)
-        } label: {
-          Image(systemName: "chevron.left").frame(width: 44, height: 44)
-        }.accessibilityLabel(store.text("Назад", "Previous"))
-        Button {
-          chooseDate = true
-        } label: {
-          Text(
-            FeatureDate.label(
-              selected, zone: store.timeZone, language: store.language,
-              template: mode == .month ? "LLLL yyyy" : "d MMM yyyy")
-          )
-          .font(.headline).frame(maxWidth: .infinity, minHeight: 44)
-        }
-        Button {
-          shift(1)
-        } label: {
-          Image(systemName: "chevron.right").frame(width: 44, height: 44)
-        }.accessibilityLabel(store.text("Вперёд", "Next"))
-        Button(store.text("Сегодня", "Today")) { date = store.today }.frame(minHeight: 44)
-      }
-      Picker(store.text("Вид календаря", "Calendar view"), selection: $mode) {
-        Text(store.text("День", "Day")).tag(NativeCalendarMode.day)
-        Text(store.text("Неделя", "Week")).tag(NativeCalendarMode.week)
-        Text(store.text("Месяц", "Month")).tag(NativeCalendarMode.month)
-      }.pickerStyle(.segmented)
-    }.buttonStyle(RitmPressStyle())
-  }
+  // MARK: Toolbar
 
-  private var monthGrid: some View {
-    RitmCard {
-      VStack(spacing: 8) {
-        HStack {
-          ForEach(
-            store.language == .ru
-              ? ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"]
-              : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], id: \.self
-          ) { Text($0).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity) }
-        }
-        LazyVGrid(
-          columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 7), spacing: 4
-        ) {
-          ForEach(days, id: \.self) { key in
-            Button {
-              date = key
-            } label: {
-              VStack(spacing: 5) {
-                Text(String(Int(key.suffix(2)) ?? 0)).font(
-                  .subheadline.weight(key == selected ? .bold : .regular))
-                HStack(spacing: 2) {
-                  ForEach(Array(items(key).prefix(3))) { item in
-                    Circle().fill(item.color).frame(width: 4, height: 4)
-                  }
-                }.frame(height: 5)
-              }.frame(maxWidth: .infinity, minHeight: 48)
-                .background(
-                  key == selected ? RitmTheme.lavender.opacity(0.24) : .clear,
-                  in: RoundedRectangle(cornerRadius: 13)
-                )
-                .overlay {
-                  if key == store.today {
-                    RoundedRectangle(cornerRadius: 13).stroke(RitmTheme.lavender, lineWidth: 1)
-                  }
-                }
-                .opacity(key.prefix(7) == selected.prefix(7) ? 1 : 0.45)
-            }.buttonStyle(RitmPressStyle())
-              .accessibilityLabel(
-                FeatureDate.label(key, zone: store.timeZone, language: store.language)
-                  + ", \(items(key).count) " + store.text("записей", "entries")
-              )
-              .accessibilityAddTraits(key == selected ? .isSelected : [])
-          }
-        }
-      }
-    }
-  }
-
-  private var timeline: some View {
-    GeometryReader { geometry in
-      HStack(alignment: .top, spacing: 1) {
-        VStack(spacing: 0) {
-          Text(timeZoneLabel).font(.caption2).frame(width: 48, height: 90)
-          ForEach(0..<24, id: \.self) { hour in
-            Text(FeatureDate.clock(TaskSchedule.minuteTime(hour * 60))).font(.caption2)
-              .foregroundStyle(.secondary).frame(width: 48, height: 64, alignment: .topTrailing)
-              .id("calendar-hour-\(hour)")
-          }
-        }
-        ScrollViewReader { horizontal in
-          ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: 1) {
-              ForEach(days, id: \.self) { key in
-                timelineColumn(key, width: mode == .day ? max(200, geometry.size.width - 52) : 156)
-                  .id("calendar-day-\(key)")
-              }
-            }
-          }.scrollIndicators(.visible)
-            .task(id: selected) {
-              await Task.yield()
-              guard navigation.section == .calendar else { return }
-              horizontal.scrollTo("calendar-day-\(selected)", anchor: .leading)
-            }
-        }
-      }
-    }.frame(height: 90 + 24 * 64)
-      .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
-      .overlay {
-        RoundedRectangle(cornerRadius: 24).strokeBorder(
-          RitmTheme.lavender.opacity(0.16), lineWidth: 1)
-      }
-  }
-  private func timelineColumn(_ key: String, width: CGFloat) -> some View {
-    let all = items(key)
-    let timed = all.filter { $0.start != nil }
-    return VStack(spacing: 0) {
-      VStack(spacing: 4) {
+  private var toolbar: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(spacing: 8) {
+        Text(store.text("Календарь", "Calendar"))
+          .ritmFont(21, weight: .bold, tracking: -0.045)
+          .foregroundStyle(RitmTheme.text)
+          .accessibilityAddTraits(.isHeader)
+        Spacer(minLength: 0)
         Button {
-          date = key
-          mode = .day
+          addEntry(selected)
         } label: {
-          Text(
-            FeatureDate.label(
-              key, zone: store.timeZone, language: store.language, template: "EEE d")
-          )
-          .font(.subheadline.bold()).frame(maxWidth: .infinity, minHeight: 44)
-        }
-        Menu {
-          ForEach(all.filter { $0.start == nil }) { item in Button(item.title) { open(item) } }
-        } label: {
-          Text(store.text("Без времени: ", "Untimed: ") + "\(all.filter { $0.start == nil }.count)")
-            .font(.caption).frame(height: 36)
-        }
-      }.frame(height: 90)
-      ZStack(alignment: .topLeading) {
-        VStack(spacing: 0) {
-          ForEach(0..<24, id: \.self) { hour in
-            Rectangle().fill(.clear).frame(height: 64)
-              .overlay(alignment: .top) {
-                Rectangle().fill(.secondary.opacity(0.15)).frame(height: 0.5)
-              }
-              .contentShape(Rectangle())
-              .dropDestination(for: String.self) { identifiers, location in
-                guard let identifier = identifiers.first,
-                  let item = days.flatMap({ items($0) }).first(where: { $0.id == identifier }),
-                  canMove(item)
-                else { return false }
-                let quarter = min(3, max(0, Int((location.y / 64 * 4).rounded(.down))))
-                moving = CalendarMove(item: item, date: key, minute: hour * 60 + quarter * 15)
-                return true
-              }
+          HStack(spacing: 8) {
+            Image(systemName: "plus").font(.system(size: 17, weight: .semibold))
+            Text(store.text("Добавить запись", "Add entry")).lineLimit(1)
           }
+          .ritmFont(14, weight: .semibold)
+          .foregroundStyle(RitmTheme.ctaInk)
+          .padding(.horizontal, 14)
+          .frame(minHeight: 44)
+          .background(RitmTheme.ctaGradient, in: RoundedRectangle(cornerRadius: 13, style: .circular))
+          .shadow(color: RitmTheme.ctaShadow, radius: 13, y: 10)
         }
-        ForEach(timed) { item in
-          let lane = laneFor(item, among: timed)
-          let lanes = laneCount(item, among: timed)
-          let itemWidth = max(36, (width - 6) / CGFloat(lanes))
-          let height = max(30, CGFloat((item.end ?? 0) - (item.start ?? 0)) / 60 * 64 - 2)
-          draggableItem(item)
-            .frame(width: itemWidth - 2, height: height, alignment: .topLeading)
-            .overlay(alignment: .bottomTrailing) {
-              if canMove(item), itemWidth >= 74, height >= 50 {
-                CalendarResizeGrip(
-                  duration: item.task?.duration ?? item.event.flatMap {
-                    CalendarEventPolicy.draft($0, timeZone: store.timeZone)?.duration
-                  } ?? 60, start: item.start ?? 0
-                ) { duration in
-                  moving = CalendarMove(
-                    item: item, date: item.date, minute: item.start ?? 0, duration: duration)
-                }
-              }
-            }
-            .offset(x: 3 + CGFloat(lane) * itemWidth, y: CGFloat(item.start ?? 0) / 60 * 64)
-        }
-      }.frame(width: width, height: 24 * 64)
-    }.frame(width: width)
-      .background(key == store.today ? RitmTheme.lavender.opacity(0.07) : .clear)
-  }
-  private func eventButton(_ item: CalendarItem) -> some View {
-    Button {
-      open(item)
-    } label: {
-      VStack(alignment: .leading, spacing: 3) {
-        Text(item.title).font(.caption.weight(.semibold)).strikethrough(item.completed)
-        Text(
-          item.intervalLabel ?? item.start.map { FeatureDate.clock(TaskSchedule.minuteTime($0)) }
-            ?? store.text("Весь день", "All day")
-        ).font(.caption2)
-        if item.clockChange {
-          Label(store.text("Перевод часов", "Clock change"), systemImage: "clock.arrow.circlepath")
-            .font(.caption2)
-        }
-      }.padding(6).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(item.color.opacity(0.22), in: RoundedRectangle(cornerRadius: 9))
-        .overlay {
-          RoundedRectangle(cornerRadius: 9).strokeBorder(item.color.opacity(0.6), lineWidth: 1)
-        }
-        .clipped()
-    }.buttonStyle(.plain).accessibilityLabel(
-      item.title + ", "
-        + (item.intervalLabel ?? item.start.map { FeatureDate.clock(TaskSchedule.minuteTime($0)) }
-          ?? store.text("Без времени", "Untimed"))
-        + (item.clockChange ? store.text(", перевод часов", ", clock change") : ""))
-  }
-  @ViewBuilder private func draggableItem(_ item: CalendarItem) -> some View {
-    if canMove(item) { eventButton(item).draggable(item.id) } else { eventButton(item) }
-  }
-  // Interval graph coloring: overlapping events occupy separate equal lanes.
-  private func assignments(_ values: [CalendarItem]) -> [String: Int] {
-    var ends: [Int] = []
-    var result: [String: Int] = [:]
-    for item in values.sorted(by: { ($0.start ?? 0, $0.id) < ($1.start ?? 0, $1.id) }) {
-      let lane = ends.firstIndex { $0 <= (item.start ?? 0) } ?? ends.count
-      if lane == ends.count { ends.append(item.end ?? 0) } else { ends[lane] = item.end ?? 0 }
-      result[item.id] = lane
-    }
-    return result
-  }
-  private func laneFor(_ item: CalendarItem, among values: [CalendarItem]) -> Int {
-    assignments(values)[item.id] ?? 0
-  }
-  private func laneCount(_ item: CalendarItem, among values: [CalendarItem]) -> Int {
-    let lanes = assignments(values)
-    var lower = item.start ?? 0
-    var upper = item.end ?? 0
-    var changed = true
-    while changed {
-      changed = false
-      for value in values where (value.start ?? 0) < upper && (value.end ?? 0) > lower {
-        let nextLower = min(lower, value.start ?? 0)
-        let nextUpper = max(upper, value.end ?? 0)
-        if nextLower != lower || nextUpper != upper {
-          changed = true
-          lower = nextLower
-          upper = nextUpper
-        }
+        .buttonStyle(RitmPressStyle())
       }
-    }
-    let cluster = values.filter { ($0.start ?? 0) < upper && ($0.end ?? 0) > lower }
-    return (cluster.compactMap { lanes[$0.id] }.max() ?? 0) + 1
-  }
-  private func agenda(_ key: String) -> some View {
-    RitmCard {
-      VStack(alignment: .leading, spacing: 12) {
-        Text(FeatureDate.label(key, zone: store.timeZone, language: store.language)).font(.headline)
-        if items(key).isEmpty {
-          Text(store.text("Нет записей на эту дату", "No entries on this date")).foregroundStyle(
-            .secondary)
-        }
-        ForEach(items(key)) { item in
+      HStack(spacing: 5) {
+        iconButton("chevron.left", store.text("Предыдущий период", "Previous period")) { shift(-1) }
+        Text(periodLabel)
+          .ritmFont(13, weight: .semibold, tracking: -0.025)
+          .foregroundStyle(RitmTheme.text)
+          .lineLimit(1)
+          .truncationMode(.tail)
+          .frame(maxWidth: .infinity)
+          .accessibilityAddTraits(.updatesFrequently)
+        iconButton("chevron.right", store.text("Следующий период", "Next period")) { shift(1) }
+        Button(store.text("Сегодня", "Today")) { date = store.today }
+          .buttonStyle(CalendarSecondaryStyle())
+        if mode == .week {
           Button {
-            open(item)
+            date = store.today
+            nowJump += 1
           } label: {
-            HStack(alignment: .top) {
-              Circle().fill(item.color).frame(width: 8, height: 8).padding(.top, 5)
-              VStack(alignment: .leading, spacing: 5) {
-                Text(item.title).strikethrough(item.completed)
-                Text(
-                  item.intervalLabel ?? item.start.map {
-                    FeatureDate.clock(TaskSchedule.minuteTime($0))
-                  } ?? store.text("Без времени", "Untimed")
-                ).font(.caption).foregroundStyle(.secondary)
-                if item.clockChange {
-                  Label(
-                    store.text("Перевод часов", "Clock change"),
-                    systemImage: "clock.arrow.circlepath"
-                  ).font(.caption)
-                }
-              }
-              Spacer()
-              Image(systemName: "chevron.right").font(.caption)
-            }.frame(minHeight: 44)
-          }.buttonStyle(.plain)
+            Image(systemName: "clock").font(.system(size: 17))
+          }
+          .buttonStyle(CalendarSecondaryStyle(square: true))
+          .accessibilityLabel(store.text("Показать текущее время", "Show the current time"))
         }
+      }
+      HStack(spacing: 8) {
+        segment
+        if !warning && (status != nil || loading) { compactStatus }
+      }
+      if warning { warningStatus }
+    }
+    .padding(.top, 10)
+    .padding(.bottom, 10)
+  }
+
+  private func iconButton(_ symbol: String, _ label: String, action: @escaping () -> Void)
+    -> some View
+  {
+    Button(action: action) {
+      Image(systemName: symbol)
+        .font(.system(size: 17, weight: .medium))
+        .foregroundStyle(RitmTheme.muted)
+        .frame(width: 44, height: 44)
+        .background(RitmTheme.panel, in: RoundedRectangle(cornerRadius: 11, style: .circular))
+        .overlay {
+          RoundedRectangle(cornerRadius: 11, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1)
+        }
+    }
+    .buttonStyle(RitmPressStyle(scale: 0.97))
+    .accessibilityLabel(label)
+  }
+
+  private var segment: some View {
+    HStack(spacing: 3) {
+      ForEach(NativeCalendarMode.allCases, id: \.self) { value in
+        let active = value == mode
+        Button {
+          mode = value
+        } label: {
+          Text(modeTitle(value))
+            .ritmFont(14, weight: .medium)
+            .lineLimit(1)
+            .foregroundStyle(active ? RitmTheme.accentColor : RitmTheme.muted)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background {
+              if active {
+                RoundedRectangle(cornerRadius: 9, style: .circular)
+                  .fill(RitmTheme.panel)
+                  .shadow(color: Color(rgb: 0x3F235F, opacity: 0.07), radius: 5, y: 3)
+              }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RitmPressStyle(scale: 0.97))
+        .accessibilityAddTraits(active ? .isSelected : [])
+      }
+    }
+    .padding(2)
+    .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 12, style: .circular))
+    .overlay {
+      RoundedRectangle(cornerRadius: 12, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1)
+    }
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel(store.text("Вид календаря", "Calendar view"))
+  }
+
+  /// `.cal-sync-footer` without a warning: an icon and the refresh or settings action.
+  private var compactStatus: some View {
+    HStack(spacing: 5) {
+      Group {
+        if loading {
+          ProgressView().controlSize(.small).tint(RitmTheme.accentColor)
+        } else {
+          Image(systemName: "calendar").font(.system(size: 15)).foregroundStyle(RitmTheme.accentColor)
+        }
+      }
+      .frame(width: 18)
+      .accessibilityLabel(statusTitle)
+      if connected {
+        Button {
+          Task { await refreshGoogle() }
+        } label: {
+          Image(systemName: "arrow.clockwise").font(.system(size: 16))
+        }
+        .buttonStyle(CalendarSecondaryStyle(square: true))
+        .disabled(loading)
+        .accessibilityLabel(store.text("Обновить", "Refresh"))
+      } else {
+        settingsLink
       }
     }
   }
-  private var quickTasksCard: some View {
-    RitmCard {
-      VStack(alignment: .leading, spacing: 12) {
-        Text(store.text("Задачи Ritm", "Ritm tasks")).font(.headline)
-        if quickTasks.isEmpty {
-          Text(store.text("Задач на выбранный день нет.", "No tasks for this day."))
-            .foregroundStyle(.secondary)
+
+  private var warningStatus: some View {
+    HStack(alignment: .top, spacing: 5) {
+      Image(systemName: "exclamationmark.circle")
+        .font(.system(size: 15))
+        .foregroundStyle(RitmTheme.accentColor)
+        .padding(.top, 2)
+        .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 4) {
+        Text(statusTitle).ritmFont(13, weight: .semibold).foregroundStyle(RitmTheme.text)
+        Text(statusMessage).ritmFont(11, lineSpacing: 6).foregroundStyle(RitmTheme.muted)
+        if let fetched = fetchedLabel {
+          Text(store.text("Последнее обновление: ", "Last updated: ") + fetched)
+            .ritmFont(10)
+            .foregroundStyle(RitmTheme.muted)
         }
-        ForEach(quickTasks) { task in
-          HStack {
-            Button {
-              Task {
-                _ = await store.write {
-                  try await $0.setTaskCompleted(
-                    id: task.id, completed: !task.isComplete(on: selected),
-                    occurrenceDate: task.repeat == .none ? nil : selected)
-                }
-              }
-            } label: {
-              Image(systemName: task.isComplete(on: selected) ? "checkmark.circle.fill" : "circle")
-                .frame(width: 44, height: 44)
-            }.disabled(!store.canWrite)
-            Button {
-              sheet = CalendarSheet(
-                item: CalendarItem(
-                  id: task.id, title: task.title, date: selected, start: nil, end: nil, task: task,
-                  event: nil, completed: task.isComplete(on: selected)), newEvent: false)
-            } label: {
-              VStack(alignment: .leading) {
-                Text(task.title).strikethrough(task.isComplete(on: selected))
-                if task.date == nil {
-                  Text(store.text("Без даты", "No date")).font(.caption).foregroundStyle(.secondary)
-                }
-              }
-              .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            }.buttonStyle(.plain)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      if connected || failed {
+        Button {
+          Task { await refreshGoogle() }
+        } label: {
+          Label(store.text("Обновить", "Refresh"), systemImage: "arrow.clockwise")
+        }
+        .buttonStyle(CalendarSecondaryStyle())
+        .disabled(loading)
+      } else {
+        settingsLink
+      }
+    }
+    .padding(.vertical, 4)
+    .padding(.horizontal, 8)
+    .frame(minHeight: 38)
+    .background(
+      RitmTheme.mix(RitmTheme.soft, 0.6, into: RitmTheme.panel),
+      in: RoundedRectangle(cornerRadius: 10, style: .circular)
+    )
+    .overlay {
+      RoundedRectangle(cornerRadius: 10, style: .circular)
+        .strokeBorder(RitmTheme.mix(RitmTheme.accentColor, 0.4, into: RitmTheme.line), lineWidth: 1)
+    }
+    .accessibilityElement(children: .contain)
+  }
+
+  private var settingsLink: some View {
+    Button {
+      navigation.section = .settings
+    } label: {
+      HStack(spacing: 4) {
+        Text(store.text("Настройки", "Settings"))
+        Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
+      }
+    }
+    .buttonStyle(RitmTextButtonStyle())
+  }
+
+  private var statusTitle: String {
+    if loading && fetchedAt == nil { return store.text("Загружаем Google Calendar…", "Loading Google Calendar…") }
+    if failed { return store.text("Google Calendar требует внимания", "Google Calendar needs attention") }
+    if needsReauth { return store.text("Подключи Google Calendar заново", "Reconnect Google Calendar") }
+    if partial { return store.text("Загружена часть событий Google", "Some Google events loaded") }
+    if connected { return store.text("Календарь синхронизирован", "Calendar synced") }
+    return store.text("Google Calendar пока не подключён", "Google Calendar is not connected yet")
+  }
+
+  private var statusMessage: String {
+    if failed {
+      return store.text(
+        "Не удалось обновить события. Показанные события могут быть неактуальны.",
+        "Could not refresh events. The events shown may be out of date.")
+    }
+    if partial {
+      return store.text(
+        "Часть событий не загружена. Свободное время нужно уточнить в Google Calendar.",
+        "Some events did not load. Check free time in Google Calendar.")
+    }
+    return store.text(
+      "Разрешение нужно обновить в настройках.", "The permission needs to be renewed in Settings.")
+  }
+
+  private var fetchedLabel: String? {
+    guard let fetchedAt, let instant = FeatureDate.instant(fetchedAt) else { return nil }
+    let key = HabitSchedule.dateKey(instant, timeZone: store.timeZone)
+    let time = FeatureDate.time(instant, zone: store.timeZone)
+    return FeatureDate.label(key, zone: store.timeZone, language: store.language, template: "d MMM")
+      + " · " + FeatureDate.clock(time)
+  }
+
+  private func modeTitle(_ value: NativeCalendarMode) -> String {
+    switch value {
+    case .day: store.text("День", "Day")
+    case .week: store.text("Неделя", "Week")
+    case .month: store.text("Месяц", "Month")
+    }
+  }
+
+  private var periodLabel: String {
+    let label: String
+    switch mode {
+    case .month:
+      label = FeatureDate.label(selected, zone: store.timeZone, language: store.language, template: "LLLL yyyy")
+    case .day:
+      label = FeatureDate.label(selected, zone: store.timeZone, language: store.language, template: "EEE d MMMM")
+    case .week:
+      let first = weekDays.first ?? selected
+      let last = weekDays.last ?? selected
+      label =
+        FeatureDate.label(first, zone: store.timeZone, language: store.language, template: "d MMM")
+        + " — "
+        + FeatureDate.label(last, zone: store.timeZone, language: store.language, template: "d MMM yyyy")
+    }
+    return CalendarText.capitalizedWords(label)
+  }
+
+  // MARK: Panel
+
+  @ViewBuilder private var panel: some View {
+    switch mode {
+    case .week:
+      CalendarWeekGrid(
+        days: weekDays,
+        entries: Dictionary(uniqueKeysWithValues: weekDays.map { ($0, entries($0)) }),
+        today: store.today, timeZoneLabel: timeZoneLabel, jumpToNow: nowJump,
+        canDrag: canDrag, onOpen: open,
+        onPick: { day, group in pick = CalendarPick(date: day, keys: group.map(\.key)) },
+        onAdd: { day, minute in addEntry(day, time: TaskSchedule.minuteTime(minute)) },
+        onSelectDay: { day in
+          date = day
+          mode = .day
+        },
+        onMove: { entry, day, minute in Task { await move(entry, to: day, minute: minute) } },
+        onSwipe: shift
+      )
+      .padding(.top, 7)
+      .padding(.horizontal, 3)
+      .background { RitmPanelBackground(radius: 20) }
+      .padding(.horizontal, -4)
+    case .day:
+      CalendarAgenda(
+        date: selected, entries: entries(selected), uncertain: uncertain, googleConnected: connected,
+        onOpen: open, onAdd: { day, time, duration in addEntry(day, time: time, duration: duration) }
+      )
+      .background { RitmPanelBackground() }
+    case .month:
+      CalendarMonthGrid(selected: selected, today: store.today, entries: entries) { day in
+        date = day
+        mode = .day
+      }
+      .background { RitmPanelBackground() }
+    }
+  }
+
+  /// `.cal-secondary`: «Твой темп · Без даты (N)», collapsed under the calendar.
+  private var secondary: some View {
+    VStack(alignment: .leading, spacing: 13) {
+      Button {
+        withAnimation(reduceMotion ? nil : RitmMotion.ease(0.2)) { backlogOpen.toggle() }
+      } label: {
+        HStack {
+          Text(
+            store.text("Твой темп", "Your pace") + " · " + store.text("Без даты", "No date")
+              + " (\(undatedTasks.count))")
+          Spacer()
+          Image(systemName: "chevron.down")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(RitmTheme.accentColor)
+            .rotationEffect(.degrees(backlogOpen ? 180 : 0))
+        }
+        .ritmFont(12)
+        .foregroundStyle(RitmTheme.muted)
+        .padding(.horizontal, 10)
+        .frame(minHeight: 26)
+        .background(RitmTheme.panel, in: RoundedRectangle(cornerRadius: 10, style: .circular))
+        .overlay {
+          RoundedRectangle(cornerRadius: 10, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1)
+        }
+        .padding(.vertical, 9)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityAddTraits(backlogOpen ? .isSelected : [])
+      if backlogOpen {
+        if mode != .week { paceCard }
+        backlogCard
+      }
+    }
+  }
+
+  private var paceCard: some View {
+    let count =
+      mode == .month ? entries(selected).count : periodDays.reduce(0) { $0 + entries($1).count }
+    return RitmCard(padding: 20) {
+      VStack(alignment: .leading, spacing: 13) {
+        HStack {
+          Label(store.text("Твой темп", "Your pace"), systemImage: "sparkles")
+            .ritmFont(14, weight: .semibold, tracking: -0.02)
+            .foregroundStyle(RitmTheme.text)
+          Spacer()
+          Text(store.text("Выбранный день", "Selected day")).ritmFont(11).foregroundStyle(RitmTheme.muted)
+        }
+        Group {
+          if count > 0 {
+            Text(
+              (uncertain ? store.text("Показано", "Shown") : store.text("В плане", "Planned"))
+                + " \(count) " + CalendarPlan.recordWord(count, language: store.language)
+                + store.text(". Оставь немного времени для себя.", ". Leave some time for yourself."))
+          } else if uncertain {
+            Text(store.text("Обновляем расписание. Дождись синхронизации.", "Updating the schedule. Wait for sync."))
+          } else {
+            Text(
+              store.text(
+                "Пока всё свободно. Начни с одного важного дела.",
+                "Everything is free for now. Start with one important thing."))
           }
         }
+        .ritmFont(13, lineSpacing: 8)
+        .foregroundStyle(RitmTheme.muted)
+        Text(
+          store.text(
+            "При редактировании повторения изменится только выбранная запись.",
+            "Editing a repeat changes only the selected entry.")
+        )
+        .ritmFont(10)
+        .foregroundStyle(RitmTheme.muted)
       }
     }
   }
-  private func items(_ key: String) -> [CalendarItem] {
-    var result = TaskSchedule.dayOccurrences(calendarTasks, date: key, language: store.language).map
-    { occurrence in
-      CalendarItem(
-        id: "task:" + occurrence.key, title: occurrence.task.title, date: occurrence.date,
-        start: occurrence.start, end: occurrence.end, task: occurrence.task, event: nil,
-        completed: occurrence.completed)
-    }
-    let calendar = FeatureDate.calendar(store.timeZone)
-    let dayStart = calendar.startOfDay(for: FeatureDate.date(key, zone: store.timeZone))
-    guard let nextStart = calendar.date(byAdding: .day, value: 1, to: dayStart) else {
-      return result
-    }
-    for event in events {
-      if event.allDay {
-        guard let first = event.start.date, let end = event.end.date, key >= first, key < end else {
-          continue
+
+  private var backlogCard: some View {
+    RitmCard(padding: 20) {
+      VStack(alignment: .leading, spacing: 0) {
+        HStack {
+          Text(store.text("Без даты", "No date"))
+            .ritmFont(14, weight: .semibold, tracking: -0.02)
+            .foregroundStyle(RitmTheme.text)
+          Spacer()
+          Text("\(undatedTasks.count)").ritmFont(11).foregroundStyle(RitmTheme.muted)
         }
-        result.append(
-          CalendarItem(
-            id: "google:\(event.id):\(key)", title: event.title, date: key, start: nil, end: nil,
-            task: nil, event: event, completed: event.googleTask?.status == "completed"))
-      } else if let start = FeatureDate.instant(event.start.dateTime),
-        let end = FeatureDate.instant(event.end.dateTime), start < nextStart, end > dayStart
-      {
-        let begin =
-          start <= dayStart
-          ? 0 : TaskSchedule.timeMinutes(FeatureDate.time(start, zone: store.timeZone)) ?? 0
-        let finish =
-          end >= nextStart
-          ? 1440
-          : (TaskSchedule.timeMinutes(FeatureDate.time(end, zone: store.timeZone)) ?? 1440)
-            + (calendar.component(.second, from: end) > 0 ? 1 : 0)
-        let actualDuration = Int(ceil(end.timeIntervalSince(start) / 60))
-        let drawnEnd = min(1440, max(begin + 1, finish > begin ? finish : begin + actualDuration))
-        result.append(
-          CalendarItem(
-            id: "google:\(event.id):\(key)", title: event.title, date: key, start: begin,
-            end: drawnEnd, task: nil, event: event,
-            completed: event.googleTask?.status == "completed",
-            clockChange: CalendarEventPolicy.hasClockChange(event, timeZone: store.timeZone),
-            intervalLabel: store.eventTimeText(event)))
+        if undatedTasks.isEmpty {
+          Text(
+            store.text(
+              "Все дела уже нашли своё место в расписании.", "Everything already has its place.")
+          )
+          .ritmFont(13, lineSpacing: 8)
+          .foregroundStyle(RitmTheme.muted)
+          .padding(.vertical, 13)
+        }
+        ForEach(undatedTasks.prefix(4)) { task in
+          Button {
+            sheet = CalendarSheet(task: task)
+          } label: {
+            HStack(spacing: 10) {
+              Text(task.title).ritmFont(12).multilineTextAlignment(.leading)
+              Spacer(minLength: 0)
+              Image(systemName: "chevron.right").font(.system(size: 13)).foregroundStyle(RitmTheme.muted)
+                .accessibilityHidden(true)
+            }
+            .foregroundStyle(RitmTheme.text)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(RitmPressStyle(scale: 0.97))
+          .overlay(alignment: .bottom) { Rectangle().fill(RitmTheme.line).frame(height: 1) }
+        }
+        if undatedTasks.count > 4 {
+          Text(
+            store.text(
+              "Ещё \(undatedTasks.count - 4) в разделе «Мой день»",
+              "\(undatedTasks.count - 4) more in My day")
+          )
+          .ritmFont(10)
+          .foregroundStyle(RitmTheme.muted)
+          .padding(.top, 10)
+        }
       }
     }
-    return result.sorted { ($0.start ?? -1, $0.title) < ($1.start ?? -1, $1.title) }
   }
-  private func open(_ item: CalendarItem) { sheet = CalendarSheet(item: item, newEvent: false) }
-  private func scrollToCurrentHour(_ proxy: ScrollViewProxy, animated: Bool) {
-    guard navigation.section == .calendar, mode != .month else { return }
-    let hour = FeatureDate.calendar(store.timeZone).component(.hour, from: Date())
-    withAnimation(animated && !reduceMotion ? .easeInOut(duration: 0.25) : nil) {
-      proxy.scrollTo("calendar-hour-\(hour)", anchor: .top)
-    }
-  }
-  private var timeZoneLabel: String {
-    let seconds = FeatureDate.calendar(store.timeZone).timeZone.secondsFromGMT(
-      for: FeatureDate.date(selected, zone: store.timeZone))
-    let minutes = abs(seconds / 60)
-    return "UTC" + (seconds >= 0 ? "+" : "−") + String(minutes / 60)
-      + (minutes % 60 == 0 ? "" : String(format: ":%02d", minutes % 60))
-  }
-  private func canMove(_ item: CalendarItem) -> Bool {
-    guard store.canWrite else { return false }
-    if let event = item.event {
-      return CalendarEventPolicy.canEdit(event, timeZone: store.timeZone) && !event.allDay
-    }
-    return item.task?.repeat == TaskRepeat.none && item.start != nil
-  }
-  private func commitMove(_ move: CalendarMove) async {
-    let duration =
-      move.duration ?? move.item.task?.duration ?? move.item.event.flatMap {
-        CalendarEventPolicy.draft($0, timeZone: store.timeZone)?.duration
-      } ?? 60
-    guard move.minute + duration <= 1440 else {
+
+  // MARK: Actions
+
+  /// `addEntry`: a slot gives a time (60 minutes by default), the main button an all-day event.
+  private func addEntry(_ day: String, time: String? = nil, duration: Int = 60) {
+    guard connected else {
       store.errorMessage = store.text(
-        "Запись должна завершиться до полуночи.", "The entry must end by midnight.")
-      moving = nil
+        "Подключи Google Calendar в настройках, чтобы добавить запись.",
+        "Connect Google Calendar in Settings to add an entry.")
+      navigation.section = .settings
       return
     }
-    if let event = move.item.event,
-      var input = CalendarEventPolicy.draft(event, timeZone: store.timeZone)
-    {
-      input.date = move.date
-      input.time = TaskSchedule.minuteTime(move.minute)
-      input.duration = duration
-      if await store.write({
-        try await $0.updateGoogleEvent(id: event.id, event: input, etag: event.etag)
-      }) != nil {
-        await reload()
-      }
-    } else if let task = move.item.task, task.repeat == .none {
-      let patch = TaskPatch(
-        date: .value(move.date), time: .value(TaskSchedule.minuteTime(move.minute)),
-        duration: move.duration)
-      if await store.write({ try await $0.updateTask(id: task.id, patch: patch) }) != nil {
-        await reload()
-      }
-    }
-    moving = nil
+    let bounded = time.flatMap(TaskSchedule.timeMinutes).map { min(duration, 1440 - $0) } ?? duration
+    sheet = CalendarSheet(draft: CalendarDraft(date: day, time: time, duration: bounded))
   }
+
+  private func open(_ entry: DayOccurrence) {
+    if let event = entry.event {
+      sheet = CalendarSheet(event: event)
+    } else if let task = entry.task?.task {
+      sheet = CalendarSheet(task: task)
+    }
+  }
+
+  /// `canDragEntry`: only editable, whole Google events that are not tasks.
+  private func canDrag(_ entry: DayOccurrence) -> Bool {
+    guard store.canWrite, let event = entry.event, !entry.continued, event.googleTask == nil else {
+      return false
+    }
+    return CalendarEventPolicy.canEdit(event, timeZone: store.timeZone)
+  }
+
+  /// `onGoogleMove`: saved at once with the same duration, no confirmation.
+  private func move(_ entry: DayOccurrence, to day: String, minute: Int) async {
+    guard let event = entry.event, canDrag(entry),
+      var input = CalendarEventPolicy.draft(event, timeZone: store.timeZone)
+    else {
+      store.errorMessage = store.text(
+        "Эту запись нельзя перетащить. Открой её для просмотра.",
+        "This entry cannot be dragged. Open it to view it.")
+      return
+    }
+    input.date = day
+    input.time = TaskSchedule.minuteTime(minute)
+    _ = await store.write { try await $0.updateGoogleEvent(id: event.id, event: input, etag: event.etag) }
+    await reload()
+  }
+
   private func shift(_ amount: Int) {
     let next =
       mode == .month
       ? TaskSchedule.addMonths(to: selected, months: amount)
       : HabitSchedule.addDays(to: selected, days: amount * (mode == .week ? 7 : 1))
-    if let next { withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { date = next } }
+    if let next { date = next }
   }
+
+  private func refreshGoogle() async {
+    await store.refresh()
+    await reload()
+  }
+
+  private var timeZoneLabel: String {
+    let seconds = FeatureDate.calendar(store.timeZone).timeZone.secondsFromGMT(
+      for: FeatureDate.date(selected, zone: store.timeZone))
+    let minutes = abs(seconds / 60)
+    return "UTC" + (seconds >= 0 ? "+" : "-") + String(minutes / 60)
+      + (minutes % 60 == 0 ? "" : String(format: ":%02d", minutes % 60))
+  }
+
   private func reload() async {
     guard navigation.section == .calendar else { return }
     let ticket = UUID()
     readID = ticket
     loading = true
-    let first = days.first ?? selected
-    let last = HabitSchedule.addDays(to: days.last ?? selected, days: 1) ?? selected
+    defer { if ticket == readID { loading = false } }
+    let (from, to) = range
     let currentStatus = await store.read { try await $0.googleStatus() }
     guard ticket == readID, !Task.isCancelled else { return }
     if let currentStatus { status = currentStatus }
-    if currentStatus?.status == .connected {
-      let result = await store.read {
-        try await $0.googleEvents(from: first, to: last, timeZone: store.timeZone)
+    guard currentStatus?.status == .connected else {
+      if currentStatus != nil {
+        events = []
+        partial = false
+        failed = false
+      } else {
+        failed = true
       }
-      guard ticket == readID, !Task.isCancelled else { return }
-      if let result {
-        events = result.events
-        partial = result.partial
-      }
-    } else if currentStatus != nil {
-      events = []
-      partial = false
+      return
     }
-    loading = false
+    let zone = store.timeZone
+    let result = await store.read { try await $0.googleEvents(from: from, to: to, timeZone: zone) }
+    guard ticket == readID, !Task.isCancelled else { return }
+    if let result {
+      events = result.events
+      partial = result.partial
+      fetchedAt = result.fetchedAt
+      failed = false
+    } else {
+      failed = true
+    }
   }
 }
 
-private struct CalendarResizeGrip: View {
-  @Environment(RitmStore.self) private var store
-  let duration: Int
-  let start: Int
-  let onResize: (Int) -> Void
-  @GestureState private var translation: CGSize = .zero
-  private func updated(_ height: CGFloat) -> Int {
-    let delta = Int((height / 64 * 60 / 5).rounded()) * 5
-    return min(min(720, 1440 - start), max(5, duration + delta))
-  }
-  var body: some View {
-    VStack(spacing: 3) {
-      if translation != .zero {
-        Text("\(updated(translation.height))").font(.caption2.bold()).monospacedDigit()
+/// The calendar's secondary buttons: glass surface, accent label, 44 pt tall.
+private struct CalendarSecondaryStyle: ButtonStyle {
+  var square = false
+  @Environment(\.isEnabled) private var isEnabled
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .ritmFont(14, weight: .semibold)
+      .lineLimit(1)
+      .foregroundStyle(RitmTheme.accentColor)
+      .padding(.horizontal, square ? 0 : 12)
+      .frame(minWidth: 44, minHeight: 44)
+      .frame(width: square ? 44 : nil)
+      .background(RitmTheme.glassRaised, in: RoundedRectangle(cornerRadius: 13, style: .circular))
+      .overlay {
+        RoundedRectangle(cornerRadius: 13, style: .circular).strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
       }
-      Capsule().fill(.primary.opacity(0.65)).frame(width: 22, height: 3)
-    }
-    .frame(width: 44, height: 44)
-    .contentShape(Rectangle())
-    .highPriorityGesture(
-      DragGesture(minimumDistance: 8)
-        .updating($translation) { value, state, _ in state = value.translation }
-        .onEnded { value in
-          let result = updated(value.translation.height)
-          if result != duration { onResize(result) }
-        }
-    )
-    .accessibilityElement()
-    .accessibilityLabel(store.text("Изменить длительность", "Change duration"))
-    .accessibilityValue("\(duration) " + store.text("минут", "minutes"))
-    .accessibilityAdjustableAction { direction in
-      let delta: Int
-      switch direction {
-      case .increment: delta = 5
-      case .decrement: delta = -5
-      @unknown default: return
-      }
-      let value = min(min(720, 1440 - start), max(5, duration + delta))
-      if value != duration { onResize(value) }
-    }
+      .opacity(isEnabled ? 1 : 0.6)
+      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+      .animation(reduceMotion ? nil : RitmMotion.press, value: configuration.isPressed)
   }
 }

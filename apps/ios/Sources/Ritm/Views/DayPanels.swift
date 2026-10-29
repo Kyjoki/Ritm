@@ -556,7 +556,7 @@ struct DaySchedulePanel: View {
         .multilineTextAlignment(.leading)
         .padding(12)
         .frame(maxWidth: .infinity, minHeight: 55, alignment: .leading)
-        .background { DayEventSurface(color: CalendarPalette.color(entry.colorId)) }
+        .background { DayEventSurface(color: CalendarPalette.entryColor(entry.colorId)) }
         .contentShape(RoundedRectangle(cornerRadius: 14, style: .circular))
       }
       .buttonStyle(RitmPressStyle())

@@ -3,6 +3,22 @@ import RitmCore
 import SwiftUI
 
 enum CalendarPalette {
+  /// The colour an entry is drawn with (src/lib/calendar-colors.ts): Ritm's soft swatches for
+  /// Google IDs, a custom colour as is, otherwise the accent.
+  static func entryColor(_ id: String?) -> Color {
+    guard let hex = CalendarPlan.entryHex(id), let value = UInt32(hex, radix: 16) else {
+      return RitmTheme.accentColor
+    }
+    return Color(rgb: value)
+  }
+  /// `--calendar-event-bg` and `--calendar-event-border`.
+  static func entryFill(_ id: String?) -> Color {
+    RitmTheme.mix(entryColor(id), 0.24, into: RitmTheme.panel)
+  }
+  static func entryBorder(_ id: String?) -> Color {
+    RitmTheme.mix(entryColor(id), 0.76, into: RitmTheme.panel)
+  }
+
   static let values: [(String, String)] = [
     ("#b71c50", "b71c50"), ("#e91e63", "e91e63"), ("4", "e67c73"), ("11", "d50000"),
     ("6", "f4511e"), ("#ef6c00", "ef6c00"), ("#f09300", "f09300"), ("5", "f6bf26"),

@@ -181,9 +181,18 @@ struct CalendarEventEditor: View {
   @State private var requestID = UUID().uuidString
   @State private var previousInput: GoogleEventInput?
 
-  init(event: GoogleCalendarEvent? = nil, initialDate: String, onSave: (() async -> Void)? = nil) {
+  /// A new entry starts at `initialTime`; nil makes it an all-day event, as on the web.
+  let initialTime: String?
+  let initialDuration: Int
+
+  init(
+    event: GoogleCalendarEvent? = nil, initialDate: String, initialTime: String? = "09:00",
+    initialDuration: Int = 30, onSave: (() async -> Void)? = nil
+  ) {
     self.event = event
     self.initialDate = initialDate
+    self.initialTime = initialTime
+    self.initialDuration = initialDuration
     self.onSave = onSave
   }
   var body: some View {
@@ -259,6 +268,11 @@ struct CalendarEventEditor: View {
       .task {
         guard !initialized else { return }
         date = initialDate
+        if event == nil {
+          time = initialTime ?? "09:00"
+          allDay = initialTime == nil
+          duration = initialDuration
+        }
         if let event {
           guard let draft = CalendarEventPolicy.draft(event, timeZone: store.timeZone) else {
             validation = store.text(
