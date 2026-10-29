@@ -1,4 +1,5 @@
 import Observation
+import RitmCore
 import SwiftUI
 import UIKit
 
@@ -68,6 +69,8 @@ struct RitmRootView: View {
               sections: mainSections, current: navigation.section,
               select: { navigation.section = $0 }, openMore: { showingMore = true })
           }
+          FinanceNotificationOverlay(openNotice: openNotice, openSettings: openNotificationSettings)
+            .zIndex(1)
           if showingMore {
             RitmMoreDialog(current: navigation.section) { section in
               if let section { navigation.section = section }
@@ -86,9 +89,26 @@ struct RitmRootView: View {
     .preferredColorScheme(preferredScheme)
     .environment(\.locale, Locale(identifier: store.language.rawValue))
     .onChange(of: navigation.section) { _, _ in
+      store.notices.closePopover()
       UIApplication.shared.sendAction(
         #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
+  }
+
+  /// A tapped notice or banner: mark it read and land on its card in Finance.
+  private func openNotice(_ notice: FinanceNotice) {
+    store.notices.markRead(notice.id)
+    store.notices.closePopover()
+    store.notices.dismissBanner()
+    if let cardID = notice.cardID {
+      store.financeFocus = FinanceFocus(cardID: cardID, entryID: notice.id)
+    }
+    navigation.section = .finance
+  }
+
+  private func openNotificationSettings() {
+    store.notices.closePopover()
+    navigation.section = .settings
   }
 
   @ViewBuilder private func sectionView(_ section: RitmSection) -> some View {
@@ -116,7 +136,22 @@ extension RitmSection {
   }
 }
 
-/// Web `.app-header`: 62 pt, 29 pt brand mark, wordmark and the 44 pt theme toggle.
+/// The 44 pt glass tile behind the header's icon buttons (theme toggle, notification bell).
+struct RitmHeaderIconBackground: View {
+  var body: some View {
+    let shape = RoundedRectangle(cornerRadius: 13, style: .circular)
+    shape
+      .fill(
+        RitmTheme.linear(
+          [.init(color: RitmTheme.glassRaised, location: 0),
+           .init(color: RitmTheme.panel, location: 1)], cssAngle: 150))
+      .overlay { shape.strokeBorder(RitmTheme.panelBorder, lineWidth: 1) }
+      .shadow(color: Color(rgb: 0x583882, opacity: 0.11), radius: 10, y: 6)
+  }
+}
+
+/// Web `.app-header`: 62 pt, 29 pt brand mark, wordmark, the finance bell and the 44 pt theme
+/// toggle. Day, Habits and Settings embed this same header, so they all get the same bell.
 struct RitmShellHeader: View {
   @Environment(RitmStore.self) private var store
   @Environment(\.colorScheme) private var scheme
@@ -144,6 +179,7 @@ struct RitmShellHeader: View {
         .foregroundStyle(RitmTheme.text)
         .accessibilityAddTraits(.isHeader)
       Spacer(minLength: 0)
+      FinanceBellButton()
       Button {
         Task { await store.toggleTheme(showingDark: showingDark) }
       } label: {
@@ -151,16 +187,7 @@ struct RitmShellHeader: View {
           .font(.system(size: 18))
           .foregroundStyle(RitmTheme.muted)
           .frame(width: 44, height: 44)
-          .background {
-            let shape = RoundedRectangle(cornerRadius: 13, style: .circular)
-            shape
-              .fill(
-                RitmTheme.linear(
-                  [.init(color: RitmTheme.glassRaised, location: 0),
-                   .init(color: RitmTheme.panel, location: 1)], cssAngle: 150))
-              .overlay { shape.strokeBorder(RitmTheme.panelBorder, lineWidth: 1) }
-              .shadow(color: Color(rgb: 0x583882, opacity: 0.11), radius: 10, y: 6)
-          }
+          .background { RitmHeaderIconBackground() }
       }
       .buttonStyle(RitmPressStyle(scale: 0.9))
       .disabled(store.pendingTheme != nil)

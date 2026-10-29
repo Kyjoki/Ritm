@@ -2,6 +2,12 @@ import Foundation
 import Observation
 import RitmCore
 
+/// Where a tapped finance notice should land; FinanceView consumes it and sets it back to nil.
+struct FinanceFocus: Equatable {
+  let cardID: String
+  let entryID: String?
+}
+
 /// UI state only. The existing Ritm server remains authoritative.
 @MainActor @Observable
 final class RitmStore {
@@ -27,6 +33,13 @@ final class RitmStore {
   private(set) var featureRetryAt: Date?
   /// The API failure behind errorMessage, for screens that explain it in place (the assistant).
   private(set) var lastFailure: APIError?
+  /// Finance rows live here only for the Finance page and the notice centre. They are never
+  /// passed to the assistant or to any AI request.
+  private(set) var financeEntries: [FinanceEntry] = []
+  private(set) var financeLoaded = false
+  private(set) var financeFailed = false
+  var financeFocus: FinanceFocus?
+  let notices = FinanceNoticeCenter()
 
   @ObservationIgnored private let client: APIClient?
   @ObservationIgnored private let vault = SessionVault()
@@ -237,6 +250,36 @@ final class RitmStore {
 
   func refresh() async { await loadSnapshot() }
 
+  /// GET /finance through the shared read boundary; updates entries, then the notice centre.
+  func reloadFinance() async {
+    guard let fresh = await read({ client in try await client.finance() }) else {
+      if !financeLoaded { financeFailed = true }
+      return
+    }
+    applyFinance(fresh)
+  }
+
+  private func applyFinance(_ entries: [FinanceEntry]) {
+    financeEntries = entries
+    financeLoaded = true
+    financeFailed = false
+    notices.update(entries: entries, today: today)
+  }
+
+  /// Part of the snapshot, so it also runs after writes (when `read` is paused) and on the poll.
+  private func refreshFinance(ticket: Int) async {
+    guard let client else { return }
+    do {
+      let fresh = try await client.finance()
+      guard ticket == generation, isSignedIn, !Task.isCancelled else { return }
+      applyFinance(fresh)
+    } catch {
+      guard ticket == generation, !Task.isCancelled else { return }
+      financeFailed = true
+      if let failure = error as? APIError, failure.requiresAuthentication { await present(error) }
+    }
+  }
+
   private func loadSnapshot(afterWrite: Bool = false) async {
     guard isSignedIn, active, !isMutating || afterWrite,
       Date() >= nextAllowedRead, let client
@@ -275,6 +318,7 @@ final class RitmStore {
       lastSyncedAt = now
       await client.setLanguage(freshAccount.settings.language)
       await refreshCalendar(ticket: ticket)
+      await refreshFinance(ticket: ticket)
       if ticket == generation, isSignedIn, let credential = await client.sessionCredential() {
         await notifications.update(snapshot: freshAccount, until: credential.expires, now: now)
       }
@@ -519,6 +563,11 @@ final class RitmStore {
     calendarFailed = false
     googleStatus = nil
     googleTasks = nil
+    financeEntries = []
+    financeLoaded = false
+    financeFailed = false
+    financeFocus = nil
+    notices.reset()
     lastSyncedAt = nil
     isOffline = false
     uncertainWrite = false
