@@ -10,7 +10,8 @@ var targets: [Target] = [
   .testTarget(name: "RitmCoreTests", dependencies: ["RitmCore"]),
 ]
 if !coreTestsOnly {
-  targets.append(.target(name: "Ritm", dependencies: ["RitmCore"]))
+  // Fonts holds Inter, the web app's typeface, registered at launch by RitmFonts.
+  targets.append(.target(name: "Ritm", dependencies: ["RitmCore"], resources: [.copy("Fonts")]))
 }
 
 let package = Package(

@@ -5,6 +5,8 @@ struct RitmApp: App {
   @State private var store = RitmStore()
   @Environment(\.scenePhase) private var scenePhase
 
+  init() { RitmFonts.register() }
+
   var body: some Scene {
     WindowGroup {
       RitmRootView()

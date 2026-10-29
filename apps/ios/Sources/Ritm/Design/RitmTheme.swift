@@ -226,7 +226,7 @@ private struct RitmFontModifier: ViewModifier {
     let traits = UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(typeSize))
     let scaled = UIFontMetrics(forTextStyle: style).scaledValue(for: size, compatibleWith: traits)
     content
-      .font(.system(size: scaled, weight: weight))
+      .font(.custom(RitmFonts.name(weight), fixedSize: scaled))
       .tracking(scaled * tracking)
       .lineSpacing(lineSpacing * scaled / size)
   }
