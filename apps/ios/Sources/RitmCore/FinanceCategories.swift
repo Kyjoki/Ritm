@@ -53,6 +53,30 @@ public enum FinanceCategories {
     other,
   ]
 
+  private static let expenseMainLabels = [
+    "Продукты", "Кафе", "Транспорт", "Развлечения", "Дом", "Образование", "Здоровье",
+  ]
+  private static let incomeMainLabels = ["Зарплата", "Подработка", "Подарок", "Проценты"]
+
+  private static func pick(_ labels: [String], from list: [FinanceCategory]) -> [FinanceCategory] {
+    labels.compactMap { label in list.first { $0.label == label } }
+  }
+
+  /// The tiles the picker shows at first, in display order.
+  public static let expenseMain = pick(expenseMainLabels, from: expense)
+  public static let incomeMain = pick(incomeMainLabels, from: income)
+  /// The rest of each list, behind the «Ещё» tile, in list order.
+  public static let expenseMore = expense.filter { !expenseMainLabels.contains($0.label) }
+  public static let incomeMore = income.filter { !incomeMainLabels.contains($0.label) }
+
+  /// True when the stored label is not one of the first tiles (a hidden or unlisted category),
+  /// so the picker must start with the «Ещё» group open.
+  public static func needsMore(_ label: String?, income isIncome: Bool) -> Bool {
+    let key = (label ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !key.isEmpty else { return false }
+    return !(isIncome ? incomeMain : expenseMain).contains { $0.label == key }
+  }
+
   /// The category for a stored label (trimmed, case-insensitive), nil when it is not in a list.
   public static func category(for label: String?) -> FinanceCategory? {
     let key = (label ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()

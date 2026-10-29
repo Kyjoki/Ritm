@@ -65,4 +65,36 @@ final class FinanceCategoriesTests: XCTestCase {
     XCTAssertEqual(FinanceCategories.englishName(for: "Продукты"), "Groceries")
     XCTAssertEqual(FinanceCategories.englishName(for: "Своё"), "Своё")
   }
+
+  func testMainAndMoreSplitTheListsInOrder() {
+    XCTAssertEqual(
+      FinanceCategories.expenseMain.map(\.label),
+      ["Продукты", "Кафе", "Транспорт", "Развлечения", "Дом", "Образование", "Здоровье"])
+    XCTAssertEqual(
+      FinanceCategories.incomeMain.map(\.label),
+      ["Зарплата", "Подработка", "Подарок", "Проценты"])
+    XCTAssertEqual(
+      FinanceCategories.incomeMore.map(\.label), ["Возврат", "Продажа", "Другое"])
+    for (main, more, all) in [
+      (FinanceCategories.expenseMain, FinanceCategories.expenseMore, FinanceCategories.expense),
+      (FinanceCategories.incomeMain, FinanceCategories.incomeMore, FinanceCategories.income),
+    ] {
+      XCTAssertTrue(Set(main.map(\.label)).isDisjoint(with: more.map(\.label)))
+      XCTAssertEqual(Set(main.map(\.label) + more.map(\.label)), Set(all.map(\.label)))
+      XCTAssertEqual(main.count + more.count, all.count)
+    }
+    XCTAssertEqual(FinanceCategories.expenseMore.last?.label, "Другое")
+  }
+
+  func testNeedsMoreWhenTheStoredCategoryIsHiddenOrUnlisted() {
+    XCTAssertFalse(FinanceCategories.needsMore(nil, income: false))
+    XCTAssertFalse(FinanceCategories.needsMore("", income: true))
+    XCTAssertFalse(FinanceCategories.needsMore("Кафе", income: false))
+    XCTAssertFalse(FinanceCategories.needsMore(" Зарплата ", income: true))
+    XCTAssertTrue(FinanceCategories.needsMore("Спорт", income: false))
+    XCTAssertTrue(FinanceCategories.needsMore("Возврат", income: true))
+    XCTAssertTrue(FinanceCategories.needsMore("Другое", income: false))
+    XCTAssertTrue(FinanceCategories.needsMore("Кофе на вынос", income: false))
+    XCTAssertTrue(FinanceCategories.needsMore("Спорт", income: true))
+  }
 }
