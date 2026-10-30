@@ -463,7 +463,7 @@ struct RitmPageHeading<Action: View>: View {
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
       action
     }
-    .padding(.top, 6)
+    .padding(.top, 16)
     .padding(.bottom, 20)
   }
 }
