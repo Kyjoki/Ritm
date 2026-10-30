@@ -191,11 +191,11 @@ struct FinanceOverviewSections: View {
               "Only \(financeSymbol(currency)), no currency conversion"))
         }
         if currencies.count > 1 {
-          FinanceSegment(
+          RitmSegmentedControl(
             label: format.text("Валюта", "Currency"), values: currencies, title: { $0.rawValue },
             selection: $currency)
         }
-        FinanceSegment(
+        RitmSegmentedControl(
           label: format.text("Период", "Period"), values: FinancePeriod.allCases,
           title: { format.periodTitle($0) }, selection: $period)
         FinanceAreaChart(
@@ -504,7 +504,7 @@ struct FinanceAccountSections: View {
         FinanceCardTitle(
           title: format.text("Динамика баланса", "Balance over time"),
           trailing: format.range(FinanceWallet.interval(period, today: today)))
-        FinanceSegment(
+        RitmSegmentedControl(
           label: format.text("Период", "Period"), values: FinancePeriod.allCases,
           title: { format.periodTitle($0) }, selection: $period)
         FinanceAreaChart(

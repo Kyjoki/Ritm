@@ -182,26 +182,29 @@ struct HabitCard: View {
 
   private var bottom: some View {
     let progress = HabitSchedule.progress(habit, on: today)
-    return HStack(alignment: .center, spacing: 10) {
-      VStack(alignment: .leading, spacing: 4) {
-        Text(scheduledToday ? store.text("Прогресс сегодня", "Today's progress") : store.text("Сегодня выходной", "Rest day today"))
-          .ritmFont(11)
-          .foregroundStyle(RitmTheme.muted)
-        if scheduledToday {
-          progressText(progress)
-            .ritmFont(12, weight: .bold)
-            .foregroundStyle(RitmTheme.text)
+    let counted = scheduledToday && habit.target != nil
+    return VStack(alignment: .leading, spacing: 10) {
+      HStack(alignment: .center, spacing: 10) {
+        VStack(alignment: .leading, spacing: 4) {
+          Text(scheduledToday ? store.text("Прогресс сегодня", "Today's progress") : store.text("Сегодня выходной", "Rest day today"))
+            .ritmFont(11)
+            .foregroundStyle(RitmTheme.muted)
+          if scheduledToday {
+            progressText(progress)
+              .ritmFont(12, weight: .bold)
+              .foregroundStyle(RitmTheme.text)
+          }
         }
-      }
-      Spacer(minLength: 0)
-      if scheduledToday {
-        if habit.target != nil {
-          HabitStepper(habit: habit, today: today, busy: busy, onSave: { onProgress(today, $0) })
-        } else {
+        Spacer(minLength: 0)
+        if scheduledToday && !counted {
           markButton(doneToday ? store.text("Отменить", "Undo") : store.text("Выполнить", "Complete")) {
             onProgress(today, doneToday ? 0 : 1)
           }
         }
+      }
+      // The count editor gets a full row: − value +, Save, the goal and Reset do not fit beside the text.
+      if counted {
+        HabitStepper(habit: habit, today: today, busy: busy, onSave: { onProgress(today, $0) })
       }
     }
   }
@@ -278,44 +281,74 @@ private struct HabitStepper: View {
   private var done: Bool { HabitSchedule.isComplete(habit, on: today) }
 
   var body: some View {
-    HStack(spacing: 7) {
-      HStack(spacing: 0) {
-        stepButton("minus", store.text("Уменьшить прогресс ", "Decrease progress ")) { onSave((value ?? progress) - 1) }
-          .disabled(busy || !valid || (value ?? 0) <= 0)
-        TextField("", text: $draft)
-          .keyboardType(.numberPad)
-          .multilineTextAlignment(.center)
-          .ritmFont(12, weight: .bold)
-          .foregroundStyle(RitmTheme.text)
-          .frame(width: 54, height: 44)
-          .accessibilityLabel(store.text("Введите прогресс ", "Enter progress ") + habit.title)
-        stepButton("plus", store.text("Увеличить прогресс ", "Increase progress ")) { onSave((value ?? progress) + 1) }
-          .disabled(busy || !valid || (value ?? target) >= target)
+    // One row when everything fits; otherwise the count pill and Save, then the goal and Reset.
+    ViewThatFits(in: .horizontal) {
+      HStack(spacing: 8) {
+        counter
+        saveButton
+        goalButton
+        resetButton
       }
-      .background(HabitStyle.tile, in: RoundedRectangle(cornerRadius: 10, style: .circular))
-      .overlay { RoundedRectangle(cornerRadius: 10, style: .circular).strokeBorder(RitmTheme.panelBorder, lineWidth: 1) }
-      if valid, let value, value != progress {
-        Button(store.text("Сохранить", "Save")) { onSave(value) }
-          .buttonStyle(RitmPrimaryButtonStyle())
-          .fixedSize()
-          .disabled(busy)
-      }
-      Button {
-        onSave(done ? 0 : target)
-      } label: {
-        Label(done ? store.text("Отменить", "Undo") : store.text("Выполнить цель", "Complete goal"), systemImage: "checkmark")
-      }
-      .buttonStyle(RitmSecondaryButtonStyle())
-      .disabled(busy)
-      if progress > 0 {
-        HabitIconButton(symbol: "arrow.counterclockwise", label: store.text("Сбросить прогресс ", "Reset progress ") + habit.title) {
-          onSave(0)
+      VStack(alignment: .leading, spacing: 8) {
+        HStack(spacing: 8) {
+          counter
+          saveButton
         }
-        .disabled(busy)
+        HStack(spacing: 8) {
+          goalButton
+          resetButton
+        }
       }
     }
+    .frame(maxWidth: .infinity, alignment: .leading)
     .onAppear { draft = String(progress) }
     .onChange(of: progress) { _, value in draft = String(value) }
+  }
+
+  private var counter: some View {
+    HStack(spacing: 0) {
+      stepButton("minus", store.text("Уменьшить прогресс ", "Decrease progress ")) { onSave((value ?? progress) - 1) }
+        .disabled(busy || !valid || (value ?? 0) <= 0)
+      TextField("", text: $draft)
+        .keyboardType(.numberPad)
+        .multilineTextAlignment(.center)
+        .ritmFont(12, weight: .bold)
+        .foregroundStyle(RitmTheme.text)
+        .frame(width: 54, height: 44)
+        .accessibilityLabel(store.text("Введите прогресс ", "Enter progress ") + habit.title)
+      stepButton("plus", store.text("Увеличить прогресс ", "Increase progress ")) { onSave((value ?? progress) + 1) }
+        .disabled(busy || !valid || (value ?? target) >= target)
+    }
+    .background(HabitStyle.tile, in: RoundedRectangle(cornerRadius: 10, style: .circular))
+    .overlay { RoundedRectangle(cornerRadius: 10, style: .circular).strokeBorder(RitmTheme.panelBorder, lineWidth: 1) }
+  }
+
+  @ViewBuilder private var saveButton: some View {
+    if valid, let value, value != progress {
+      Button(store.text("Сохранить", "Save")) { onSave(value) }
+        .buttonStyle(RitmPrimaryButtonStyle())
+        .fixedSize()
+        .disabled(busy)
+    }
+  }
+
+  private var goalButton: some View {
+    Button {
+      onSave(done ? 0 : target)
+    } label: {
+      Label(done ? store.text("Отменить", "Undo") : store.text("Выполнить цель", "Complete goal"), systemImage: "checkmark")
+    }
+    .buttonStyle(RitmSecondaryButtonStyle())
+    .disabled(busy)
+  }
+
+  @ViewBuilder private var resetButton: some View {
+    if progress > 0 {
+      HabitIconButton(symbol: "arrow.counterclockwise", label: store.text("Сбросить прогресс ", "Reset progress ") + habit.title) {
+        onSave(0)
+      }
+      .disabled(busy)
+    }
   }
 
   private func stepButton(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {

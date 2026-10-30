@@ -219,9 +219,7 @@ struct CalendarEventEditor: View {
           if !allDay {
             TextField(store.text("Время HH:mm", "Time HH:mm"), text: $time).keyboardType(
               .numbersAndPunctuation)
-            Stepper(
-              store.text("Длительность: ", "Duration: ") + "\(duration) "
-                + store.text("мин", "min"), value: $duration, in: 5...720, step: 5)
+            RitmDurationStepper(duration: $duration)
           }
           if event == nil {
             Picker(store.text("Повтор", "Repeat"), selection: $recurrence) {

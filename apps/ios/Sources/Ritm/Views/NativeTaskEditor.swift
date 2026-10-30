@@ -100,9 +100,7 @@ struct NativeTaskEditor: View {
               DateKeyPicker(title: store.text("Дата", "Date"), value: $date, zone: store.timeZone)
               Toggle(store.text("Указать время", "Set time"), isOn: $timed)
               if timed { TextField("HH:mm", text: $time).keyboardType(.numbersAndPunctuation) }
-              Stepper(
-                store.text("Длительность: ", "Duration: ") + "\(duration) "
-                  + store.text("мин", "min"), value: $duration, in: 5...720, step: 5)
+              RitmDurationStepper(duration: $duration)
               Picker(store.text("Повтор", "Repeat"), selection: $recurrence) { recurrenceOptions }
             }
             if task != nil && task?.repeat != TaskRepeat.none {

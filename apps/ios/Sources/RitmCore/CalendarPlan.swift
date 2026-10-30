@@ -109,6 +109,95 @@ public enum CalendarPlan {
     return max(0, min(latest, snapped))
   }
 
+  // MARK: Moving entries in the week grid
+
+  /// Hold this long before an entry is lifted (web: 280 ms for touch).
+  public static let dragHold: TimeInterval = 0.35
+  /// A finger that wanders further than this during the hold is scrolling, not lifting.
+  public static let dragHoldSlop = 10.0
+  /// Dwell at the side edge before the week switches (`calendarDragWeekEdge`, 650 ms on the web).
+  public static let dragWeekDwell: TimeInterval = 0.65
+  public static let dragWeekEdgeInset = 24.0
+  public static let dragScrollInset = 56.0
+  public static let dragScrollMaxSpeed = 520.0
+
+  /// Where an entry sits inside its day column: `lane` of `lanes`, 1 pt from the column edges.
+  public struct EntryFrame: Sendable, Equatable {
+    public let x: Double
+    public let y: Double
+    public let width: Double
+    public let height: Double
+  }
+
+  public static func entryFrame(_ placed: PlacedOccurrence, column: Double, hourHeight: Double)
+    -> EntryFrame
+  {
+    let lanes = Double(max(1, placed.lanes))
+    return EntryFrame(
+      x: Double(placed.lane) * column / lanes + 1, y: Double(placed.start) / 60 * hourHeight + 2,
+      width: max(1, column / lanes - 2),
+      height: max(22, Double(placed.end - placed.start) / 60 * hourHeight - 4))
+  }
+
+  /// The topmost entry under a point of the day column (`x` and `y` relative to the column).
+  public static func entry(
+    at x: Double, y: Double, in placed: [PlacedOccurrence], column: Double, hourHeight: Double
+  ) -> PlacedOccurrence? {
+    placed.last { item in
+      let frame = entryFrame(item, column: column, hourHeight: hourHeight)
+      return x >= frame.x && x <= frame.x + frame.width && y >= frame.y
+        && y <= frame.y + frame.height
+    }
+  }
+
+  public struct DragTarget: Sendable, Equatable {
+    public let dayIndex: Int
+    public let minutes: Int
+    public init(dayIndex: Int, minutes: Int) {
+      self.dayIndex = dayIndex
+      self.minutes = minutes
+    }
+  }
+
+  /// `calendarDragTarget`: `x` and `y` are the finger in grid content coordinates (time column
+  /// included), `grabY` how far below the card's top the finger took hold. The grab point stays
+  /// under the finger and the start snaps to 15 minutes.
+  public static func dragTarget(
+    x: Double, y: Double, grabY: Double, column: Double, timeColumn: Double, days: Int,
+    hourHeight: Double, duration: Int
+  ) -> DragTarget {
+    let index = Int(((x - timeColumn) / max(1, column)).rounded(.down))
+    let raw = (y - grabY) / hourHeight * 60
+    return DragTarget(
+      dayIndex: max(0, min(max(1, days) - 1, index)),
+      minutes: snappedStart(rawMinutes: raw, duration: duration))
+  }
+
+  /// `calendarDragWeekEdge`: -1 near the left edge, 1 near the right edge.
+  public static func dragWeekEdge(x: Double, width: Double) -> Int {
+    if x < dragWeekEdgeInset { return -1 }
+    if x > width - dragWeekEdgeInset { return 1 }
+    return 0
+  }
+
+  /// Auto-scroll speed in points per second while the finger is in the top or bottom band of the
+  /// viewport: negative scrolls up, 0 in the middle, faster the closer to the edge.
+  public static func dragScrollSpeed(y: Double, height: Double) -> Double {
+    guard height > dragScrollInset * 2 else { return 0 }
+    if y < dragScrollInset {
+      return -dragScrollMaxSpeed * min(1, (dragScrollInset - y) / dragScrollInset)
+    }
+    if y > height - dragScrollInset {
+      return dragScrollMaxSpeed * min(1, (y - (height - dragScrollInset)) / dragScrollInset)
+    }
+    return 0
+  }
+
+  /// Releasing outside the grid cancels the move.
+  public static func isInside(x: Double, y: Double, width: Double, height: Double) -> Bool {
+    x >= 0 && x <= width && y >= 0 && y <= height
+  }
+
   /// 42 days from the Sunday on or before the first of the month.
   public static func monthDays(containing date: String) -> [String] {
     guard let first = TaskSchedule.startOfMonth(date),

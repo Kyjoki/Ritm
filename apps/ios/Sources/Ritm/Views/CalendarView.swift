@@ -40,6 +40,7 @@ struct CalendarView: View {
   @State private var pick: CalendarPick?
   @State private var backlogOpen = false
   @State private var nowJump = 0
+  @State private var dragging = false
 
   private var selected: String { date.isEmpty ? store.today : date }
   private var weekDays: [String] { HabitSchedule.week(containing: selected) }
@@ -62,14 +63,13 @@ struct CalendarView: View {
     (loading && fetchedAt == nil) || failed || partial || needsReauth || (connected && fetchedAt == nil)
   }
   private var warning: Bool { failed || partial || needsReauth }
-  /// The web calendar shows Google events; dated Ritm tasks move to Google from the web app.
   private var undatedTasks: [RitmTask] {
     (store.bootstrap?.tasks ?? []).filter { $0.date == nil && !$0.completed }
   }
 
   private func entries(_ day: String) -> [DayOccurrence] {
     DayPlan.occurrences(
-      tasks: [], events: events, date: day, timeZone: store.timeZone, language: store.language)
+      tasks: store.bootstrap?.tasks ?? [], events: events, date: day, timeZone: store.timeZone, language: store.language)
   }
 
   var body: some View {
@@ -91,6 +91,7 @@ struct CalendarView: View {
             .padding(.bottom, 16)
           }
           .scrollIndicators(.hidden)
+          .scrollDisabled(dragging)
           .refreshable {
             await store.refresh()
             await reload()
@@ -202,37 +203,9 @@ struct CalendarView: View {
   }
 
   private var segment: some View {
-    HStack(spacing: 3) {
-      ForEach(NativeCalendarMode.allCases, id: \.self) { value in
-        let active = value == mode
-        Button {
-          mode = value
-        } label: {
-          Text(modeTitle(value))
-            .ritmFont(14, weight: .medium)
-            .lineLimit(1)
-            .foregroundStyle(active ? RitmTheme.accentColor : RitmTheme.muted)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .background {
-              if active {
-                RoundedRectangle(cornerRadius: 9, style: .circular)
-                  .fill(RitmTheme.panel)
-                  .shadow(color: Color(rgb: 0x3F235F, opacity: 0.07), radius: 5, y: 3)
-              }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(RitmPressStyle(scale: 0.97))
-        .accessibilityAddTraits(active ? .isSelected : [])
-      }
-    }
-    .padding(2)
-    .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 12, style: .circular))
-    .overlay {
-      RoundedRectangle(cornerRadius: 12, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1)
-    }
-    .accessibilityElement(children: .contain)
-    .accessibilityLabel(store.text("Вид календаря", "Calendar view"))
+    RitmSegmentedControl(
+      label: store.text("Вид календаря", "Calendar view"), values: NativeCalendarMode.allCases,
+      title: modeTitle, selection: $mode, fontSize: 14)
   }
 
   /// `.cal-sync-footer` without a warning: an icon and the refresh or settings action.
@@ -384,14 +357,15 @@ struct CalendarView: View {
         days: weekDays,
         entries: Dictionary(uniqueKeysWithValues: weekDays.map { ($0, entries($0)) }),
         today: store.today, timeZoneLabel: timeZoneLabel, jumpToNow: nowJump,
-        canDrag: canDrag, onOpen: open,
+        dragBlock: dragBlock, onOpen: open,
         onPick: { day, group in pick = CalendarPick(date: day, keys: group.map(\.key)) },
         onAdd: { day, minute in addEntry(day, time: TaskSchedule.minuteTime(minute)) },
         onSelectDay: { day in
           date = day
           mode = .day
         },
-        onMove: { entry, day, minute in Task { await move(entry, to: day, minute: minute) } },
+        onMove: { entry, day, minute in await move(entry, to: day, minute: minute) },
+        onDragActive: { dragging = $0 },
         onSwipe: shift
       )
       .padding(.top, 7)
@@ -562,27 +536,93 @@ struct CalendarView: View {
     }
   }
 
-  /// `canDragEntry`: only editable, whole Google events that are not tasks.
-  private func canDrag(_ entry: DayOccurrence) -> Bool {
-    guard store.canWrite, let event = entry.event, !entry.continued, event.googleTask == nil else {
-      return false
+  /// `canDragEntry`, with the reason: a whole, editable Google event that is not a task, or a
+  /// timed one-off Ritm task. Everything else stays put and says why when it is held.
+  private func dragBlock(_ entry: DayOccurrence) -> String? {
+    if let reason = movePolicy(entry) { return reason }
+    guard store.canWrite else {
+      return store.text(
+        "Сейчас нельзя сохранять изменения. Подожди и попробуй ещё раз.",
+        "Changes cannot be saved right now. Wait a moment and try again.")
     }
-    return CalendarEventPolicy.canEdit(event, timeZone: store.timeZone)
+    return nil
   }
 
-  /// `onGoogleMove`: saved at once with the same duration, no confirmation.
+  private func movePolicy(_ entry: DayOccurrence) -> String? {
+    guard entry.start != nil, !entry.allDay else { return Self.notMovable(store) }
+    if entry.continued {
+      return store.text(
+        "Продолжение записи с прошлого дня переносится вместе с основной записью.",
+        "The part that continues from yesterday moves with the main entry.")
+    }
+    if let event = entry.event {
+      if event.googleTask != nil || event.taskLink == true {
+        return store.text(
+          "Задачи Google переносятся в Google Tasks. Открой запись, чтобы изменить её.",
+          "Google tasks are moved in Google Tasks. Open the entry to change it.")
+      }
+      if event.readOnly {
+        return store.text(
+          "Это событие только для просмотра: перенести его нельзя.",
+          "This event is view-only and cannot be moved.")
+      }
+      if !CalendarEventPolicy.canEdit(event, timeZone: store.timeZone) {
+        return store.text(
+          "Это событие нельзя перенести здесь: оно повторяется, идёт несколько дней или меняет часы. Открой его, чтобы изменить.",
+          "This event cannot be moved here: it repeats, spans days or crosses a clock change. Open it to edit.")
+      }
+      return nil
+    }
+    if let task = entry.task?.task {
+      if task.repeat != .none {
+        return store.text(
+          "Повторяющуюся задачу нельзя перенести отдельно: изменится вся серия. Открой её, чтобы изменить.",
+          "A repeating task cannot be moved on its own: the whole series would change. Open it to edit.")
+      }
+      if entry.completed {
+        return store.text(
+          "Выполненную задачу нельзя перенести.", "A completed task cannot be moved.")
+      }
+      if let start = entry.start, start + task.duration > 1440 {
+        return store.text(
+          "Задача заканчивается после полуночи: перенести её можно только через редактор.",
+          "The task ends after midnight: move it from the editor.")
+      }
+      return nil
+    }
+    return Self.notMovable(store)
+  }
+
+  private static func notMovable(_ store: RitmStore) -> String {
+    store.text("Эту запись нельзя перенести.", "This entry cannot be moved.")
+  }
+
+  /// `onGoogleMove`: saved at once with the same duration, no confirmation. A Ritm task keeps its
+  /// duration too. An ETag conflict or a failed write is reported by `store.write`, and the
+  /// reload below shows the server's version.
   private func move(_ entry: DayOccurrence, to day: String, minute: Int) async {
-    guard let event = entry.event, canDrag(entry),
-      var input = CalendarEventPolicy.draft(event, timeZone: store.timeZone)
-    else {
+    guard movePolicy(entry) == nil else {
       store.errorMessage = store.text(
         "Эту запись нельзя перетащить. Открой её для просмотра.",
         "This entry cannot be dragged. Open it to view it.")
       return
     }
-    input.date = day
-    input.time = TaskSchedule.minuteTime(minute)
-    _ = await store.write { try await $0.updateGoogleEvent(id: event.id, event: input, etag: event.etag) }
+    let time = TaskSchedule.minuteTime(minute)
+    var saved = false
+    if let event = entry.event, var input = CalendarEventPolicy.draft(event, timeZone: store.timeZone) {
+      input.date = day
+      input.time = time
+      saved = await store.write { try await $0.updateGoogleEvent(id: event.id, event: input, etag: event.etag) } != nil
+    } else if let task = entry.task?.task {
+      let patch = TaskPatch(date: .value(day), time: .value(time))
+      saved = await store.write { try await $0.updateTask(id: task.id, patch: patch) } != nil
+    }
+    if saved {
+      store.toasts.show(store.text("Перенесено", "Moved"))
+    } else if store.errorMessage == nil {
+      store.errorMessage = store.text(
+        "Не удалось перенести запись. Попробуй ещё раз.", "Could not move the entry. Try again.")
+    }
     await reload()
   }
 

@@ -443,51 +443,6 @@ struct FinanceDistributionBar: View {
 
 // MARK: - Shared controls
 
-/// The custom segmented control of the calendar, with a sliding active pill.
-struct FinanceSegment<Value: Hashable>: View {
-  let label: String
-  let values: [Value]
-  let title: (Value) -> String
-  @Binding var selection: Value
-  @Namespace private var indicator
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-  var body: some View {
-    HStack(spacing: 3) {
-      ForEach(values, id: \.self) { value in
-        let active = value == selection
-        Button {
-          withAnimation(reduceMotion ? nil : RitmMotion.indicator) { selection = value }
-        } label: {
-          Text(title(value))
-            .ritmFont(13, weight: .medium)
-            .lineLimit(1)
-            .foregroundStyle(active ? RitmTheme.accentColor : RitmTheme.muted)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .background {
-              if active {
-                RoundedRectangle(cornerRadius: 9, style: .circular)
-                  .fill(RitmTheme.panel)
-                  .shadow(color: Color(rgb: 0x3F235F, opacity: 0.07), radius: 5, y: 3)
-                  .matchedGeometryEffect(id: "active", in: indicator)
-              }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(RitmPressStyle(scale: 0.97))
-        .accessibilityAddTraits(active ? .isSelected : [])
-      }
-    }
-    .padding(2)
-    .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 12, style: .circular))
-    .overlay {
-      RoundedRectangle(cornerRadius: 12, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1)
-    }
-    .accessibilityElement(children: .contain)
-    .accessibilityLabel(label)
-  }
-}
-
 struct FinanceStat: Identifiable {
   let title: String
   let value: String

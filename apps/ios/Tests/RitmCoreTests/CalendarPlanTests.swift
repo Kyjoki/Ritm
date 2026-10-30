@@ -64,6 +64,58 @@ final class CalendarPlanTests: XCTestCase {
     XCTAssertEqual(CalendarPlan.snappedStart(rawMinutes: 1430, duration: 50), 1380)
   }
 
+  func testDragTargetKeepsTheGrabPointAndSnapsToQuarterHours() {
+    // 7 columns of 50 pt after a 40 pt time column, 48 pt per hour.
+    func target(_ x: Double, _ y: Double, grab: Double = 10, duration: Int = 60) -> CalendarPlan.DragTarget {
+      CalendarPlan.dragTarget(
+        x: x, y: y, grabY: grab, column: 50, timeColumn: 40, days: 7, hourHeight: 48,
+        duration: duration)
+    }
+    // Card top at 9:00 is y = 432; a finger 10 pt below it is at 442.
+    XCTAssertEqual(target(65, 442), CalendarPlan.DragTarget(dayIndex: 0, minutes: 540))
+    XCTAssertEqual(target(165, 442 + 12), CalendarPlan.DragTarget(dayIndex: 2, minutes: 555), "12 pt = 15 min")
+    XCTAssertEqual(target(165, 442 + 5), CalendarPlan.DragTarget(dayIndex: 2, minutes: 540), "snaps back under 7.5 min")
+    XCTAssertEqual(target(5, -50).dayIndex, 0, "left of the grid stays on the first day")
+    XCTAssertEqual(target(5, -50).minutes, 0)
+    XCTAssertEqual(target(900, 5000).dayIndex, 6, "right of the grid stays on the last day")
+    XCTAssertEqual(target(900, 5000, duration: 90).minutes, 1350, "ends by midnight")
+  }
+
+  func testEntryHitTestUsesTheLaneFrames() {
+    let placed = CalendarPlan.layout([entry("a", 540, 600), entry("b", 560, 620), entry("c", 700, 710)])
+    let a = CalendarPlan.entryFrame(placed.first { $0.entry.key == "a" }!, column: 100, hourHeight: 48)
+    XCTAssertEqual(a.x, 1)
+    XCTAssertEqual(a.width, 48, "two lanes share 100 pt, minus 2")
+    XCTAssertEqual(a.y, 434)
+    XCTAssertEqual(
+      CalendarPlan.entry(at: 20, y: 440, in: placed, column: 100, hourHeight: 48)?.entry.key, "a")
+    XCTAssertEqual(
+      CalendarPlan.entry(at: 80, y: 480, in: placed, column: 100, hourHeight: 48)?.entry.key, "b")
+    XCTAssertNil(CalendarPlan.entry(at: 20, y: 100, in: placed, column: 100, hourHeight: 48))
+    let short = CalendarPlan.entryFrame(placed.first { $0.entry.key == "c" }!, column: 100, hourHeight: 48)
+    XCTAssertEqual(short.height, 22, "short entries keep a 22 pt hit area")
+  }
+
+  func testDragEdgesAndAutoScroll() {
+    XCTAssertEqual(CalendarPlan.dragWeekEdge(x: 10, width: 390), -1)
+    XCTAssertEqual(CalendarPlan.dragWeekEdge(x: 380, width: 390), 1)
+    XCTAssertEqual(CalendarPlan.dragWeekEdge(x: 200, width: 390), 0)
+    XCTAssertEqual(CalendarPlan.dragScrollSpeed(y: 300, height: 600), 0)
+    XCTAssertLessThan(CalendarPlan.dragScrollSpeed(y: 20, height: 600), 0)
+    XCTAssertGreaterThan(CalendarPlan.dragScrollSpeed(y: 590, height: 600), 0)
+    XCTAssertEqual(CalendarPlan.dragScrollSpeed(y: -30, height: 600), -CalendarPlan.dragScrollMaxSpeed)
+    XCTAssertLessThan(
+      abs(CalendarPlan.dragScrollSpeed(y: 50, height: 600)),
+      abs(CalendarPlan.dragScrollSpeed(y: 10, height: 600)), "faster nearer the edge")
+    XCTAssertEqual(CalendarPlan.dragScrollSpeed(y: 10, height: 80), 0, "a tiny viewport never scrolls")
+  }
+
+  func testReleaseOutsideTheGridCancels() {
+    XCTAssertTrue(CalendarPlan.isInside(x: 100, y: 100, width: 390, height: 500))
+    XCTAssertFalse(CalendarPlan.isInside(x: 100, y: -4, width: 390, height: 500))
+    XCTAssertFalse(CalendarPlan.isInside(x: 400, y: 100, width: 390, height: 500))
+  }
+
   func testMonthHasFortyTwoDaysFromTheSundayBeforeTheFirst() {
     let days = CalendarPlan.monthDays(containing: "2026-10-29")
     XCTAssertEqual(days.count, 42)

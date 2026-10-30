@@ -356,40 +356,25 @@ private struct HabitsAnalytics: View {
       + FeatureDate.label(dates.last ?? first, zone: store.timeZone, language: store.language, template: "d MMM")
   }
 
+  /// Switching the period also returns to the current one and clears the selected day.
+  private var periodBinding: Binding<Bool> {
+    Binding(
+      get: { month },
+      set: { value in
+        month = value
+        offset = 0
+        selectedDay = nil
+      })
+  }
+
   private var controls: some View {
     HStack(spacing: 6) {
-      HStack(spacing: 2) {
-        ForEach([false, true], id: \.self) { value in
-          Button {
-            month = value
-            offset = 0
-            selectedDay = nil
-          } label: {
-            Text(value ? store.text("Месяц", "Month") : store.text("Неделя", "Week"))
-              .ritmFont(12, weight: .semibold)
-              .foregroundStyle(month == value ? RitmTheme.accentColor : RitmTheme.muted)
-              .padding(.horizontal, 13)
-              .frame(minHeight: 44)
-              .background {
-                if month == value {
-                  RoundedRectangle(cornerRadius: 8, style: .circular).fill(RitmTheme.glassRaised)
-                    .shadow(color: Color(rgb: 0x3E236B, opacity: 0.09), radius: 5, y: 3)
-                }
-              }
-              .contentShape(Rectangle())
-          }
-          .buttonStyle(RitmPressStyle(scale: 0.97))
-          .accessibilityAddTraits(month == value ? .isSelected : [])
-        }
-      }
-      .padding(3)
-      .background(RitmTheme.soft.opacity(0.74), in: RoundedRectangle(cornerRadius: 11, style: .circular))
-      .overlay {
-        RoundedRectangle(cornerRadius: 11, style: .circular).strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
-      }
+      RitmSegmentedControl(
+        label: store.text("Период аналитики", "Analytics period"), values: [false, true],
+        title: { $0 ? store.text("Месяц", "Month") : store.text("Неделя", "Week") },
+        selection: periodBinding, fontSize: 12, fillsWidth: false
+      )
       .padding(.trailing, 5)
-      .accessibilityElement(children: .contain)
-      .accessibilityLabel(store.text("Период аналитики", "Analytics period"))
       HabitIconButton(symbol: "chevron.left", label: store.text("Предыдущий период", "Previous period")) {
         offset -= 1
         selectedDay = nil
