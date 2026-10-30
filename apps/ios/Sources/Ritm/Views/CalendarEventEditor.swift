@@ -306,6 +306,7 @@ struct CalendarEventEditor: View {
             }
             busy = false
             if success {
+              store.toasts.show(store.text("Событие удалено", "Event deleted"))
               await onSave?()
               dismiss()
             }
@@ -345,6 +346,10 @@ struct CalendarEventEditor: View {
     }
     busy = false
     if result != nil {
+      store.toasts.show(
+        event == nil
+          ? store.text("Событие добавлено", "Event added")
+          : store.text("Событие сохранено", "Event saved"))
       await onSave?()
       dismiss()
     }

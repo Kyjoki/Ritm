@@ -179,7 +179,10 @@ struct NativeTaskEditor: View {
             busy = true
             deleted = await store.write { try await $0.deleteTask(id: task.id) }
             busy = false
-            if deleted != nil { await onSave?() }
+            if deleted != nil {
+              store.toasts.show(store.text("Задача удалена", "Task deleted"))
+              await onSave?()
+            }
           }
         }
       } message: {
@@ -261,6 +264,10 @@ struct NativeTaskEditor: View {
     }
     busy = false
     if result != nil {
+      store.toasts.show(
+        task == nil && input.date != nil
+          ? store.text("Запись добавлена в календарь", "Entry added to calendar")
+          : store.text("Задача сохранена", "Task saved"))
       await onSave?()
       dismiss()
     }

@@ -36,6 +36,39 @@ private struct FinanceEmptyLine: View {
   }
 }
 
+/// Small muted explanatory lines under a chart or a row of tiles.
+private struct FinanceNotes: View {
+  let lines: [String]
+
+  var body: some View {
+    if !lines.isEmpty {
+      VStack(alignment: .leading, spacing: 4) {
+        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+          FinanceEmptyLine(text: line)
+        }
+      }
+    }
+  }
+}
+
+private func financeSymbol(_ currency: FinanceCurrency) -> String {
+  switch currency {
+  case .KZT: "₸"
+  case .USD: "$"
+  case .EUR: "€"
+  case .RUB: "₽"
+  }
+}
+
+/// Said only when the first data day really falls inside the period.
+private func financeShortWindow(
+  asOf: String?, period: FinancePeriod, today: String, format: FinanceFormat
+) -> String? {
+  guard let asOf, asOf > FinanceWallet.interval(period, today: today).start else { return nil }
+  let day = format.date(asOf, template: "d MMMM yyyy")
+  return format.text("Данные есть с \(day).", "Data starts on \(day).")
+}
+
 private func financeDivider() -> some View {
   Rectangle().fill(RitmTheme.line).frame(height: 1)
 }
@@ -121,11 +154,42 @@ struct FinanceOverviewSections: View {
       entries, currency: currency, period: period, today: today)
     let stats = FinanceWallet.overviewStats(entries, currency: currency, period: period, today: today)
     let key = "overview-\(currency.rawValue)-\(period.rawValue)"
+    let range = FinanceWallet.interval(period, today: today)
+    let firstDay = cards.filter { $0.currency == currency && $0.balanceMinor != nil }
+      .compactMap(\.asOf).min()
+    var chartNotes: [String] = []
+    if let window = financeShortWindow(
+      asOf: firstDay, period: period, today: today, format: format)
+    {
+      chartNotes.append(window)
+    }
+    if currencies.count > 1 {
+      chartNotes.append(
+        format.text(
+          "Средства в других валютах показаны отдельно и не складываются.",
+          "Funds in other currencies are shown separately and never added together."))
+    }
+    var statNotes = [
+      format.text(
+        "Показатели за \(format.range(range)), \(financeSymbol(currency)).",
+        "Figures for \(format.range(range)), \(financeSymbol(currency)).")
+    ]
+    statNotes.append(contentsOf: otherCurrencyLines(period: period))
+    statNotes.append(
+      format.text(
+        "Переводы между своими счетами не считаются доходом или расходом.",
+        "Transfers between your own accounts are not income or spending."))
     return RitmCard(reveal: 3) {
       VStack(alignment: .leading, spacing: 14) {
-        FinanceCardTitle(
-          title: format.text("Динамика средств", "Funds over time"),
-          trailing: format.range(FinanceWallet.interval(period, today: today)))
+        VStack(alignment: .leading, spacing: 4) {
+          FinanceCardTitle(
+            title: format.text("Динамика средств", "Funds over time"),
+            trailing: format.range(range))
+          FinanceEmptyLine(
+            text: format.text(
+              "Только \(financeSymbol(currency)), без пересчёта валют",
+              "Only \(financeSymbol(currency)), no currency conversion"))
+        }
         if currencies.count > 1 {
           FinanceSegment(
             label: format.text("Валюта", "Currency"), values: currencies, title: { $0.rawValue },
@@ -138,6 +202,7 @@ struct FinanceOverviewSections: View {
           points: series, period: period, currency: currency, format: format, drawKey: key, log: log
         )
         .id(key)
+        FinanceNotes(lines: chartNotes)
         financeDivider()
         FinanceStatTiles(
           stats: [
@@ -150,7 +215,21 @@ struct FinanceOverviewSections: View {
               format.text("Разница", "Net"), stats.incomeMinor - stats.expenseMinor,
               FinanceTone.net(stats.incomeMinor - stats.expenseMinor), currency),
           ])
+        FinanceNotes(lines: statNotes)
       }
+    }
+  }
+
+  /// One line per currency other than the selected one; the totals are never summed.
+  private func otherCurrencyLines(period: FinancePeriod) -> [String] {
+    currencies.filter { $0 != currency }.map { other in
+      let value = FinanceWallet.overviewStats(entries, currency: other, period: period, today: today)
+      let income = format.signed(value.incomeMinor, other)
+      let spending = format.signed(-value.expenseMinor, other)
+      let net = format.signed(value.incomeMinor - value.expenseMinor, other)
+      return format.text(
+        "В \(other.rawValue): доходы \(income) · расходы \(spending) · разница \(net)",
+        "In \(other.rawValue): income \(income) · spending \(spending) · net \(net)")
     }
   }
 
@@ -398,6 +477,28 @@ struct FinanceAccountSections: View {
     let series = FinanceWallet.balanceSeries(entries, card: card, period: period, today: today)
     let key = "card-\(card.id)-\(period.rawValue)"
     let moved = FinanceWallet.stats(entries, card: card, period: period, today: today)
+    let range = FinanceWallet.interval(period, today: today)
+    let chartNotes = [
+      financeShortWindow(asOf: card.asOf, period: period, today: today, format: format)
+    ].compactMap { $0 }
+    var statNotes: [String] = []
+    switch card.kind {
+    case .account:
+      statNotes = [
+        format.text("Показатели за \(format.range(range)).", "Figures for \(format.range(range))."),
+        format.text(
+          "Переводы между своими счетами не считаются доходом или расходом.",
+          "Transfers between your own accounts are not income or spending."),
+      ]
+    case .deposit:
+      statNotes = [
+        format.text(
+          "Показатели за \(format.range(range)). Это переводы со своих счетов, не доходы и не расходы.",
+          "Figures for \(format.range(range)). These are transfers from your own accounts, not income or spending."
+        )
+      ]
+    case .stocks: break
+    }
     return RitmCard(reveal: 3) {
       VStack(alignment: .leading, spacing: 14) {
         FinanceCardTitle(
@@ -411,8 +512,10 @@ struct FinanceAccountSections: View {
           log: log
         )
         .id(key)
+        FinanceNotes(lines: chartNotes)
         financeDivider()
         FinanceStatTiles(stats: stats)
+        FinanceNotes(lines: statNotes)
         if card.kind == .account, moved.transfersInMinor > 0 || moved.transfersOutMinor > 0 {
           Text(
             format.text("Переводы между счетами: ", "Transfers between accounts: ")

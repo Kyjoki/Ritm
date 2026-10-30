@@ -1,11 +1,34 @@
 import RitmCore
 import SwiftUI
 
+/// Where the theme reveal grows from: the selected theme tile when it is on screen, otherwise
+/// the save button. Frames are in window coordinates and only read at the moment of saving.
+@MainActor private final class SettingsRevealFrames {
+  var tiles: [String: CGRect] = [:]
+  var save: CGRect = .zero
+}
+
+/// A theme reveal armed by Save, started once the app really switches colour scheme.
+private struct ThemeRevealRequest {
+  let origin: CGPoint
+  let expires: Date
+}
+
+/// Inputs that decide when the one-shot scroll to the notifications card can run.
+private struct NotificationScrollTrigger: Equatable {
+  let requested: Bool
+  let ready: Bool
+  let onSettings: Bool
+}
+
 /// «Настройки»: src/features/SettingsPage.tsx at 390 px.
 struct AccountView: View {
   @Environment(RitmStore.self) private var store
   @Environment(RitmNavigation.self) private var navigation
   @Environment(\.openURL) private var openURL
+  @Environment(\.colorScheme) private var scheme
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.ritmPageActive) private var pageActive
   @State private var draft = AccountSettings()
   @State private var baseline: AccountSettings?
   @State private var google: GoogleCalendarStatus?
@@ -20,6 +43,10 @@ struct AccountView: View {
   @State private var saved = false
   @State private var saving = false
   @State private var notificationError: String?
+  @State private var revealFrames = SettingsRevealFrames()
+  @State private var themeReveal: ThemeRevealRequest?
+  @State private var scrollTick = 0
+  private static let notificationsAnchor = "settings-notifications"
 
   private var dirty: Bool { baseline.map { $0 != draft } ?? false }
   private var initials: String {
@@ -48,51 +75,59 @@ struct AccountView: View {
   var body: some View {
     ZStack {
       RitmBackground()
-      ScrollView {
-        VStack(alignment: .leading, spacing: 0) {
-          RitmShellHeader()
-          RitmPageHeading(
-            eyebrow: store.text("Ritm под твой образ жизни", "Ritm fits your life"),
-            title: store.text("Настройки", "Settings"),
-            description: store.text("Твоё пространство. Твои правила.", "Your space. Your rules.")
-          )
-          if let message = store.errorMessage { RitmErrorBanner(message: message).padding(.bottom, 12) }
-          MutationRecoveryView()
-          if baseline != nil {
-            VStack(spacing: 14) {
-              languageCard.ritmPageReveal(index: 0)
-              accountCard.ritmPageReveal(index: 1)
-              appearanceCard.ritmPageReveal(index: 2)
-              notificationsCard.ritmPageReveal(index: 3)
-              connectionsCard.ritmPageReveal(index: 4)
-              ServerAddressCard().ritmPageReveal(index: 5)
+      ScrollViewReader { proxy in
+        ScrollView {
+          VStack(alignment: .leading, spacing: 0) {
+            RitmShellHeader()
+            RitmPageHeading(
+              eyebrow: store.text("Ritm под твой образ жизни", "Ritm fits your life"),
+              title: store.text("Настройки", "Settings"),
+              description: store.text("Твоё пространство. Твои правила.", "Your space. Your rules.")
+            )
+            if let message = store.errorMessage { RitmErrorBanner(message: message).padding(.bottom, 12) }
+            MutationRecoveryView()
+            if baseline != nil {
+              VStack(spacing: 14) {
+                languageCard.ritmPageReveal(index: 0)
+                accountCard.ritmPageReveal(index: 1)
+                appearanceCard.ritmPageReveal(index: 2)
+                notificationsCard.ritmPageReveal(index: 3).id(Self.notificationsAnchor)
+                connectionsCard.ritmPageReveal(index: 4)
+                ServerAddressCard().ritmPageReveal(index: 5)
+              }
+              .padding(.top, 22)
+              .disabled(saving)
+              saveBar
             }
-            .padding(.top, 22)
-            .disabled(saving)
-            saveBar
+            Button {
+              Task { await store.signOut() }
+            } label: {
+              Label(store.text("Выйти из аккаунта", "Sign out"), systemImage: "rectangle.portrait.and.arrow.right")
+                .ritmFont(12, weight: .medium)
+                .foregroundStyle(RitmTheme.muted)
+                .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(RitmPressStyle(scale: 0.97))
+            .disabled(store.isMutating)
+            .padding(.top, 17)
+            RitmPageFooter()
           }
-          Button {
-            Task { await store.signOut() }
-          } label: {
-            Label(store.text("Выйти из аккаунта", "Sign out"), systemImage: "rectangle.portrait.and.arrow.right")
-              .ritmFont(12, weight: .medium)
-              .foregroundStyle(RitmTheme.muted)
-              .frame(maxWidth: .infinity, minHeight: 44)
-          }
-          .buttonStyle(RitmPressStyle(scale: 0.97))
-          .disabled(store.isMutating)
-          .padding(.top, 17)
-          RitmPageFooter()
+          .padding(.horizontal, 16)
+          .padding(.bottom, 28)
+          .frame(maxWidth: 700)
+          .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 28)
-        .frame(maxWidth: 700)
-        .frame(maxWidth: .infinity)
-      }
-      .scrollDismissesKeyboard(.interactively)
-      .refreshable {
-        await store.refresh()
-        await loadIntegrations()
+        .scrollDismissesKeyboard(.interactively)
+        .refreshable {
+          await store.refresh()
+          await loadIntegrations()
+        }
+        .task(id: scrollTrigger) { await awaitNotificationsScroll() }
+        .onChange(of: scrollTick) { _, _ in
+          withAnimation(reduceMotion ? nil : RitmMotion.easeInOut(0.5)) {
+            proxy.scrollTo(Self.notificationsAnchor, anchor: .top)
+          }
+        }
       }
     }
     .toolbar(.hidden, for: .navigationBar)
@@ -104,6 +139,7 @@ struct AccountView: View {
     .onChange(of: store.lastSyncedAt) { _, _ in
       if navigation.section == .settings { Task { await loadIntegrations() } }
     }
+    .onChange(of: scheme) { _, _ in startThemeReveal() }
     .onChange(of: draft) { _, _ in
       saved = false
       saveError = nil
@@ -212,9 +248,9 @@ struct AccountView: View {
         .padding(.top, 16)
         .padding(.bottom, 17)
       HStack(spacing: 8) {
-        SettingsThemeTile(theme: .light, title: store.text("Светлая", "Light"), symbol: "sun.max", selected: draft.theme == .light) { draft.theme = .light }
-        SettingsThemeTile(theme: .dark, title: store.text("Тёмная", "Dark"), symbol: "moon", selected: draft.theme == .dark) { draft.theme = .dark }
-        SettingsThemeTile(theme: .system, title: store.text("Системная", "System"), symbol: "sparkles", selected: draft.theme == .system) { draft.theme = .system }
+        themeTile(.light, key: "light", title: store.text("Светлая", "Light"), symbol: "sun.max")
+        themeTile(.dark, key: "dark", title: store.text("Тёмная", "Dark"), symbol: "moon")
+        themeTile(.system, key: "system", title: store.text("Системная", "System"), symbol: "sparkles")
       }
       .accessibilityElement(children: .contain)
       .accessibilityLabel(store.text("Тема приложения", "App theme"))
@@ -223,6 +259,13 @@ struct AccountView: View {
       }
       SettingsHint(text: store.text("Новое оформление появится после сохранения.", "The new look appears after you save."))
     }
+  }
+
+  private func themeTile(_ theme: Theme, key: String, title: String, symbol: String) -> some View {
+    SettingsThemeTile(theme: theme, title: title, symbol: symbol, selected: draft.theme == theme) {
+      draft.theme = theme
+    }
+    .ritmFrameReader(active: pageActive) { revealFrames.tiles[key] = $0 }
   }
 
   private var notificationsCard: some View {
@@ -491,6 +534,7 @@ struct AccountView: View {
         Task { await saveSettings() }
       }
       .buttonStyle(RitmPrimaryButtonStyle(minHeight: 48))
+      .ritmFrameReader(active: pageActive) { revealFrames.save = $0 }
       .disabled(!dirty || saving || !store.canWrite)
       if dirty {
         Button(store.text("Отменить изменения", "Discard changes")) {
@@ -583,14 +627,60 @@ struct AccountView: View {
     value.email = value.email.trimmingCharacters(in: .whitespacesAndNewlines)
     saving = true
     defer { saving = false }
+    armThemeReveal(for: value.theme)
     if let result = await store.saveSettings(value) {
       baseline = result
       draft = result
       saved = true
       await store.updateLocalNotifications()
-    } else if let message = store.errorMessage {
-      saveError = message
+    } else {
+      themeReveal = nil
+      if let message = store.errorMessage { saveError = message }
     }
+  }
+
+  // MARK: Theme reveal
+
+  /// Saving a different effective theme switches the whole app, so it gets the same circular
+  /// reveal as the top-bar toggle. The snapshot of the old look is taken when the scheme
+  /// actually changes (`startThemeReveal`), which is after the server accepted the save.
+  private func armThemeReveal(for theme: Theme) {
+    let toDark = theme == .system ? RitmThemeReveal.systemIsDark : theme == .dark
+    guard toDark != (scheme == .dark) else {
+      themeReveal = nil
+      return
+    }
+    let bounds = RitmThemeReveal.windowBounds
+    let tile = revealFrames.tiles[theme.rawValue]
+    let anchor = tile.flatMap { bounds.contains($0) ? $0 : nil } ?? revealFrames.save
+    let origin = anchor == .zero ? CGPoint(x: bounds.midX, y: bounds.maxY - 120) : CGPoint(x: anchor.midX, y: anchor.midY)
+    themeReveal = ThemeRevealRequest(origin: origin, expires: Date().addingTimeInterval(10))
+  }
+
+  private func startThemeReveal() {
+    guard let request = themeReveal else { return }
+    themeReveal = nil
+    guard request.expires > Date() else { return }
+    RitmThemeReveal.run(origin: request.origin, reduceMotion: reduceMotion) {}
+  }
+
+  // MARK: Scroll to notifications
+
+  private var scrollTrigger: NotificationScrollTrigger {
+    NotificationScrollTrigger(
+      requested: navigation.scrollToNotifications, ready: baseline != nil,
+      onSettings: navigation.section == .settings)
+  }
+
+  /// «Настройки уведомлений» in the bell popover: once the page is shown and its cards exist,
+  /// wait for the reveal to lay out, then scroll once.
+  private func awaitNotificationsScroll() async {
+    let trigger = scrollTrigger
+    guard trigger.requested, trigger.ready, trigger.onSettings else { return }
+    try? await Task.sleep(for: .milliseconds(350))
+    guard !Task.isCancelled, navigation.scrollToNotifications else { return }
+    navigation.scrollToNotifications = false
+    scrollTick += 1
   }
 
   private func disconnect(_ kind: IntegrationKind) async {

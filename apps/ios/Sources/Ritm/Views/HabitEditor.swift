@@ -120,7 +120,13 @@ struct HabitEditor: View {
     } else {
       result = await store.write { try await $0.createHabit(input) }
     }
-    if result != nil { dismiss() }
+    if result != nil {
+      store.toasts.show(
+        habit == nil
+          ? store.text("Привычка добавлена", "Habit added")
+          : store.text("Привычка сохранена", "Habit saved"))
+      dismiss()
+    }
   }
 }
 func habitSymbol(_ icon: HabitIcon?) -> String {

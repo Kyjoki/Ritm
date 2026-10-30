@@ -40,6 +40,7 @@ final class RitmStore {
   private(set) var financeFailed = false
   var financeFocus: FinanceFocus?
   let notices = FinanceNoticeCenter()
+  let toasts = RitmToastCenter()
 
   /// The Ritm server this device talks to. Changed only through `changeServer(to:)`.
   private(set) var serverAddress: ServerAddress

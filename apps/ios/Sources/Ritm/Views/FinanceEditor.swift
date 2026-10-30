@@ -248,6 +248,19 @@ struct FinanceEditor: View {
       }
     }
   }
+  private func savedToast(name: String) -> String {
+    if entry != nil { return store.text("Запись сохранена", "Record saved") }
+    switch kind {
+    case .income, .expense, .transfer:
+      return store.text("Операция добавлена", "Transaction added")
+    case .account, .deposit:
+      return name.isEmpty
+        ? store.text("Счёт добавлен", "Account added")
+        : store.text("Счёт «\(name)» добавлен", "Account “\(name)” added")
+    default:
+      return store.text("Запись добавлена", "Record added")
+    }
+  }
   private func save() async {
     validation = nil
     let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -338,6 +351,7 @@ struct FinanceEditor: View {
     }
     saving = false
     if result != nil {
+      store.toasts.show(savedToast(name: trimmedName))
       await onSave()
       dismiss()
     }

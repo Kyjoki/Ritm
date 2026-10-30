@@ -64,6 +64,15 @@ enum RitmThemeReveal {
     overlay = nil
   }
 
+  /// The window the reveal covers, for choosing an origin that is on screen.
+  static var windowBounds: CGRect { keyWindow()?.bounds ?? .zero }
+
+  /// Whether the device itself is in dark mode, ignoring the app's own colour-scheme override.
+  static var systemIsDark: Bool {
+    let screen = keyWindow()?.windowScene?.screen
+    return screen?.traitCollection.userInterfaceStyle == .dark
+  }
+
   private static func keyWindow() -> UIWindow? {
     UIApplication.shared.connectedScenes
       .compactMap { $0 as? UIWindowScene }

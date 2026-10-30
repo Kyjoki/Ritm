@@ -9,6 +9,9 @@ final class RitmNavigation {
   private(set) var visited: Set<RitmSection> = [.day]
   var assistantPrompt: String?
   var habitCelebration: String?
+  /// One-shot: set by «Настройки уведомлений» in the bell popover, consumed by Settings once it
+  /// has scrolled to the notifications card.
+  var scrollToNotifications = false
 }
 enum RitmSection: String, CaseIterable, Hashable {
   case day, calendar, habits, finance, assistant, settings
@@ -36,6 +39,9 @@ struct RitmRootView: View {
   @State private var navigation = RitmNavigation()
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var showingMore = false
+  /// The page being left: it keeps fading on top of the new one for the length of the exit.
+  @State private var leaving: RitmSection?
+  @State private var leaveTask: Task<Void, Never>?
   private var visitedSections: [RitmSection] {
     RitmSection.allCases.filter { navigation.visited.contains($0) }
   }
@@ -54,13 +60,14 @@ struct RitmRootView: View {
         ZStack {
           ZStack {
             ForEach(visitedSections, id: \.self) { section in
-              // The web switches pages instantly; only the nav indicator moves.
+              // The incoming page appears at once and plays its own reveal; the outgoing one
+              // fades for 0.12 s (MOTION.md §2) on top, then stays active until it is gone.
               NavigationStack { sectionView(section) }
-                .opacity(navigation.section == section ? 1 : 0)
+                .modifier(RitmPageSwap(active: navigation.section == section))
                 .allowsHitTesting(navigation.section == section)
                 .accessibilityHidden(navigation.section != section)
-                .environment(\.ritmPageActive, navigation.section == section)
-                .zIndex(navigation.section == section ? 1 : 0)
+                .environment(\.ritmPageActive, navigation.section == section || leaving == section)
+                .zIndex(pageLayer(section))
                 .toolbarBackground(.hidden, for: .navigationBar)
             }
           }
@@ -82,6 +89,8 @@ struct RitmRootView: View {
           }
           FinanceNotificationOverlay(openNotice: openNotice, openSettings: openNotificationSettings)
             .zIndex(1)
+          RitmToastOverlay()
+            .zIndex(2)
         }
         .overlayPreferenceValue(RitmMoreAnchorKey.self) { anchor in
           GeometryReader { proxy in
@@ -104,11 +113,26 @@ struct RitmRootView: View {
     .onChange(of: store.notices.isOpen) { _, isOpen in
       if isOpen { setMore(false) }
     }
-    .onChange(of: navigation.section) { _, _ in
+    .onChange(of: navigation.section) { old, _ in
+      beginLeaving(old)
       setMore(false)
       store.notices.closePopover()
       UIApplication.shared.sendAction(
         #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+  }
+
+  private func pageLayer(_ section: RitmSection) -> Double {
+    section == navigation.section ? 1 : section == leaving ? 2 : 0
+  }
+
+  private func beginLeaving(_ old: RitmSection) {
+    leaving = old
+    leaveTask?.cancel()
+    leaveTask = Task { @MainActor in
+      try? await Task.sleep(for: .seconds(RitmMotion.pageExit + 0.04))
+      guard !Task.isCancelled else { return }
+      leaving = nil
     }
   }
 
@@ -141,6 +165,7 @@ struct RitmRootView: View {
 
   private func openNotificationSettings() {
     store.notices.closePopover()
+    navigation.scrollToNotifications = true
     navigation.section = .settings
   }
 
@@ -206,22 +231,6 @@ struct RitmShellHeader: View {
     }
   }
 
-  private var toggleFrameReader: some View {
-    GeometryReader { proxy in
-      let frame = proxy.frame(in: .global)
-      Color.clear
-        .onAppear { record(frame) }
-        .onChange(of: frame) { _, value in record(value) }
-        .onChange(of: pageActive) { _, _ in record(frame) }
-    }
-  }
-
-  /// Pages kept alive behind the active one must not move the origin.
-  private func record(_ frame: CGRect) {
-    guard pageActive else { return }
-    toggleFrame.frame = frame
-  }
-
   var body: some View {
     HStack(spacing: 8) {
       RitmMark()
@@ -250,11 +259,48 @@ struct RitmShellHeader: View {
           .background { RitmHeaderIconBackground() }
       }
       .buttonStyle(RitmPressStyle(scale: 0.9))
-      .background { toggleFrameReader }
+      .ritmFrameReader(active: pageActive) { toggleFrame.frame = $0 }
       .disabled(store.pendingTheme != nil)
       .accessibilityLabel(store.text("Переключить тему", "Switch appearance"))
     }
     .frame(height: 62)
+  }
+}
+
+/// Page switch: appearing is instant; leaving fades over 0.12 s with a 4 pt lift (easeIn).
+/// Reduce Motion: a plain fade without the lift.
+private struct RitmPageSwap: ViewModifier {
+  let active: Bool
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  private static let lift: CGFloat = -4
+
+  private var exit: Animation {
+    reduceMotion
+      ? RitmMotion.reducedFade
+      : .timingCurve(0.42, 0, 1, 1, duration: RitmMotion.pageExit)
+  }
+
+  func body(content: Content) -> some View {
+    content
+      .opacity(active ? 1 : 0)
+      .offset(y: active || reduceMotion ? 0 : Self.lift)
+      .animation(active ? nil : exit, value: active)
+  }
+}
+
+extension View {
+  /// Reports the view's frame in window coordinates whenever it moves, while `active`. Pages
+  /// kept alive behind the visible one must not move a shared origin.
+  func ritmFrameReader(active: Bool, record: @escaping (CGRect) -> Void) -> some View {
+    background {
+      GeometryReader { proxy in
+        let frame = proxy.frame(in: .global)
+        Color.clear
+          .onAppear { if active { record(frame) } }
+          .onChange(of: frame) { _, value in if active { record(value) } }
+          .onChange(of: active) { _, _ in if active { record(frame) } }
+      }
+    }
   }
 }
 
