@@ -304,39 +304,25 @@ struct AssistantView: View {
           .frame(width: 7, height: 7)
           .accessibilityLabel(configured ? store.text("Ключ настроен", "Key configured") : store.text("Не настроен", "Not configured"))
       }
-      HStack(spacing: 4) {
-        modeButton(.assistant, store.text("Помощник", "Assistant"))
-        modeButton(.ideaReview, store.text("Разбор идей", "Idea review"))
-      }
-      .padding(4)
-      .ritmGlass(in: Capsule())
-      .accessibilityElement(children: .contain)
-      .accessibilityLabel(store.text("Режим ИИ", "AI mode"))
+      RitmSegmentedControl(
+        label: store.text("Режим ИИ", "AI mode"), values: [ChatMode.assistant, .ideaReview],
+        title: { $0 == .ideaReview ? store.text("Разбор идей", "Idea review") : store.text("Помощник", "Assistant") },
+        selection: modeBinding
+      )
+      .disabled(sending || failed)
     }
     .padding(.vertical, 17)
     .padding(.horizontal, 16)
   }
 
-  private func modeButton(_ value: ChatMode, _ title: String) -> some View {
-    let active = mode == value
-    return Button {
-      mode = value
-      if value == .assistant { discussionID = nil }
-    } label: {
-      Text(title)
-        .ritmFont(13, weight: .bold)
-        .foregroundStyle(active ? RitmTheme.accentColor : RitmTheme.muted)
-        .frame(maxWidth: .infinity, minHeight: 44)
-        .background {
-          if active {
-            Color.clear.ritmGlassThumb(in: Capsule(), tint: RitmTheme.accentColor.opacity(0.12))
-          }
-        }
-        .contentShape(Rectangle())
-    }
-    .buttonStyle(RitmPressStyle(scale: 0.97))
-    .disabled(sending || failed)
-    .accessibilityAddTraits(active ? .isSelected : [])
+  /// Switching to the assistant leaves a discussion.
+  private var modeBinding: Binding<ChatMode> {
+    Binding(
+      get: { mode },
+      set: { value in
+        mode = value
+        if value == .assistant { discussionID = nil }
+      })
   }
 
   private var welcome: some View {

@@ -126,9 +126,9 @@ struct SettingsThemeTile: View {
       .frame(maxWidth: .infinity, minHeight: 104)
       .background {
         if selected {
-          Color.clear.ritmGlassThumb(
-            in: RoundedRectangle(cornerRadius: 14, style: .circular),
-            tint: RitmTheme.accentColor.opacity(0.14))
+          RoundedRectangle(cornerRadius: 14, style: .circular)
+            .fill(RitmTheme.ctaGradient)
+            .opacity(0.2)
         }
       }
       .overlay {

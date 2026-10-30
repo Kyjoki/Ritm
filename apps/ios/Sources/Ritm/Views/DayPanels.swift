@@ -112,42 +112,12 @@ struct DayTasksPanel: View {
 
   // MARK: Day switch and quick add
 
-  /// `.dashboard-task-days`. Each half keeps a 44 pt touch height, 2 pt more than the web pill.
+  /// `.dashboard-task-days`: Сегодня / Завтра.
   private var dayPicker: some View {
-    HStack(spacing: 3) {
-      dayButton(store.text("Сегодня", "Today"), selected: !tomorrow) { tomorrow = false }
-      dayButton(store.text("Завтра", "Tomorrow"), selected: tomorrow) { tomorrow = true }
-    }
-    .padding(.horizontal, 3)
-    .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 11, style: .circular))
-    .overlay {
-      RoundedRectangle(cornerRadius: 11, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1)
-    }
-    .accessibilityElement(children: .contain)
-    .accessibilityLabel(store.text("День для списка задач", "Task list day"))
-  }
-
-  private func dayButton(_ title: String, selected: Bool, action: @escaping () -> Void)
-    -> some View
-  {
-    Button(action: action) {
-      Text(title)
-        .ritmFont(12, weight: selected ? .bold : .regular)
-        .foregroundStyle(selected ? RitmTheme.accentColor : RitmTheme.muted)
-        .padding(.horizontal, 13)
-        .frame(minWidth: 86, minHeight: 36)
-        .background {
-          if selected {
-            RoundedRectangle(cornerRadius: 8, style: .circular)
-              .fill(RitmTheme.panel)
-              .shadow(color: Color(rgb: 0x4A2B6B, opacity: 0.045), radius: 14, y: 8)
-          }
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-    }
-    .buttonStyle(RitmPressStyle())
-    .accessibilityAddTraits(selected ? .isSelected : [])
+    RitmSegmentedControl(
+      label: store.text("День для списка задач", "Task list day"), values: [false, true],
+      title: { $0 ? store.text("Завтра", "Tomorrow") : store.text("Сегодня", "Today") },
+      selection: $tomorrow, fontSize: 13, fillsWidth: false)
   }
 
   private var quickAdd: some View {
