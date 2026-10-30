@@ -191,12 +191,8 @@ struct HabitsView: View {
     .foregroundStyle(RitmTheme.accentColor)
     .padding(.vertical, 13)
     .padding(.horizontal, 17)
-    .background(RitmTheme.glassRaised, in: RoundedRectangle(cornerRadius: 18, style: .circular))
-    .overlay {
-      RoundedRectangle(cornerRadius: 18, style: .circular)
-        .strokeBorder(RitmTheme.mix(RitmTheme.accentColor, 0.48, into: RitmTheme.panelBorder), lineWidth: 1)
-    }
-    .shadow(color: Color(rgb: 0x3C1E5F, opacity: 0.18), radius: 21, y: 18)
+    .background(RitmTheme.glassRaised.opacity(0.5), in: Capsule())
+    .ritmGlass(in: Capsule())
     .padding(16)
     .transition(.opacity.combined(with: .move(edge: .bottom)))
     .accessibilityAddTraits(.isStaticText)
@@ -714,13 +710,11 @@ struct HabitIconButton: View {
         .font(.system(size: 15, weight: .medium))
         .foregroundStyle(RitmTheme.muted)
         .frame(width: 44, height: 44)
-        .background(RitmTheme.glassRaised, in: RoundedRectangle(cornerRadius: 12, style: .circular))
-        .overlay {
-          RoundedRectangle(cornerRadius: 12, style: .circular).strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
-        }
+        .ritmGlass(in: Circle(), interactive: true)
+        .contentShape(Circle())
         .opacity(isEnabled ? 1 : 0.45)
     }
-    .buttonStyle(RitmPressStyle())
+    .buttonStyle(RitmGlassButtonStyle())
     .accessibilityLabel(label)
   }
 }

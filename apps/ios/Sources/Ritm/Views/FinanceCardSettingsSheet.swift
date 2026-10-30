@@ -33,7 +33,7 @@ struct FinanceCardSettingsSheet: View {
       }
     }
     .presentationDetents([.medium, .large])
-    .presentationDragIndicator(.visible)
+    .ritmSheetGrabber()
     .presentationCornerRadius(22)
   }
 
@@ -48,7 +48,7 @@ struct FinanceCardSettingsSheet: View {
           .accessibilityAddTraits(.isHeader)
         Spacer(minLength: 12)
         Button(format.text("Готово", "Done")) { dismiss() }
-          .buttonStyle(RitmTextButtonStyle(size: 14))
+          .buttonStyle(RitmSecondaryButtonStyle())
       }
       Text(
         format.text(

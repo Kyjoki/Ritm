@@ -125,11 +125,7 @@ struct DayHabitsCard: View {
         .font(.system(size: 14, weight: .medium))
         .foregroundStyle(RitmTheme.muted)
         .frame(width: 32, height: 32)
-        .background(RitmTheme.glassRaised, in: RoundedRectangle(cornerRadius: 10, style: .circular))
-        .overlay {
-          RoundedRectangle(cornerRadius: 10, style: .circular)
-            .strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
-        }
+        .ritmGlass(in: Circle(), interactive: true)
         .frame(width: 44, height: 44)
         .contentShape(Rectangle())
     }

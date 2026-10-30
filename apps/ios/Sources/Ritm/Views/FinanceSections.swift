@@ -120,8 +120,8 @@ struct FinanceOverviewSections: View {
         .ritmText(.button)
         .foregroundStyle(RitmTheme.ctaInk)
         .frame(maxWidth: .infinity, minHeight: 44)
-        .background(RitmTheme.ctaGradient, in: RoundedRectangle(cornerRadius: 13, style: .circular))
-        .shadow(color: RitmTheme.ctaShadow, radius: 13, y: 10)
+        .ritmGlass(in: Capsule(), prominent: true, interactive: true)
+        .contentShape(Capsule())
       }
       .disabled(!actions.canWrite)
       Menu {
@@ -140,14 +140,8 @@ struct FinanceOverviewSections: View {
         .ritmText(.button)
         .foregroundStyle(RitmTheme.accentColor)
         .frame(maxWidth: .infinity, minHeight: 44)
-        .background {
-          RoundedRectangle(cornerRadius: 13, style: .circular)
-            .fill(RitmTheme.panel)
-            .overlay {
-              RoundedRectangle(cornerRadius: 13, style: .circular)
-                .strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
-            }
-        }
+        .ritmGlass(in: Capsule(), interactive: true)
+        .contentShape(Capsule())
       }
       .disabled(!actions.canWrite)
     }
@@ -429,14 +423,8 @@ struct FinanceAccountSections: View {
         .font(.system(size: 18, weight: .medium))
         .foregroundStyle(RitmTheme.accentColor)
         .frame(width: 44, height: 44)
-        .background {
-          RoundedRectangle(cornerRadius: 13, style: .circular)
-            .fill(RitmTheme.panel)
-            .overlay {
-              RoundedRectangle(cornerRadius: 13, style: .circular)
-                .strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
-            }
-        }
+        .ritmGlass(in: Circle(), interactive: true)
+        .contentShape(Circle())
     }
     .disabled(!actions.canWrite)
     .accessibilityLabel(format.text("Действия со счётом", "Account actions"))

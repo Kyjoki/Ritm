@@ -186,7 +186,7 @@ struct FinanceAllHistorySheet: View {
     }
     .animation(reduceMotion ? nil : RitmMotion.ease(0.24), value: filter)
     .presentationDetents([.large])
-    .presentationDragIndicator(.visible)
+    .ritmSheetGrabber()
     .presentationCornerRadius(22)
     .sheet(item: $detail, onDismiss: finishDetail) { route in
       FinanceDetailSheet(
@@ -204,7 +204,7 @@ struct FinanceAllHistorySheet: View {
         .accessibilityAddTraits(.isHeader)
       Spacer(minLength: 12)
       Button(format.text("Готово", "Done")) { dismiss() }
-        .buttonStyle(RitmTextButtonStyle(size: 14))
+        .buttonStyle(RitmSecondaryButtonStyle())
     }
     .padding(.horizontal, 20)
     .padding(.top, 28)

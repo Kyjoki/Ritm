@@ -179,6 +179,7 @@ struct FinanceOperationRow: View {
               RoundedRectangle(cornerRadius: 22, style: .circular)
                 .strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
             }
+            .ritmCalmRim(in: RoundedRectangle(cornerRadius: 22, style: .circular))
         }
       }
       .contentShape(Rectangle())
@@ -251,7 +252,7 @@ struct FinanceDetailSheet: View {
       }
     }
     .presentationDetents([.medium, .large])
-    .presentationDragIndicator(.visible)
+    .ritmSheetGrabber()
     .presentationCornerRadius(22)
   }
 

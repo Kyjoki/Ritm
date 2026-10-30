@@ -124,14 +124,20 @@ struct SettingsThemeTile: View {
       .foregroundStyle(selected ? RitmTheme.accentColor : RitmTheme.muted)
       .padding(6)
       .frame(maxWidth: .infinity, minHeight: 104)
-      .background(selected ? RitmTheme.soft : Color.clear, in: RoundedRectangle(cornerRadius: 14, style: .circular))
+      .background {
+        if selected {
+          Color.clear.ritmGlassThumb(
+            in: RoundedRectangle(cornerRadius: 14, style: .circular),
+            tint: RitmTheme.accentColor.opacity(0.14))
+        }
+      }
       .overlay {
         RoundedRectangle(cornerRadius: 14, style: .circular)
-          .strokeBorder(selected ? RitmTheme.accentColor : RitmTheme.line, lineWidth: 1)
+          .strokeBorder(selected ? RitmTheme.accentColor.opacity(0.6) : RitmTheme.line, lineWidth: 1)
       }
       .contentShape(RoundedRectangle(cornerRadius: 14, style: .circular))
     }
-    .buttonStyle(RitmPressStyle(scale: 0.97))
+    .buttonStyle(RitmPressStyle(scale: RitmGlassTokens.pressScale))
     .accessibilityLabel(title)
     .accessibilityAddTraits(selected ? .isSelected : [])
   }
@@ -216,11 +222,9 @@ struct SettingsSmallButton: View {
         .foregroundStyle(RitmTheme.accentColor)
         .padding(.horizontal, 10)
         .frame(minHeight: 44)
-        .background(RitmTheme.glassRaised, in: RoundedRectangle(cornerRadius: 13, style: .circular))
-        .overlay {
-          RoundedRectangle(cornerRadius: 13, style: .circular).strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
-        }
+        .ritmGlass(in: Capsule(), interactive: true)
+        .contentShape(Capsule())
     }
-    .buttonStyle(RitmPressStyle(scale: 0.97))
+    .buttonStyle(RitmGlassButtonStyle())
   }
 }

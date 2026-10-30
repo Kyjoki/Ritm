@@ -194,13 +194,10 @@ struct DayTasksPanel: View {
         }
         .foregroundStyle(RitmTheme.accentColor)
         .frame(width: 44, height: 44)
-        .background(RitmTheme.glassRaised, in: RoundedRectangle(cornerRadius: 13, style: .circular))
-        .overlay {
-          RoundedRectangle(cornerRadius: 13, style: .circular)
-            .strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
-        }
+        .ritmGlass(in: Circle(), interactive: true)
+        .contentShape(Circle())
       }
-      .buttonStyle(RitmPressStyle())
+      .buttonStyle(RitmGlassButtonStyle())
       .disabled(quickBusy || trimmedTitle.isEmpty || !store.canWrite)
       .accessibilityLabel(
         tomorrow

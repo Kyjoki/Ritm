@@ -1,10 +1,9 @@
 import SwiftUI
 
 /// The one segmented control of the app (Calendar view, Habits period, Finance period and
-/// currency). The selected option sits on a clearly filled indicator that slides between
-/// options: in the dark theme an accent-tinted gradient with a 1 pt accent border and a soft glow,
-/// in the light theme a raised white pill with a shadow. The selected label is bold in the accent
-/// ink, unselected labels stay readable, every option is at least 44 pt tall.
+/// currency): a Liquid Glass capsule whose selected option is a drop of glass that slides between
+/// options. The selected label is bold in the accent ink, unselected labels stay readable, every
+/// option is at least 44 pt tall.
 struct RitmSegmentedControl<Value: Hashable>: View {
   let label: String
   let values: [Value]
@@ -15,7 +14,6 @@ struct RitmSegmentedControl<Value: Hashable>: View {
   var fillsWidth = true
   @Namespace private var indicator
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @Environment(\.colorScheme) private var scheme
 
   /// `cubic-bezier(.2, .8, .2, 1)` in 0.28 s; Reduce Motion switches at once.
   private var slide: Animation? {
@@ -27,10 +25,7 @@ struct RitmSegmentedControl<Value: Hashable>: View {
       ForEach(values, id: \.self) { value in option(value) }
     }
     .padding(3)
-    .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 14, style: .circular))
-    .overlay {
-      RoundedRectangle(cornerRadius: 14, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1)
-    }
+    .ritmGlass(in: Capsule())
     .animation(slide, value: selection)
     .accessibilityElement(children: .contain)
     .accessibilityLabel(label)
@@ -54,34 +49,18 @@ struct RitmSegmentedControl<Value: Hashable>: View {
       .frame(maxWidth: fillsWidth ? .infinity : nil, minHeight: 44)
       .background {
         if active {
-          pill.matchedGeometryEffect(id: "indicator", in: indicator)
+          thumb.matchedGeometryEffect(id: "indicator", in: indicator)
         }
       }
       .contentShape(Rectangle())
     }
-    .buttonStyle(RitmPressStyle(scale: 0.97))
+    .buttonStyle(RitmPressStyle(scale: RitmGlassTokens.pressScale))
     .accessibilityLabel(title(value))
     .accessibilityAddTraits(active ? .isSelected : [])
   }
 
-  @ViewBuilder private var pill: some View {
-    let shape = RoundedRectangle(cornerRadius: 11, style: .circular)
-    if scheme == .dark {
-      shape
-        .fill(
-          LinearGradient(
-            colors: [
-              RitmTheme.mix(RitmTheme.accentColor, 0.34, into: RitmTheme.panel),
-              RitmTheme.mix(RitmTheme.accentColor, 0.2, into: RitmTheme.panel),
-            ], startPoint: .top, endPoint: .bottom)
-        )
-        .overlay { shape.strokeBorder(RitmTheme.accentColor, lineWidth: 1) }
-        .shadow(color: RitmTheme.accentColor.opacity(0.35), radius: 8)
-    } else {
-      shape
-        .fill(Color.white)
-        .overlay { shape.strokeBorder(RitmTheme.accentColor.opacity(0.18), lineWidth: 1) }
-        .shadow(color: Color(rgb: 0x3F235F, opacity: 0.16), radius: 6, y: 3)
-    }
+  /// The selection: a drop of glass that slides between the options.
+  private var thumb: some View {
+    Color.clear.ritmGlassThumb(in: Capsule(), tint: RitmTheme.accentColor.opacity(0.12))
   }
 }

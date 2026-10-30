@@ -109,7 +109,7 @@ enum RitmTheme {
       [
         .init(color: Color(light: 0x6540AE, dark: 0xB390E9), location: 0),
         .init(color: Color(light: 0x855ACC, dark: 0xC8A6EF), location: 0.72),
-        .init(color: Color(light: 0x9E70D7, dark: 0xD0AFF1), location: 1),
+        .init(color: Color(light: 0x8A5EC8, dark: 0xD0AFF1), location: 1),
       ], cssAngle: 125)
   }
   static var ctaInk: Color { Color(light: 0xFFFFFF, dark: 0x21162F) }
@@ -311,6 +311,7 @@ struct RitmPanelBackground: View {
         shape.strokeBorder(
           contrast == .increased ? RitmTheme.text : RitmTheme.panelBorder, lineWidth: 1)
       }
+      .ritmCalmRim(in: shape)
       .shadow(color: RitmTheme.panelShadow, radius: 11, y: 7)
   }
 }
@@ -362,10 +363,10 @@ struct RitmPressStyle: ButtonStyle {
   }
 }
 
+/// Prominent glass capsule: the accent gradient on a glass base, strong contrast for the label.
 struct RitmPrimaryButtonStyle: ButtonStyle {
   var minHeight: CGFloat = 44
   @Environment(\.isEnabled) private var isEnabled
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
@@ -373,11 +374,9 @@ struct RitmPrimaryButtonStyle: ButtonStyle {
       .padding(.horizontal, 14)
       .frame(maxWidth: .infinity, minHeight: minHeight)
       .foregroundStyle(RitmTheme.ctaInk)
-      .background(RitmTheme.ctaGradient, in: RoundedRectangle(cornerRadius: 13, style: .circular))
-      .shadow(color: RitmTheme.ctaShadow, radius: 13, y: 10)
+      .ritmGlass(in: Capsule(), prominent: true, interactive: true)
       .opacity(isEnabled ? 1 : 0.6)
-      .scaleEffect(configuration.isPressed && !reduceMotion ? RitmMotion.pressScale : 1)
-      .animation(reduceMotion ? nil : RitmMotion.press, value: configuration.isPressed)
+      .environment(\.ritmGlassPressed, configuration.isPressed)
   }
 }
 
@@ -396,11 +395,10 @@ struct RitmTextButtonStyle: ButtonStyle {
   }
 }
 
-/// Secondary web button: panel fill, one contour, accent text.
+/// Secondary button: a glass capsule with an accent label.
 struct RitmSecondaryButtonStyle: ButtonStyle {
   var minHeight: CGFloat = 44
   @Environment(\.isEnabled) private var isEnabled
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
@@ -408,21 +406,14 @@ struct RitmSecondaryButtonStyle: ButtonStyle {
       .padding(.horizontal, 14)
       .frame(minHeight: minHeight)
       .foregroundStyle(RitmTheme.accentColor)
-      .background {
-        RoundedRectangle(cornerRadius: 13, style: .circular)
-          .fill(RitmTheme.panel)
-          .overlay {
-            RoundedRectangle(cornerRadius: 13, style: .circular)
-              .strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
-          }
-      }
+      .ritmGlass(in: Capsule(), interactive: true)
       .opacity(isEnabled ? 1 : 0.6)
-      .scaleEffect(configuration.isPressed && !reduceMotion ? RitmMotion.pressScale : 1)
-      .animation(reduceMotion ? nil : RitmMotion.press, value: configuration.isPressed)
+      .environment(\.ritmGlassPressed, configuration.isPressed)
   }
 }
 
-/// The 44 × 44 icon-only call to action next to a page title (DashboardPage «+»).
+/// The 44 × 44 icon-only call to action next to a page title (DashboardPage «+»): a prominent
+/// glass circle.
 struct RitmIconCTA: View {
   let symbol: String
   let label: String
@@ -434,10 +425,10 @@ struct RitmIconCTA: View {
         .font(.system(size: 21, weight: .regular))
         .foregroundStyle(RitmTheme.ctaInk)
         .frame(width: 44, height: 44)
-        .background(RitmTheme.ctaGradient, in: RoundedRectangle(cornerRadius: 13, style: .circular))
-        .shadow(color: RitmTheme.ctaShadow, radius: 13, y: 10)
+        .ritmGlass(in: Circle(), prominent: true, interactive: true)
+        .contentShape(Circle())
     }
-    .buttonStyle(RitmPressStyle())
+    .buttonStyle(RitmGlassButtonStyle())
     .accessibilityLabel(label)
   }
 }

@@ -38,12 +38,11 @@ final class RitmToastCenter {
   }
 }
 
-/// A compact glass capsule above the bottom bar. It rises 8 pt while fading in over 0.2 s and
+/// A compact Liquid Glass capsule above the bottom bar. It rises 8 pt while fading in over 0.2 s and
 /// leaves with a 0.2 s fade; Reduce Motion: a plain fade.
 struct RitmToastOverlay: View {
   @Environment(RitmStore.self) private var store
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
   /// Clears the bottom bar (about 70 pt) plus a gap.
   private static let bottomClearance: CGFloat = 88
@@ -85,18 +84,12 @@ struct RitmToastOverlay: View {
         .lineLimit(2)
         .padding(.vertical, 12)
         .padding(.horizontal, 20)
-        .background {
-          Capsule()
-            .fill(
-              reduceTransparency
-                ? AnyShapeStyle(RitmTheme.panel) : AnyShapeStyle(.ultraThinMaterial)
-            )
-            .overlay { Capsule().fill(RitmTheme.glassRaised.opacity(reduceTransparency ? 0 : 0.8)) }
-            .overlay { Capsule().strokeBorder(RitmTheme.panelBorder, lineWidth: 1) }
-            .shadow(color: Color(rgb: 0x2C1848, opacity: 0.2), radius: 15, y: 10)
-        }
+        // A raised under-layer keeps the text readable over any content.
+        .background(RitmTheme.glassRaised.opacity(0.5), in: Capsule())
+        .ritmGlass(in: Capsule(), interactive: true)
+        .contentShape(Capsule())
     }
-    .buttonStyle(.plain)
+    .buttonStyle(RitmGlassButtonStyle())
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(text)
     .accessibilityAddTraits(.isStaticText)

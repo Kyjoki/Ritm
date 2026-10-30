@@ -147,10 +147,10 @@ struct CalendarView: View {
           .foregroundStyle(RitmTheme.ctaInk)
           .padding(.horizontal, 14)
           .frame(minHeight: 44)
-          .background(RitmTheme.ctaGradient, in: RoundedRectangle(cornerRadius: 13, style: .circular))
-          .shadow(color: RitmTheme.ctaShadow, radius: 13, y: 10)
+          .ritmGlass(in: Capsule(), prominent: true, interactive: true)
+          .contentShape(Capsule())
         }
-        .buttonStyle(RitmPressStyle())
+        .buttonStyle(RitmGlassButtonStyle())
       }
       HStack(spacing: 5) {
         iconButton("chevron.left", store.text("Предыдущий период", "Previous period")) { shift(-1) }
@@ -193,12 +193,10 @@ struct CalendarView: View {
         .font(.system(size: 17, weight: .medium))
         .foregroundStyle(RitmTheme.muted)
         .frame(width: 44, height: 44)
-        .background(RitmTheme.panel, in: RoundedRectangle(cornerRadius: 11, style: .circular))
-        .overlay {
-          RoundedRectangle(cornerRadius: 11, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1)
-        }
+        .ritmGlass(in: Circle(), interactive: true)
+        .contentShape(Circle())
     }
-    .buttonStyle(RitmPressStyle(scale: 0.97))
+    .buttonStyle(RitmGlassButtonStyle())
     .accessibilityLabel(label)
   }
 
@@ -681,11 +679,10 @@ struct CalendarView: View {
   }
 }
 
-/// The calendar's secondary buttons: glass surface, accent label, 44 pt tall.
+/// The calendar's secondary buttons: Liquid Glass, accent label, 44 pt tall.
 private struct CalendarSecondaryStyle: ButtonStyle {
   var square = false
   @Environment(\.isEnabled) private var isEnabled
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
@@ -695,12 +692,8 @@ private struct CalendarSecondaryStyle: ButtonStyle {
       .padding(.horizontal, square ? 0 : 12)
       .frame(minWidth: 44, minHeight: 44)
       .frame(width: square ? 44 : nil)
-      .background(RitmTheme.glassRaised, in: RoundedRectangle(cornerRadius: 13, style: .circular))
-      .overlay {
-        RoundedRectangle(cornerRadius: 13, style: .circular).strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
-      }
+      .ritmGlass(in: Capsule(), interactive: true)
       .opacity(isEnabled ? 1 : 0.6)
-      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
-      .animation(reduceMotion ? nil : RitmMotion.press, value: configuration.isPressed)
+      .environment(\.ritmGlassPressed, configuration.isPressed)
   }
 }

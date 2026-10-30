@@ -310,7 +310,7 @@ private struct FinanceInboxCategorySheet: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .background(RitmTheme.background.ignoresSafeArea())
     .presentationDetents([.medium, .large])
-    .presentationDragIndicator(.visible)
+    .ritmSheetGrabber()
     .onChange(of: purchase == nil) { _, gone in if gone { dismiss() } }
   }
 

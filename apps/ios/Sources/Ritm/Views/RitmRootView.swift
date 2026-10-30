@@ -78,7 +78,7 @@ struct RitmRootView: View {
               RitmShellHeader()
                 .padding(.horizontal, 16)
                 .frame(maxWidth: .infinity)
-                .background(alignment: .top) { RitmHeaderBackdrop() }
+                .background(alignment: .top) { RitmScrollEdge(side: .top) }
             }
           }
           .background { RitmBackground() }
@@ -86,6 +86,7 @@ struct RitmRootView: View {
             RitmNavigationBar(
               sections: RitmSection.barSections, current: navigation.section,
               select: selectTab, toggleMore: toggleMore)
+              .background(alignment: .bottom) { RitmScrollEdge(side: .bottom) }
           }
           FinanceNotificationOverlay(openNotice: openNotice, openSettings: openNotificationSettings)
             .zIndex(1)
@@ -197,20 +198,6 @@ extension RitmSection {
   }
 }
 
-/// The 44 pt glass tile behind the header's icon buttons (theme toggle, notification bell).
-struct RitmHeaderIconBackground: View {
-  var body: some View {
-    let shape = RoundedRectangle(cornerRadius: 13, style: .circular)
-    shape
-      .fill(
-        RitmTheme.linear(
-          [.init(color: RitmTheme.glassRaised, location: 0),
-           .init(color: RitmTheme.panel, location: 1)], cssAngle: 150))
-      .overlay { shape.strokeBorder(RitmTheme.panelBorder, lineWidth: 1) }
-      .shadow(color: Color(rgb: 0x583882, opacity: 0.11), radius: 10, y: 6)
-  }
-}
-
 /// Web `.app-header`: 62 pt, 29 pt brand mark, wordmark, the finance bell and the 44 pt theme
 /// toggle. Day, Habits and Settings embed this same header, so they all get the same bell.
 struct RitmShellHeader: View {
@@ -253,18 +240,23 @@ struct RitmShellHeader: View {
         .foregroundStyle(RitmTheme.text)
         .accessibilityAddTraits(.isHeader)
       Spacer(minLength: 0)
-      FinanceBellButton()
-      Button(action: switchTheme) {
-        Image(systemName: showingDark ? "sun.max" : "moon")
-          .font(.system(size: 18))
-          .foregroundStyle(RitmTheme.muted)
-          .frame(width: 44, height: 44)
-          .background { RitmHeaderIconBackground() }
+      RitmGlassGroup(spacing: 8) {
+        HStack(spacing: 8) {
+          FinanceBellButton()
+          Button(action: switchTheme) {
+            Image(systemName: showingDark ? "sun.max" : "moon")
+              .font(.system(size: 18))
+              .foregroundStyle(RitmTheme.muted)
+              .frame(width: 44, height: 44)
+              .ritmGlass(in: Circle(), interactive: true)
+              .contentShape(Circle())
+          }
+          .buttonStyle(RitmGlassButtonStyle())
+          .ritmFrameReader(active: pageActive) { toggleFrame.frame = $0 }
+          .disabled(store.pendingTheme != nil)
+          .accessibilityLabel(store.text("Переключить тему", "Switch appearance"))
+        }
       }
-      .buttonStyle(RitmPressStyle(scale: 0.9))
-      .ritmFrameReader(active: pageActive) { toggleFrame.frame = $0 }
-      .disabled(store.pendingTheme != nil)
-      .accessibilityLabel(store.text("Переключить тему", "Switch appearance"))
     }
     .frame(height: 62)
   }
@@ -313,36 +305,6 @@ extension View {
   var frame: CGRect = .zero
 }
 
-/// The pinned header's own backdrop: a bar gradient from the theme background over an
-/// ultra-thin material, fading out below the bar, so content scrolling underneath never shows
-/// crisp text behind the logo and the buttons (MOTION.md §7). It reaches up under the status bar.
-private struct RitmHeaderBackdrop: View {
-  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-  private static let fade: CGFloat = 18
-
-  var body: some View {
-    ZStack {
-      if !reduceTransparency { Rectangle().fill(.ultraThinMaterial) }
-      LinearGradient(
-        colors: [
-          RitmTheme.background.opacity(reduceTransparency ? 1 : 0.94),
-          RitmTheme.background.opacity(reduceTransparency ? 1 : 0.8),
-        ], startPoint: .top, endPoint: .bottom)
-    }
-    .mask {
-      VStack(spacing: 0) {
-        Rectangle()
-        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
-          .frame(height: Self.fade)
-      }
-    }
-    .padding(.bottom, -Self.fade)
-    .ignoresSafeArea(edges: .top)
-    .allowsHitTesting(false)
-    .accessibilityHidden(true)
-  }
-}
-
 /// Motion of the bottom bar (prototype shell.html): the indicator slides in 0.28 s on
 /// cubic-bezier(.2, .8, .2, 1); the «Ещё» panel inflates out of its icon in 0.30 s with a tiny
 /// overshoot (cubic-bezier(.34, 1.32, .5, 1), about 3 %) and shrinks back in 0.18 s without one.
@@ -370,7 +332,6 @@ private struct RitmMoreAnchorKey: PreferenceKey {
 private struct RitmNavigationBar: View {
   @Environment(RitmStore.self) private var store
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   @Environment(\.colorSchemeContrast) private var contrast
   let sections: [RitmSection]
   let current: RitmSection
@@ -382,6 +343,12 @@ private struct RitmNavigationBar: View {
   private var selectedIndex: Int { sections.firstIndex(of: current) ?? sections.count }
 
   var body: some View {
+    RitmGlassGroup(spacing: 8) { bar }
+      .padding(.horizontal, 16)
+      .padding(.bottom, 8)
+  }
+
+  private var bar: some View {
     HStack(spacing: 0) {
       ForEach(sections, id: \.self) { section in
         item(title: section.title(store), symbol: section.symbol, selected: current == section) {
@@ -407,42 +374,7 @@ private struct RitmNavigationBar: View {
     }
     .animation(reduceMotion ? nil : RitmMore.slide, value: selectedIndex)
     .padding(6)
-    .background { capsule }
-    .padding(.horizontal, 16)
-    .padding(.bottom, 8)
-  }
-
-  private var capsule: some View {
-    Capsule()
-      .fill(reduceTransparency ? AnyShapeStyle(RitmTheme.panel) : AnyShapeStyle(.ultraThinMaterial))
-      .overlay {
-        if !reduceTransparency {
-          Capsule().fill(
-            RitmTheme.linear(
-              [
-                .init(
-                  color: Color(
-                    light: 0xFFFCFF, dark: 0x3B2D51, lightOpacity: 0.82, darkOpacity: 0.85),
-                  location: 0),
-                .init(
-                  color: Color(
-                    light: 0xE1D3F4, dark: 0x1F182D, lightOpacity: 0.65, darkOpacity: 0.76),
-                  location: 1),
-              ], cssAngle: 150))
-          Capsule().fill(
-            RitmTheme.linear(
-              [.init(color: .white.opacity(0.16), location: 0), .init(color: .clear, location: 0.42)],
-              cssAngle: 175))
-        }
-      }
-      .overlay {
-        Capsule().strokeBorder(
-          contrast == .increased
-            ? RitmTheme.text
-            : Color(light: 0xFFFFFF, dark: 0xE5D3FC, lightOpacity: 0.76, darkOpacity: 0.3),
-          lineWidth: 1)
-      }
-      .shadow(color: Color(rgb: 0x2C1848, opacity: 0.2), radius: 15, y: 12)
+    .ritmGlass(in: Capsule())
   }
 
   private func item(
@@ -467,26 +399,11 @@ private struct RitmNavigationBar: View {
     .accessibilityAddTraits(selected ? .isSelected : [])
   }
 
+  /// The sliding thumb: a drop of glass under the active icon.
   private var activeIndicator: some View {
-    let shape = RoundedRectangle(cornerRadius: 16, style: .circular)
-    return shape
-      .fill(
-        RitmTheme.linear(
-          [
-            .init(
-              color: Color(light: 0xA574DF, dark: 0xC299F1, lightOpacity: 0.24, darkOpacity: 0.28),
-              location: 0),
-            .init(
-              color: Color(light: 0xC1A4E8, dark: 0x805CB1, lightOpacity: 0.14, darkOpacity: 0.2),
-              location: 1),
-          ], cssAngle: 145)
-      )
-      .overlay {
-        shape.strokeBorder(
-          Color(light: 0xFFFFFF, dark: 0xE5CDFF, lightOpacity: 0.64, darkOpacity: 0.24),
-          lineWidth: 1)
-      }
-      .shadow(color: Color(rgb: 0x553086, opacity: 0.12), radius: 6, y: 4)
+    Color.clear.ritmGlassThumb(
+      in: Capsule(),
+      tint: Color(light: 0xA574DF, dark: 0xC299F1, lightOpacity: 0.16, darkOpacity: 0.18))
   }
 }
 
@@ -605,19 +522,18 @@ private struct RitmMorePanel: View {
 
   private var panel: some View {
     let scale = reduceMotion || isOpen ? 1 : RitmMore.seed
-    return HStack(spacing: Self.spacing) {
-      ForEach(Array(RitmSection.moreSections.enumerated()), id: \.element) { index, section in
-        tile(section, index: index)
+    return RitmGlassGroup(spacing: Self.spacing) {
+      HStack(spacing: Self.spacing) {
+        ForEach(Array(RitmSection.moreSections.enumerated()), id: \.element) { index, section in
+          tile(section, index: index)
+        }
       }
     }
     .padding(Self.padding)
     .padding(.bottom, RitmBubble.tailHeight)
-    .background {
-      let bubble = RitmBubble(tailX: tailX)
-      bubble.fill(RitmTheme.glassDense)
-        .overlay { bubble.stroke(RitmTheme.panelBorder, lineWidth: 1) }
-        .shadow(color: Color(rgb: 0x1A0D2D, opacity: 0.3), radius: 24, y: 12)
-    }
+    // A dense under-layer keeps the labels readable on any content behind the glass.
+    .background(RitmTheme.glassDense.opacity(0.55), in: RitmBubble(tailX: tailX))
+    .ritmGlass(in: RitmBubble(tailX: tailX))
     .scaleEffect(scale, anchor: UnitPoint(x: tipX / Self.panelWidth, y: 1))
     .offset(
       x: (1 - scale) * inflateShift.width, y: (1 - scale) * inflateShift.height)
@@ -647,13 +563,9 @@ private struct RitmMorePanel: View {
       .padding(.vertical, 8).padding(.horizontal, 6)
       .frame(width: Self.tileWidth)
       .frame(minHeight: 72)
-      .background {
-        let shape = RoundedRectangle(cornerRadius: 16, style: .circular)
-        shape.fill(selected ? RitmTheme.soft : RitmTheme.panel)
-          .overlay {
-            shape.strokeBorder(selected ? RitmTheme.accentColor : RitmTheme.line, lineWidth: 1)
-          }
-      }
+      .ritmGlassThumb(
+        in: RoundedRectangle(cornerRadius: 16, style: .circular),
+        tint: selected ? RitmTheme.accentColor.opacity(0.2) : nil)
       .contentShape(Rectangle())
     }
     .buttonStyle(RitmPressStyle(scale: 0.95))

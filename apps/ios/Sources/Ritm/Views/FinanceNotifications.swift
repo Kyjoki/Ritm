@@ -246,7 +246,8 @@ struct FinanceBellButton: View {
         .font(.system(size: 18))
         .foregroundStyle(center.isOpen ? RitmTheme.accentColor : RitmTheme.muted)
         .frame(width: 44, height: 44)
-        .background { RitmHeaderIconBackground() }
+        .ritmGlass(in: Circle(), interactive: true)
+        .contentShape(Circle())
         .overlay(alignment: .topTrailing) {
           if unread > 0 {
             Text(unread > 9 ? "9+" : "\(unread)")
@@ -260,7 +261,7 @@ struct FinanceBellButton: View {
           }
         }
     }
-    .buttonStyle(RitmPressStyle(scale: 0.9))
+    .buttonStyle(RitmGlassButtonStyle())
     .background { frameReader }
     .accessibilityLabel(
       unread > 0
@@ -423,8 +424,6 @@ private struct FinancePopoverShape: Shape {
 
 private struct FinancePopover: View {
   @Environment(RitmStore.self) private var store
-  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-  @Environment(\.colorSchemeContrast) private var contrast
   let width: CGFloat
   let notchX: CGFloat
   let listLimit: CGFloat
@@ -444,14 +443,9 @@ private struct FinancePopover: View {
     .padding(.top, FinancePopoverShape.notchHeight)
     .frame(width: width)
     .clipShape(shape)
-    .background {
-      shape.fill(RitmTheme.glassDense)
-        .overlay { if !reduceTransparency { shape.fill(RitmTheme.panelSheen) } }
-        .overlay {
-          shape.stroke(contrast == .increased ? RitmTheme.text : RitmTheme.panelBorder, lineWidth: 1)
-        }
-        .shadow(color: Color(rgb: 0x1A0D2D, opacity: 0.26), radius: 24, y: 16)
-    }
+    // A dense under-layer keeps the rows readable on any content behind the glass.
+    .background(RitmTheme.glassDense.opacity(0.6), in: shape)
+    .ritmGlass(in: shape)
     .accessibilityElement(children: .contain)
     .accessibilityAddTraits(.isModal)
     .accessibilityLabel(store.text("Уведомления", "Notifications"))
@@ -490,9 +484,7 @@ private struct FinancePopover: View {
       .foregroundStyle(RitmTheme.accentColor)
       .padding(.horizontal, 10)
       .frame(minHeight: 44)
-      .background {
-        Capsule().strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
-      }
+      .ritmGlassThumb(in: Capsule())
       .contentShape(Capsule())
     }
     .buttonStyle(RitmPressStyle())
@@ -657,7 +649,6 @@ private struct FinanceNoticeRow: View {
 
 private struct FinanceBanner: View {
   @Environment(RitmStore.self) private var store
-  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   let notice: FinanceNotice
   let open: () -> Void
   let close: () -> Void
@@ -713,7 +704,7 @@ private struct FinanceBanner: View {
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(RitmTheme.muted)
             .frame(width: 28, height: 28)
-            .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 9, style: .circular))
+            .ritmGlassThumb(in: Circle())
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
         }
@@ -723,12 +714,8 @@ private struct FinanceBanner: View {
       .padding(.trailing, 2)
       .padding(.bottom, 4)
     }
-    .background {
-      shape.fill(RitmTheme.glassDense)
-        .overlay { if !reduceTransparency { shape.fill(RitmTheme.panelSheen) } }
-        .overlay { shape.strokeBorder(RitmTheme.panelBorder, lineWidth: 1) }
-        .shadow(color: Color(rgb: 0x1A0D2D, opacity: 0.24), radius: 22, y: 14)
-    }
+    .background(RitmTheme.glassDense.opacity(0.6), in: shape)
+    .ritmGlass(in: shape)
     .frame(maxWidth: 520)
     .onAppear {
       UIAccessibility.post(notification: .announcement, argument: spoken)

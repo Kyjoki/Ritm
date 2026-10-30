@@ -310,8 +310,7 @@ struct AssistantView: View {
         modeButton(.ideaReview, store.text("Разбор идей", "Idea review"))
       }
       .padding(4)
-      .background(RitmTheme.soft.opacity(0.7), in: RoundedRectangle(cornerRadius: 12, style: .circular))
-      .overlay { RoundedRectangle(cornerRadius: 12, style: .circular).strokeBorder(RitmTheme.panelBorder, lineWidth: 1) }
+      .ritmGlass(in: Capsule())
       .accessibilityElement(children: .contain)
       .accessibilityLabel(store.text("Режим ИИ", "AI mode"))
     }
@@ -331,8 +330,7 @@ struct AssistantView: View {
         .frame(maxWidth: .infinity, minHeight: 44)
         .background {
           if active {
-            RoundedRectangle(cornerRadius: 8, style: .circular).fill(RitmTheme.glassRaised)
-              .shadow(color: Color(rgb: 0x3E236B, opacity: 0.09), radius: 5, y: 3)
+            Color.clear.ritmGlassThumb(in: Capsule(), tint: RitmTheme.accentColor.opacity(0.12))
           }
         }
         .contentShape(Rectangle())
@@ -599,15 +597,19 @@ struct AssistantView: View {
         ScrollView(.horizontal) {
           HStack(spacing: 6) {
             ForEach(AssistantPrompt.all, id: \.title) { prompt in
-              Button(store.text(prompt.title, prompt.english)) { choose(store.text(prompt.title, prompt.english)) }
-                .ritmFont(11)
-                .foregroundStyle(RitmTheme.muted)
-                .padding(.horizontal, 11)
-                .frame(minHeight: 44)
-                .background(RitmTheme.panel, in: Capsule())
-                .overlay { Capsule().strokeBorder(RitmTheme.line, lineWidth: 1) }
-                .buttonStyle(RitmPressStyle(scale: 0.97))
-                .disabled(sending)
+              Button {
+                choose(store.text(prompt.title, prompt.english))
+              } label: {
+                Text(store.text(prompt.title, prompt.english))
+                  .ritmFont(11)
+                  .foregroundStyle(RitmTheme.muted)
+                  .padding(.horizontal, 11)
+                  .frame(minHeight: 44)
+                  .ritmGlass(in: Capsule(), interactive: true)
+                  .contentShape(Capsule())
+              }
+              .buttonStyle(RitmGlassButtonStyle())
+              .disabled(sending)
             }
           }
           .padding(.trailing, 12)
@@ -668,18 +670,18 @@ struct AssistantView: View {
           }
           .foregroundStyle(RitmTheme.ctaInk)
           .frame(width: 44, height: 44)
-          .background(RitmTheme.ctaGradient, in: RoundedRectangle(cornerRadius: 13, style: .circular))
+          .ritmGlass(in: Circle(), prominent: true, interactive: true)
+          .contentShape(Circle())
           .opacity(canSend ? 1 : 0.6)
         }
-        .buttonStyle(RitmPressStyle())
+        .buttonStyle(RitmGlassButtonStyle())
         .disabled(!canSend)
         .accessibilityLabel(sending ? store.text("Отправка сообщения", "Sending message") : store.text("Отправить сообщение", "Send message"))
       }
       .padding(.vertical, 8)
       .padding(.leading, 12)
       .padding(.trailing, 8)
-      .background(RitmTheme.field, in: RoundedRectangle(cornerRadius: 14, style: .circular))
-      .overlay { RoundedRectangle(cornerRadius: 14, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1) }
+      .ritmGlass(in: RoundedRectangle(cornerRadius: 24, style: .circular))
       .padding(.top, 12)
       HStack(spacing: 5) {
         Image(systemName: "checkmark.shield").font(.system(size: 10))

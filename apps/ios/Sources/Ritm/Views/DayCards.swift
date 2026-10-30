@@ -279,16 +279,10 @@ struct DayAssistantCard: View {
           .padding(.horizontal, 10)
           .frame(minHeight: 44)
           .foregroundStyle(RitmTheme.accentColor)
-          .background {
-            RoundedRectangle(cornerRadius: 13, style: .circular)
-              .fill(RitmTheme.glassRaised)
-              .overlay {
-                RoundedRectangle(cornerRadius: 13, style: .circular)
-                  .strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
-              }
-          }
+          .ritmGlass(in: Capsule(), interactive: true)
+          .contentShape(Capsule())
         }
-        .buttonStyle(RitmPressStyle())
+        .buttonStyle(RitmGlassButtonStyle())
       }
       Text(
         store.text(
@@ -321,14 +315,16 @@ struct DayAssistantDock: View {
       .padding(.leading, 8)
       .padding(.trailing, 18)
       .padding(.vertical, 7)
-      .background {
-        Capsule()
-          .fill(RitmTheme.linear([.init(color: Color(rgb: 0x352449), location: 0), .init(color: Color(rgb: 0x30243F), location: 1)], cssAngle: 130))
-          .overlay { Capsule().strokeBorder(Color(rgb: 0x72558A), lineWidth: 1) }
-          .shadow(color: Color(rgb: 0x613A8F, opacity: 0.15), radius: 12, y: 9)
-      }
+      // The dark under-layer keeps the light label readable in both themes.
+      .background(
+        RitmTheme.linear([.init(color: Color(rgb: 0x352449), location: 0), .init(color: Color(rgb: 0x30243F), location: 1)], cssAngle: 130)
+          .opacity(0.88),
+        in: Capsule()
+      )
+      .ritmGlass(in: Capsule(), interactive: true)
+      .contentShape(Capsule())
     }
-    .buttonStyle(RitmPressStyle())
+    .buttonStyle(RitmGlassButtonStyle())
     .frame(maxWidth: .infinity)
   }
 }

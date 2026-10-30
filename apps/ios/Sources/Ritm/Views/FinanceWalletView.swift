@@ -520,14 +520,10 @@ struct FinanceCustomizeButton: View {
         .font(.system(size: 16, weight: .regular))
         .foregroundStyle(RitmTheme.accentColor)
         .frame(width: 48, height: 48)
-        .background {
-          Circle()
-            .fill(RitmTheme.glassRaised)
-            .overlay { Circle().strokeBorder(RitmTheme.panelBorder, lineWidth: 1) }
-        }
+        .ritmGlass(in: Circle(), interactive: true)
         .contentShape(Circle())
     }
-    .buttonStyle(RitmPressStyle())
+    .buttonStyle(RitmGlassButtonStyle())
     .accessibilityLabel(format.text("Настроить карты", "Customize cards"))
   }
 }
