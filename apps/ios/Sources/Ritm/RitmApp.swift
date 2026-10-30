@@ -12,9 +12,11 @@ struct RitmApp: App {
       RitmRootView()
         .environment(store)
         .task { await store.start() }
+        .task { await store.importWalletFile() }
         .onOpenURL { store.handleWalletLink($0) }
         .onChange(of: scenePhase) { _, phase in
           store.setActive(phase == .active)
+          if phase == .active { Task { await store.importWalletFile() } }
         }
         .privacySensitive()
         .overlay {

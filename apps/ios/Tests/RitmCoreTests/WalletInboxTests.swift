@@ -93,7 +93,7 @@ final class WalletInboxTests: XCTestCase {
     for language in Language.allCases {
       XCTAssertEqual(
         WalletLink.template(language: language),
-        "ritm://add?amount=<Amount>&merchant=<Merchant>&card=<Card>&date=<Date>")
+        "ritm://add?amount=<Amount>&merchant=<Merchant>&card=<Card>&date=<Date>&at=<Дата>")
     }
   }
 

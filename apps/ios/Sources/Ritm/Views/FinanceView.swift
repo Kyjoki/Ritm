@@ -67,7 +67,11 @@ struct FinanceView: View {
       }
       .scrollIndicators(.hidden)
       .scrollDisabled(walletDragging)
-      .refreshable { await store.reloadFinance() }
+      .refreshable {
+        async let imported: Void = store.importWalletFile(userInitiated: true)
+        await store.reloadFinance()
+        await imported
+      }
     }
     .toolbar(.hidden, for: .navigationBar)
     .task(id: navigation.section) {

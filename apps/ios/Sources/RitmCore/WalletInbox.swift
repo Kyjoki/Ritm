@@ -39,12 +39,14 @@ public struct WalletPurchase: Codable, Equatable, Identifiable, Sendable {
 
   /// Deterministic across launches (FNV-1a, not `Hasher`): the same purchase always gets the same id.
   public static func makeID(
-    date: String, amountMinor: Int, currency: FinanceCurrency, merchant: String, card: String?
+    date: String, amountMinor: Int, currency: FinanceCurrency, merchant: String, card: String?,
+    at: String? = nil
   ) -> String {
     let normalised = MerchantMemory.normalise(merchant)
     let name = normalised.isEmpty ? merchant.lowercased() : normalised
-    let source = [date, String(amountMinor), currency.rawValue, name, card ?? ""]
-      .joined(separator: "\u{1F}")
+    var parts = [date, String(amountMinor), currency.rawValue, name, card ?? ""]
+    if let at, !at.isEmpty { parts.append(at) }
+    let source = parts.joined(separator: "\u{1F}")
     var hash: UInt64 = 0xcbf2_9ce4_8422_2325
     for byte in source.utf8 {
       hash ^= UInt64(byte)
@@ -65,8 +67,10 @@ public enum WalletLink {
   public static let maxCardLength = 40
   static let maxURLLength = 4096
 
+  /// `occurrence` separates byte-identical lines of one file (0 for the first, 1 for the second…);
+  /// it only matters when the link carries no time (`at=` or a time inside `date=`).
   public static func parse(
-    _ url: URL, today: String, receivedAt: String
+    _ url: URL, today: String, receivedAt: String, occurrence: Int = 0
   ) -> Result<WalletPurchase, WalletLinkError> {
     guard url.scheme?.lowercased() == scheme else { return .failure(.wrongScheme) }
     guard url.absoluteString.count <= maxURLLength else { return .failure(.tooLarge) }
@@ -88,10 +92,16 @@ public enum WalletLink {
     guard !merchant.isEmpty else { return .failure(.missingMerchant) }
 
     let card = cardLabel(value(of: "card", in: items))
-    let date = value(of: "date", in: items).flatMap(WalletDate.normalise) ?? today
+    let dateText = value(of: "date", in: items) ?? ""
+    let dateParts = WalletTimestamp.parts(dateText)
+    let atText = value(of: "at", in: items)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let atParts = atText.isEmpty ? nil : WalletTimestamp.parts(atText)
+    let date =
+      dateParts?.date ?? WalletDate.normalise(dateText) ?? atParts?.date ?? today
     let id = WalletPurchase.makeID(
       date: date, amountMinor: amount.minor, currency: amount.currency, merchant: merchant,
-      card: card)
+      card: card,
+      at: idStamp(atText: atText, dateParts: dateParts, occurrence: occurrence))
     return .success(
       WalletPurchase(
         id: id, merchant: merchant, amountMinor: amount.minor, currency: amount.currency,
@@ -101,7 +111,7 @@ public enum WalletLink {
   /// The text the owner pastes into the Shortcuts «Open URL» action. The placeholders are the
   /// Shortcuts variables of the «Transaction» automation; the same in every language.
   public static func template(language: Language) -> String {
-    "\(scheme)://add?amount=<Amount>&merchant=<Merchant>&card=<Card>&date=<Date>"
+    "\(scheme)://add?amount=<Amount>&merchant=<Merchant>&card=<Card>&date=<Date>&at=<Дата>"
   }
 
   /// Amount as Shortcuts may format it; the sign is ignored. Nil for zero, garbage or an amount
@@ -116,6 +126,16 @@ public enum WalletLink {
   }
 
   // MARK: - Private
+
+  /// What tells two same-day purchases apart: the `at` timestamp, else the time inside `date`,
+  /// else (a repeated identical line in one file) the occurrence number. Nil keeps the old id.
+  private static func idStamp(
+    atText: String, dateParts: WalletTimestamp.Parts?, occurrence: Int
+  ) -> String? {
+    if !atText.isEmpty { return WalletTimestamp.normalise(atText) }
+    if let dateParts, let time = dateParts.time { return "\(dateParts.date) \(time)" }
+    return occurrence > 0 ? "#\(occurrence)" : nil
+  }
 
   private static func isAddAction(_ components: URLComponents) -> Bool {
     if let host = components.host, !host.isEmpty { return host.lowercased() == "add" }
@@ -356,7 +376,7 @@ enum WalletDate {
     return nil
   }
 
-  private static func format(year: Int, month: Int, day: Int) -> String? {
+  static func format(year: Int, month: Int, day: Int) -> String? {
     guard (2000...2100).contains(year), (1...12).contains(month), day >= 1,
       day <= daysIn(month: month, year: year)
     else { return nil }

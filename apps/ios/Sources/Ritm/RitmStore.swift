@@ -43,6 +43,8 @@ final class RitmStore {
   let toasts = RitmToastCenter()
   /// Apple Wallet purchases waiting for confirmation; local to this iPhone.
   let wallet = WalletInboxStore()
+  /// The Files folder whose `purchases.txt` the Shortcuts automation appends to; local only.
+  let walletFolder = WalletFolderSource()
 
   /// The Ritm server this device talks to. Changed only through `changeServer(to:)`.
   private(set) var serverAddress: ServerAddress
@@ -78,6 +80,7 @@ final class RitmStore {
     generation += 1
     pollTask?.cancel()
     wallet.reset()
+    walletFolder.disconnect()
     vault.forgetLogin()
     await clearAccount()
     let newVault = SessionVault(server: address)
@@ -453,6 +456,7 @@ final class RitmStore {
     do { try await client.logout() } catch { revokeFailed = true }
     vault.forgetLogin()
     wallet.reset()
+    walletFolder.disconnect()
     await clearAccount()
     isMutating = false
     if revokeFailed {

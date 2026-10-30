@@ -53,6 +53,14 @@ final class WalletInboxStore {
     return add(purchase)
   }
 
+  /// Puts the purchases read from `purchases.txt` into the inbox in one step. Anything already
+  /// pending, confirmed or skipped is a duplicate; a full inbox leaves the rest in the file.
+  func receive(file purchases: [WalletPurchase]) -> WalletState.FileReceipt {
+    let result = state.receiving(file: purchases)
+    update(result.state)
+    return result.receipt
+  }
+
   func requestShowingInbox() { showRequest += 1 }
 
   func setCategory(_ category: String, for id: String) {
