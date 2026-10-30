@@ -142,13 +142,12 @@ enum RitmTheme {
 /// Text roles with the web sizes at 390 px. Sizes scale with Dynamic Type through
 /// UIFontMetrics, so 27 pt stays 27 pt at the default size, as on the web.
 enum RitmTextRole {
-  case pageTitle, eyebrow, pageDescription, cardTitle, cardCaption, body, message, button,
+  case pageTitle, eyebrow, cardTitle, cardCaption, body, message, button,
     navLabel, brand, footer, sectionTitle, value
 
   var size: CGFloat {
     switch self {
     case .pageTitle: 27
-    case .pageDescription: 11
     case .eyebrow, .cardCaption, .navLabel: 10
     case .cardTitle: 15
     case .body, .button: 12
@@ -165,7 +164,7 @@ enum RitmTextRole {
     // `font-weight: 650` renders with Inter's 700 face.
     case .eyebrow, .brand: .bold
     case .cardCaption, .navLabel: .medium
-    case .pageDescription, .body, .message, .footer: .regular
+    case .body, .message, .footer: .regular
     }
   }
 
@@ -184,7 +183,6 @@ enum RitmTextRole {
   /// Extra space between lines, from the CSS line-height minus the font's own leading.
   var lineSpacing: CGFloat {
     switch self {
-    case .pageDescription: 3
     case .message: 7
     case .body: 3
     default: 0
@@ -196,7 +194,6 @@ enum RitmTextRole {
     case .pageTitle, .sectionTitle, .brand, .value: .title2
     case .cardTitle: .headline
     case .eyebrow, .cardCaption, .navLabel, .footer: .caption2
-    case .pageDescription: .caption1
     case .body, .message, .button: .subheadline
     }
   }
@@ -447,52 +444,33 @@ struct RitmIconCTA: View {
 
 // MARK: - Page structure
 
-/// The web page heading: eyebrow, gradient title, description and an optional action that sits
-/// 21 pt lower than the text (app.css .dashboard-heading).
+/// The page heading: the gradient title and an optional action beside it.
 struct RitmPageHeading<Action: View>: View {
-  let eyebrow: String
   let title: String
-  let description: String?
   private let action: Action
 
-  init(
-    eyebrow: String, title: String, description: String? = nil,
-    @ViewBuilder action: () -> Action
-  ) {
-    self.eyebrow = eyebrow
+  init(title: String, @ViewBuilder action: () -> Action) {
     self.title = title
-    self.description = description
     self.action = action()
   }
 
   var body: some View {
-    HStack(alignment: .top, spacing: 12) {
-      VStack(alignment: .leading, spacing: 0) {
-        Text(eyebrow)
-          .ritmText(.eyebrow)
-          .foregroundStyle(RitmTheme.accentColor)
-          .padding(.bottom, 8)
-        Text(title)
-          .ritmText(.pageTitle)
-          .foregroundStyle(RitmTheme.titleGradient)
-          .accessibilityAddTraits(.isHeader)
-        if let description {
-          Text(description)
-            .ritmText(.pageDescription)
-            .foregroundStyle(RitmTheme.muted)
-            .padding(.top, 9)
-        }
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      action.padding(.top, 21)
+    HStack(alignment: .center, spacing: 12) {
+      Text(title)
+        .ritmText(.pageTitle)
+        .foregroundStyle(RitmTheme.titleGradient)
+        .accessibilityAddTraits(.isHeader)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      action
     }
-    .padding(.bottom, 24)
+    .padding(.top, 6)
+    .padding(.bottom, 20)
   }
 }
 
 extension RitmPageHeading where Action == EmptyView {
-  init(eyebrow: String, title: String, description: String? = nil) {
-    self.init(eyebrow: eyebrow, title: title, description: description) { EmptyView() }
+  init(title: String) {
+    self.init(title: title) { EmptyView() }
   }
 }
 

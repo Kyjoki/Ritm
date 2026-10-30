@@ -12,6 +12,7 @@ struct RitmApp: App {
       RitmRootView()
         .environment(store)
         .task { await store.start() }
+        .onOpenURL { store.handleWalletLink($0) }
         .onChange(of: scenePhase) { _, phase in
           store.setActive(phase == .active)
         }

@@ -41,6 +41,8 @@ final class RitmStore {
   var financeFocus: FinanceFocus?
   let notices = FinanceNoticeCenter()
   let toasts = RitmToastCenter()
+  /// Apple Wallet purchases waiting for confirmation; local to this iPhone.
+  let wallet = WalletInboxStore()
 
   /// The Ritm server this device talks to. Changed only through `changeServer(to:)`.
   private(set) var serverAddress: ServerAddress
@@ -75,6 +77,7 @@ final class RitmStore {
     isMutating = true
     generation += 1
     pollTask?.cancel()
+    wallet.reset()
     vault.forgetLogin()
     await clearAccount()
     let newVault = SessionVault(server: address)
@@ -449,6 +452,7 @@ final class RitmStore {
     var revokeFailed = false
     do { try await client.logout() } catch { revokeFailed = true }
     vault.forgetLogin()
+    wallet.reset()
     await clearAccount()
     isMutating = false
     if revokeFailed {

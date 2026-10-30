@@ -97,12 +97,8 @@ struct AssistantView: View {
 
   private var heading: some View {
     VStack(alignment: .leading, spacing: 15) {
-      RitmPageHeading(
-        eyebrow: store.text("Меньше рутины. Больше твоего времени.", "Less routine. More of your time."),
-        title: store.text("ИИ-помощник", "AI assistant"),
-        description: store.text("Вместе найдём твой темп.", "Let's find your pace together.")
-      )
-      .padding(.bottom, -24)
+      RitmPageHeading(title: store.text("ИИ-помощник", "AI assistant"))
+        .padding(.bottom, -20)
       HStack(spacing: 9) {
         Button {
           withAnimation(reduceMotion ? nil : RitmMotion.ease(0.24)) { historyOpen.toggle() }

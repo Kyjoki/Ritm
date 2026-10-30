@@ -113,6 +113,9 @@ struct RitmRootView: View {
     .onChange(of: store.notices.isOpen) { _, isOpen in
       if isOpen { setMore(false) }
     }
+    .onChange(of: store.wallet.showRequest) { _, _ in
+      navigation.section = .finance
+    }
     .onChange(of: navigation.section) { old, _ in
       beginLeaving(old)
       setMore(false)

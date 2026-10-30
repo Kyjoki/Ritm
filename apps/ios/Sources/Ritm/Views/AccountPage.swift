@@ -79,11 +79,7 @@ struct AccountView: View {
         ScrollView {
           VStack(alignment: .leading, spacing: 0) {
             RitmShellHeader()
-            RitmPageHeading(
-              eyebrow: store.text("Ritm под твой образ жизни", "Ritm fits your life"),
-              title: store.text("Настройки", "Settings"),
-              description: store.text("Твоё пространство. Твои правила.", "Your space. Your rules.")
-            )
+            RitmPageHeading(title: store.text("Настройки", "Settings"))
             if let message = store.errorMessage { RitmErrorBanner(message: message).padding(.bottom, 12) }
             MutationRecoveryView()
             if baseline != nil {
@@ -93,7 +89,8 @@ struct AccountView: View {
                 appearanceCard.ritmPageReveal(index: 2)
                 notificationsCard.ritmPageReveal(index: 3).id(Self.notificationsAnchor)
                 connectionsCard.ritmPageReveal(index: 4)
-                ServerAddressCard().ritmPageReveal(index: 5)
+                WalletSettingsCard().ritmPageReveal(index: 5)
+                ServerAddressCard().ritmPageReveal(index: 6)
               }
               .padding(.top, 22)
               .disabled(saving)

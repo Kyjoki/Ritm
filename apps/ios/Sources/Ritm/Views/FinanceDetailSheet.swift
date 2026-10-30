@@ -129,6 +129,8 @@ struct FinanceOperationRow: View {
   let entry: FinanceEntry
   let format: FinanceFormat
   let includeAccount: Bool
+  /// A rounded panel around the row (radius 22) for the dated history.
+  var capsule = false
   let action: () -> Void
 
   var body: some View {
@@ -168,6 +170,17 @@ struct FinanceOperationRow: View {
           .accessibilityHidden(true)
       }
       .frame(minHeight: 56)
+      .padding(.horizontal, capsule ? 12 : 0)
+      .background {
+        if capsule {
+          RoundedRectangle(cornerRadius: 22, style: .circular)
+            .fill(RitmTheme.panel)
+            .overlay {
+              RoundedRectangle(cornerRadius: 22, style: .circular)
+                .strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
+            }
+        }
+      }
       .contentShape(Rectangle())
     }
     .buttonStyle(RitmPressStyle(scale: 0.98))

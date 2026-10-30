@@ -87,6 +87,8 @@ struct FinanceOverviewSections: View {
   let log: FinanceDrawLog
   let actions: FinanceActions
   let openCard: (String) -> Void
+  @State private var showingHistory = false
+  @State private var historyFollowUp: FinanceHistoryFollowUp?
 
   var body: some View {
     VStack(spacing: 12) {
@@ -94,6 +96,9 @@ struct FinanceOverviewSections: View {
       dynamicsCard
       distributionCard
       recentCard
+    }
+    .sheet(isPresented: $showingHistory, onDismiss: runHistoryFollowUp) {
+      FinanceAllHistorySheet(format: format, onFollowUp: { historyFollowUp = $0 })
     }
   }
 
@@ -297,18 +302,37 @@ struct FinanceOverviewSections: View {
 
   private var recentCard: some View {
     let recent = FinanceWallet.recent(entries, limit: 6)
-    return RitmCard(reveal: 5) {
-      VStack(alignment: .leading, spacing: 8) {
-        FinanceCardTitle(title: format.text("Последние операции", "Recent operations"))
-        if recent.isEmpty {
-          FinanceEmptyLine(text: format.text("Операций пока нет.", "No operations yet."))
+    return VStack(alignment: .leading, spacing: 12) {
+      FinanceCardTitle(title: format.text("Последние операции", "Recent operations"))
+        .padding(.horizontal, 4)
+      if recent.isEmpty {
+        FinanceEmptyLine(text: format.text("Операций пока нет.", "No operations yet."))
+          .padding(.horizontal, 4)
+      } else {
+        FinanceDatedHistory(
+          entries: recent, format: format, today: today, includeAccount: true, revealOffset: 6,
+          open: actions.open)
+        Button {
+          showingHistory = true
+        } label: {
+          Text(format.text("Все операции", "All operations"))
+            .ritmFont(12, weight: .semibold)
+            .foregroundStyle(RitmTheme.accentColor)
+            .frame(maxWidth: .infinity, minHeight: 44)
         }
-        ForEach(Array(recent.enumerated()), id: \.element.id) { index, entry in
-          if index > 0 { financeDivider() }
-          FinanceOperationRow(
-            entry: entry, format: format, includeAccount: true, action: { actions.open(entry) })
-        }
+        .buttonStyle(RitmPressStyle())
       }
+    }
+    .padding(.top, 6)
+    .ritmPageReveal(index: 5)
+  }
+
+  private func runHistoryFollowUp() {
+    guard let next = historyFollowUp else { return }
+    historyFollowUp = nil
+    switch next {
+    case .edit(let entry): actions.edit(entry)
+    case .delete(let entry): actions.remove(entry)
     }
   }
 }
@@ -661,33 +685,37 @@ struct FinanceAccountSections: View {
   private var historyCard: some View {
     let history = FinanceWallet.history(entries, card: card)
     let shown = showAllHistory ? history : Array(history.prefix(Self.historyLimit))
-    return RitmCard(reveal: 5) {
-      VStack(alignment: .leading, spacing: 8) {
-        FinanceCardTitle(title: format.text("История операций", "Operation history"))
-        if history.isEmpty {
-          FinanceEmptyLine(text: format.text("По этому счёту операций пока нет.", "No operations on this account yet."))
+    return VStack(alignment: .leading, spacing: 12) {
+      FinanceCardTitle(title: format.text("История операций", "Operation history"))
+        .padding(.horizontal, 4)
+      if history.isEmpty {
+        FinanceEmptyLine(
+          text: format.text(
+            "По этому счёту операций пока нет.", "No operations on this account yet.")
+        )
+        .padding(.horizontal, 4)
+      } else {
+        FinanceDatedHistory(
+          entries: shown, format: format, today: today, includeAccount: false, revealOffset: 6,
+          open: actions.open)
+      }
+      if history.count > Self.historyLimit {
+        Button {
+          withAnimation(RitmMotion.indicator) { showAllHistory.toggle() }
+        } label: {
+          Text(
+            showAllHistory
+              ? format.text("Свернуть", "Show less")
+              : format.text("Показать все (\(history.count))", "Show all (\(history.count))")
+          )
+          .ritmFont(12, weight: .semibold)
+          .foregroundStyle(RitmTheme.accentColor)
+          .frame(maxWidth: .infinity, minHeight: 44)
         }
-        ForEach(Array(shown.enumerated()), id: \.element.id) { index, item in
-          if index > 0 { financeDivider() }
-          FinanceOperationRow(
-            entry: item, format: format, includeAccount: false, action: { actions.open(item) })
-        }
-        if history.count > Self.historyLimit {
-          Button {
-            withAnimation(RitmMotion.indicator) { showAllHistory.toggle() }
-          } label: {
-            Text(
-              showAllHistory
-                ? format.text("Свернуть", "Show less")
-                : format.text("Показать все (\(history.count))", "Show all (\(history.count))")
-            )
-            .ritmFont(12, weight: .semibold)
-            .foregroundStyle(RitmTheme.accentColor)
-            .frame(maxWidth: .infinity, minHeight: 44)
-          }
-          .buttonStyle(RitmPressStyle())
-        }
+        .buttonStyle(RitmPressStyle())
       }
     }
+    .padding(.top, 6)
+    .ritmPageReveal(index: 5)
   }
 }

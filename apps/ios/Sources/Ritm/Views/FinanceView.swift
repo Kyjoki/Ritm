@@ -56,6 +56,7 @@ struct FinanceView: View {
         VStack(alignment: .leading, spacing: 0) {
           heading
           notices
+          if !expanded { FinanceInboxCard() }
           content(cards)
           RitmPageFooter()
         }
@@ -121,17 +122,7 @@ struct FinanceView: View {
   // MARK: Heading
 
   private var heading: some View {
-    RitmPageHeading(
-      eyebrow: (expanded
-        ? store.text("Ritm · Карты раскрыты", "Ritm · Cards open")
-        : store.text("Ritm · Карты собраны", "Ritm · Cards stacked")).uppercased(),
-      title: store.text("Финансы", "Finance"),
-      description: expanded
-        ? nil
-        : store.text(
-          "Поступления, расходы и активы — в одной ясной картине.",
-          "Income, spending and assets in one clear picture.")
-    ) {
+    RitmPageHeading(title: store.text("Финансы", "Finance")) {
       // The stack opens and collapses by tapping a card; only the card settings stay a button.
       if !cards.isEmpty {
         FinanceCustomizeButton(format: format(cards)) { customizing = true }

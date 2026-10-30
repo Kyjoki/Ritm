@@ -23,8 +23,6 @@ struct FinanceEditor: View {
   @State private var toID = ""
   @State private var validation: String?
   @State private var saving = false
-  @State private var showAllCategories: Bool
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   init(
     entry: FinanceEntry?, kind: FinanceEntryKind, currency: FinanceCurrency,
@@ -38,9 +36,6 @@ struct FinanceEditor: View {
     _amount = State(initialValue: FinanceDisplay.decimal(entry?.amountMinor ?? entry?.valueMinor))
     _date = State(initialValue: entry?.date ?? entry?.asOf ?? "")
     _category = State(initialValue: entry?.category ?? "")
-    // A selected category behind «Ещё» (or one kept from elsewhere) starts open, unanimated.
-    _showAllCategories = State(
-      initialValue: FinanceCategories.needsMore(entry?.category, income: (entry?.type ?? kind) == .income))
     _name = State(initialValue: entry?.name ?? "")
     _note = State(initialValue: entry?.note ?? "")
     _exchange = State(initialValue: entry?.exchange ?? "KASE")
@@ -145,67 +140,9 @@ struct FinanceEditor: View {
       }
     }
   }
-  private var mainTiles: [FinanceCategory] {
-    kind == .income ? FinanceCategories.incomeMain : FinanceCategories.expenseMain
-  }
-  private var moreTiles: [FinanceCategory] {
-    let isIncome = kind == .income
-    let more = isIncome ? FinanceCategories.incomeMore : FinanceCategories.expenseMore
-    let stored = (entry?.category ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !stored.isEmpty, !(mainTiles + more).contains(where: { $0.label == stored }) else {
-      return more
-    }
-    // A category saved elsewhere stays selectable, so editing the record does not lose it.
-    return more + [
-      FinanceCategory(label: stored, english: stored, symbol: FinanceCategories.symbol(for: stored))
-    ]
-  }
-  private func toggleCategories() {
-    let opening = !showAllCategories
-    let animation: Animation =
-      reduceMotion
-      ? .easeInOut(duration: 0.2)
-      : .timingCurve(0.2, 0.8, 0.2, 1, duration: opening ? 0.42 : 0.3)
-    withAnimation(animation) { showAllCategories = opening }
-  }
-  private func categoryTile(_ item: FinanceCategory) -> FinanceCategoryTile {
-    FinanceCategoryTile(
-      symbol: item.symbol, title: store.text(item.label, item.english),
-      selected: category == item.label
-    ) { category = item.label }
-  }
   private var categoryPicker: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Text(store.text("Категория", "Category"))
-        .ritmFont(12, weight: .semibold)
-        .foregroundStyle(RitmTheme.muted)
-      LazyVGrid(
-        columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8
-      ) {
-        ForEach(mainTiles, id: \.label) { categoryTile($0) }
-        FinanceCategoryMoreTile(
-          expanded: showAllCategories, reduceMotion: reduceMotion,
-          title: store.text("Ещё", "More"), collapseTitle: store.text("Свернуть", "Collapse"),
-          hint: showAllCategories
-            ? store.text("Развёрнуто", "Expanded") : store.text("Свёрнуто", "Collapsed"),
-          action: toggleCategories)
-        if showAllCategories {
-          ForEach(Array(moreTiles.enumerated()), id: \.element.label) { index, item in
-            categoryTile(item).transition(extraTransition(index))
-          }
-        }
-      }
-    }
-    .padding(.vertical, 4)
-  }
-  /// Extra tiles fade and scale in from 0.85 with a 35 ms stagger; Reduce Motion is a plain fade.
-  private func extraTransition(_ index: Int) -> AnyTransition {
-    if reduceMotion { return .opacity.animation(.easeInOut(duration: 0.2)) }
-    let curve = { (duration: Double) in Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: duration) }
-    return .asymmetric(
-      insertion: AnyTransition.opacity.combined(with: .scale(scale: 0.85))
-        .animation(curve(0.42).delay(0.035 * Double(index))),
-      removal: AnyTransition.opacity.combined(with: .scale(scale: 0.85)).animation(curve(0.3)))
+    FinanceCategoryPicker(
+      income: kind == .income, selection: $category, stored: entry?.category)
   }
   private var stockFields: some View {
     Section {
@@ -355,73 +292,5 @@ struct FinanceEditor: View {
       await onSave()
       dismiss()
     }
-  }
-}
-
-private extension View {
-  /// The shared 56 pt picker tile: a rounded outline, accent-tinted and heavier when selected.
-  func categoryTileChrome(selected: Bool) -> some View {
-    let shape = RoundedRectangle(cornerRadius: 12, style: .circular)
-    return self
-      .foregroundStyle(selected ? RitmTheme.accentColor : RitmTheme.text)
-      .frame(maxWidth: .infinity, minHeight: 56)
-      .padding(.horizontal, 2)
-      .background(selected ? RitmTheme.soft : Color.clear, in: shape)
-      .overlay {
-        shape.strokeBorder(
-          selected ? RitmTheme.accentColor : RitmTheme.line, lineWidth: selected ? 1.5 : 1)
-      }
-      .contentShape(shape)
-  }
-}
-
-private struct FinanceCategoryTile: View {
-  let symbol: String
-  let title: String
-  let selected: Bool
-  let action: () -> Void
-
-  var body: some View {
-    Button(action: action) {
-      VStack(spacing: 4) {
-        Image(systemName: symbol).font(.system(size: 19, weight: .regular)).frame(height: 22)
-        Text(title).ritmFont(10, weight: .medium).lineLimit(1).minimumScaleFactor(0.7)
-      }
-      .categoryTileChrome(selected: selected)
-    }
-    .buttonStyle(.plain)
-    .accessibilityLabel(title)
-    .accessibilityAddTraits(selected ? .isSelected : [])
-  }
-}
-
-/// «Ещё» / «Свернуть»: the chevron turns 180 degrees and the label crossfades.
-private struct FinanceCategoryMoreTile: View {
-  let expanded: Bool
-  let reduceMotion: Bool
-  let title: String
-  let collapseTitle: String
-  let hint: String
-  let action: () -> Void
-
-  var body: some View {
-    Button(action: action) {
-      VStack(spacing: 4) {
-        Image(systemName: "chevron.down")
-          .font(.system(size: 19, weight: .regular))
-          .rotationEffect(.degrees(expanded && !reduceMotion ? 180 : 0))
-          .opacity(reduceMotion && expanded ? 0.7 : 1)
-          .frame(height: 22)
-        ZStack {
-          Text(title).opacity(expanded ? 0 : 1)
-          Text(collapseTitle).opacity(expanded ? 1 : 0)
-        }
-        .ritmFont(10, weight: .medium).lineLimit(1).minimumScaleFactor(0.7)
-      }
-      .categoryTileChrome(selected: false)
-    }
-    .buttonStyle(.plain)
-    .accessibilityLabel(expanded ? collapseTitle : title)
-    .accessibilityHint(hint)
   }
 }

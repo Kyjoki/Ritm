@@ -13,5 +13,13 @@
     <array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
     <key>UILaunchScreen</key><dict/>
     <key>ITSAppUsesNonExemptEncryption</key><false/>
+    <!-- ritm://add?… is opened by the Apple Wallet automation in Shortcuts (see WalletInbox). -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key><string>app.ritm.personal</string>
+            <key>CFBundleURLSchemes</key><array><string>ritm</string></array>
+        </dict>
+    </array>
 </dict>
 </plist>

@@ -96,19 +96,13 @@ struct HabitsView: View {
   /// On a phone the web stacks the title and puts the 44 pt «+» under it.
   private var heading: some View {
     VStack(alignment: .leading, spacing: 0) {
-      RitmPageHeading(
-        eyebrow: "RITM · " + store.text("Ежедневные привычки", "Daily habits"),
-        title: store.text("Привычки", "Habits"),
-        description: store.text(
-          "Маленькие действия складываются в устойчивый ритм.",
-          "Small actions add up to a steady rhythm.")
-      )
-      .padding(.bottom, -24)
+      RitmPageHeading(title: store.text("Привычки", "Habits"))
+        .padding(.bottom, -20)
       RitmIconCTA(symbol: "plus", label: store.text("Новая привычка", "New habit")) {
         store.errorMessage = nil
         editing = HabitEditTarget(habit: nil)
       }
-      .padding(.top, 36)
+      .padding(.top, 14)
     }
     .padding(.bottom, 24)
   }

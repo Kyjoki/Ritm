@@ -83,12 +83,7 @@ struct DayView: View {
     let name =
       store.bootstrap?.settings.displayName.split(separator: " ").first.map(String.init) ?? ""
     let greeting = DayPlan.greeting(hour: hour, language: store.language)
-    return RitmPageHeading(
-      eyebrow: store.todayLabel + " · " + store.text("Мой день", "My day"),
-      title: name.isEmpty ? greeting : greeting + ", " + name,
-      description: store.text(
-        "Ваши дела. Ваш темп. Один ясный план.", "Your tasks. Your pace. One clear plan.")
-    ) {
+    return RitmPageHeading(title: name.isEmpty ? greeting : greeting + ", " + name) {
       RitmIconCTA(symbol: "plus.circle", label: store.text("Добавить запись", "Add entry")) {
         addEntry()
       }
