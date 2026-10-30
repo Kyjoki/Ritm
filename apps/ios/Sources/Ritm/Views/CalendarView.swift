@@ -130,27 +130,17 @@ struct CalendarView: View {
 
   private var toolbar: some View {
     VStack(alignment: .leading, spacing: 6) {
-      HStack(spacing: 8) {
+      HStack(alignment: .center, spacing: 12) {
         Text(store.text("Календарь", "Calendar"))
           .ritmFont(21, weight: .bold, tracking: -0.045)
           .foregroundStyle(RitmTheme.text)
+          .lineLimit(1)
+          .minimumScaleFactor(0.8)
           .accessibilityAddTraits(.isHeader)
         Spacer(minLength: 0)
-        Button {
+        RitmIconCTA(symbol: "plus", label: store.text("Добавить запись", "Add entry")) {
           addEntry(selected)
-        } label: {
-          HStack(spacing: 8) {
-            Image(systemName: "plus").font(.system(size: 17, weight: .semibold))
-            Text(store.text("Добавить запись", "Add entry")).lineLimit(1)
-          }
-          .ritmFont(14, weight: .semibold)
-          .foregroundStyle(RitmTheme.ctaInk)
-          .padding(.horizontal, 14)
-          .frame(minHeight: 44)
-          .ritmGlass(in: Capsule(), prominent: true, interactive: true)
-          .contentShape(Capsule())
         }
-        .buttonStyle(RitmGlassButtonStyle())
       }
       HStack(spacing: 5) {
         iconButton("chevron.left", store.text("Предыдущий период", "Previous period")) { shift(-1) }

@@ -445,13 +445,22 @@ struct RitmPageHeading<Action: View>: View {
     self.action = action()
   }
 
+  @Environment(\.dynamicTypeSize) private var typeSize
+
+  /// Title left, action right, one row. The title stays on one line (shrinking to 80 %) up to
+  /// the large sizes and wraps only at accessibility sizes, where the action sits beside the
+  /// first line. The row is never shorter than the 44 pt action, so every page starts alike.
   var body: some View {
-    HStack(alignment: .center, spacing: 12) {
+    let wraps = typeSize.isAccessibilitySize
+    HStack(alignment: wraps ? .top : .center, spacing: 12) {
       Text(title)
         .ritmText(.pageTitle)
         .foregroundStyle(RitmTheme.titleGradient)
+        .lineLimit(wraps ? nil : 1)
+        .minimumScaleFactor(wraps ? 1 : 0.8)
+        .fixedSize(horizontal: false, vertical: wraps)
         .accessibilityAddTraits(.isHeader)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
       action
     }
     .padding(.top, 6)

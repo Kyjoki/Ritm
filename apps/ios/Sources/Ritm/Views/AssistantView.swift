@@ -96,9 +96,8 @@ struct AssistantView: View {
   // MARK: Heading and history
 
   private var heading: some View {
-    VStack(alignment: .leading, spacing: 15) {
+    VStack(alignment: .leading, spacing: 0) {
       RitmPageHeading(title: store.text("ИИ-помощник", "AI assistant"))
-        .padding(.bottom, -20)
       HStack(spacing: 9) {
         Button {
           withAnimation(reduceMotion ? nil : RitmMotion.ease(0.24)) { historyOpen.toggle() }

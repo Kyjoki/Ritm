@@ -509,7 +509,7 @@ struct FinanceWalletView: View {
   }
 }
 
-/// The 48 pt «Настроить карты» icon button in the page heading.
+/// The 44 pt «Настроить карты» icon button in the page heading.
 struct FinanceCustomizeButton: View {
   let format: FinanceFormat
   let action: () -> Void
@@ -519,7 +519,7 @@ struct FinanceCustomizeButton: View {
       Image(systemName: "slider.horizontal.3")
         .font(.system(size: 16, weight: .regular))
         .foregroundStyle(RitmTheme.accentColor)
-        .frame(width: 48, height: 48)
+        .frame(width: 44, height: 44)
         .ritmGlass(in: Circle(), interactive: true)
         .contentShape(Circle())
     }

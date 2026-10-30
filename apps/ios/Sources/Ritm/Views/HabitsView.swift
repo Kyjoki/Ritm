@@ -93,18 +93,14 @@ struct HabitsView: View {
 
   // MARK: Heading and list
 
-  /// On a phone the web stacks the title and puts the 44 pt «+» under it.
+  /// The title on the left and the 44 pt «+» on the right, on one row.
   private var heading: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      RitmPageHeading(title: store.text("Привычки", "Habits"))
-        .padding(.bottom, -20)
+    RitmPageHeading(title: store.text("Привычки", "Habits")) {
       RitmIconCTA(symbol: "plus", label: store.text("Новая привычка", "New habit")) {
         store.errorMessage = nil
         editing = HabitEditTarget(habit: nil)
       }
-      .padding(.top, 14)
     }
-    .padding(.bottom, 24)
   }
 
   private var listHeading: some View {

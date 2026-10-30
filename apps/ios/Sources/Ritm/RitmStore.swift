@@ -480,6 +480,7 @@ final class RitmStore {
       while !Task.isCancelled {
         do { try await Task.sleep(for: .seconds(30)) } catch { return }
         guard !Task.isCancelled else { return }
+        self?.now = Date()  // The greeting and «today» follow the clock even while offline.
         await self?.refresh()
       }
     }
