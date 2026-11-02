@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Write finished workouts to Apple Health. xtool lists this entitlement as free; whether Apple's server grants it to a free developer team is not verified. -->
+    <key>com.apple.developer.healthkit</key><true/>
+</dict>
+</plist>

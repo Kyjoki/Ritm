@@ -50,6 +50,8 @@ final class RitmStore {
   /// The training log («Тренировки»); local to this iPhone and NOT cleared by sign-out or a
   /// server switch: it is the owner's own log, not account data held by the server.
   let workouts = WorkoutStore()
+  /// Saving finished workouts to Apple Health; local to this iPhone, not cleared by sign-out.
+  let health = HealthExportStore()
 
   /// The Ritm server this device talks to. Changed only through `changeServer(to:)`.
   private(set) var serverAddress: ServerAddress
@@ -70,6 +72,11 @@ final class RitmStore {
     serverAddress = address
     client = try? APIClient(baseURL: address.url)
     vault = SessionVault(server: address)
+    workouts.alerts.language = { [weak self] in self?.language ?? .ru }
+    // A workout resumed after a relaunch: reuse its lock-screen card and pending notification.
+    workouts.syncAlerts()
+    workouts.onWorkoutFinished = { [health] in health.exportIfEnabled($0) }
+    health.reconcileOnLaunch()
   }
 
   /// Switches this device to another server and signs it out first. The session and the saved
@@ -479,6 +486,7 @@ final class RitmStore {
     pollTask?.cancel()
     if value {
       now = Date()
+      workouts.syncAlerts()
       schedulePolling()
       Task { await refresh() }
     }

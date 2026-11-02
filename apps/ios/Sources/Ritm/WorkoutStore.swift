@@ -31,6 +31,10 @@ final class WorkoutStore {
   private(set) var rest: RestTimer
   /// True while the last attempt to write a file failed.
   private(set) var saveFailed = false
+  /// What the running workout shows outside the app (rest notification, lock-screen card).
+  @ObservationIgnored let alerts = WorkoutAlerts()
+  /// Called with each completed workout, only after it is saved in the journal (never on cancel).
+  @ObservationIgnored var onWorkoutFinished: ((WorkoutRecord) -> Void)?
 
   @ObservationIgnored private let directory: URL
   @ObservationIgnored private var dirty: Set<File> = []
@@ -150,6 +154,7 @@ final class WorkoutStore {
     rest = RestTimer(preset: rest.preset)
     scheduleSave(.session)
     flush(.session)
+    syncAlerts(now: now)
     return .started
   }
 
@@ -165,11 +170,12 @@ final class WorkoutStore {
   @discardableResult
   func toggleSet(item itemID: String, set setID: String, now: Date = Date()) -> WorkoutSessionItem.TickResult {
     var result = WorkoutSessionItem.TickResult.missing
-    mutateSession { $0.update(itemID) { result = $0.toggle(setID: setID) } }
+    mutateSession(syncing: false) { $0.update(itemID) { result = $0.toggle(setID: setID) } }
     if result == .done {
       rest.restart(now: now)
       scheduleSave(.session)
     }
+    syncAlerts(now: now)
     return result
   }
 
@@ -198,6 +204,8 @@ final class WorkoutStore {
     scheduleSave(.history)
     scheduleSave(.session)
     flush()
+    syncAlerts(now: now)
+    onWorkoutFinished?(record)  // after the journal is on disk; may export to Apple Health
     return true
   }
 
@@ -207,14 +215,16 @@ final class WorkoutStore {
     rest.reset()
     scheduleSave(.session)
     flush()
+    syncAlerts()
   }
 
-  private func mutateSession(_ change: (inout WorkoutSession) -> Void) {
+  private func mutateSession(syncing: Bool = true, _ change: (inout WorkoutSession) -> Void) {
     guard var next = session else { return }
     change(&next)
     guard next != session else { return }
     session = next
     scheduleSave(.session)
+    if syncing { syncAlerts() }
   }
 
   // MARK: - Rest timer
@@ -225,22 +235,30 @@ final class WorkoutStore {
     case .idle, .paused, .finished: rest.start(now: now)
     }
     scheduleSave(.session)
+    syncAlerts(now: now)
   }
 
   func resetRest() {
     rest.reset()
     scheduleSave(.session)
+    syncAlerts()
   }
 
   func extendRest(now: Date = Date()) {
     rest.extend(now: now)
     scheduleSave(.session)
+    syncAlerts(now: now)
   }
 
   func setRestPreset(_ value: TimeInterval, now: Date = Date()) {
     rest.setPreset(value, now: now)
     scheduleSave(.session)
+    syncAlerts(now: now)
   }
+
+  /// Hands the workout to the end-of-rest notification and the lock-screen card. They only
+  /// derive from it; a failure there never touches the journal.
+  func syncAlerts(now: Date = Date()) { alerts.sync(session: session, rest: rest, now: now) }
 
   // MARK: - Files
 

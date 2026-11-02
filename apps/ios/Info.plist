@@ -13,6 +13,13 @@
     <array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
     <key>UILaunchScreen</key><dict/>
     <key>ITSAppUsesNonExemptEncryption</key><false/>
+    <!-- Apple Health: Ritm only WRITES finished workouts; the entitlement is in Ritm.entitlements. -->
+    <key>NSHealthShareUsageDescription</key>
+    <string>Ritm ничего не читает из Здоровья. Доступ нужен только для записи тренировок.</string>
+    <key>NSHealthUpdateUsageDescription</key>
+    <string>Ritm сохраняет в Здоровье только завершённые тренировки: тип, время начала и окончания и длительность. Подходы, веса и упражнения остаются в журнале Ritm.</string>
+    <!-- Live Activities: the lock-screen workout card. Needs the widget extension in LiveActivity/. -->
+    <key>NSSupportsLiveActivities</key><true/>
     <!-- ritm://add?… is opened by the Apple Wallet automation in Shortcuts (see WalletInbox). -->
     <key>CFBundleURLTypes</key>
     <array>

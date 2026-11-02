@@ -3,7 +3,8 @@
   "git": {
     "deploymentEnabled": {
       "codex/ritm-native-ios": false,
-      "claude/ritm-native-ios-parity": false
+      "claude/ritm-native-ios-parity": false,
+      "claude/ritm-health-live-activity": false
     }
   },
   "framework": "vite",

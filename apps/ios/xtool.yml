@@ -3,3 +3,4 @@ bundleID: app.ritm.personal
 product: Ritm
 infoPath: Info.plist
 iconPath: Resources/AppIcon.png
+entitlementsPath: Ritm.entitlements

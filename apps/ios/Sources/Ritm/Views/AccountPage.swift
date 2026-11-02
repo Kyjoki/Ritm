@@ -91,6 +91,8 @@ struct AccountView: View {
                 connectionsCard.ritmPageReveal(index: 4)
                 WalletSettingsCard().ritmPageReveal(index: 5)
                 ServerAddressCard().ritmPageReveal(index: 6)
+                LiveActivitySettingsCard().ritmPageReveal(index: 7)
+                HealthSettingsCard().ritmPageReveal(index: 8)
               }
               .padding(.top, 22)
               .disabled(saving)
