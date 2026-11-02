@@ -189,6 +189,7 @@ struct FinanceView: View {
         expanded: $expanded, selectedID: $selectedID, dragging: $walletDragging
       )
       .padding(.horizontal, -16)
+      PaymentsEntryRow(cards: cards, format: format)
       ZStack(alignment: .top) {
         if expanded, let selected {
           FinanceAccountSections(

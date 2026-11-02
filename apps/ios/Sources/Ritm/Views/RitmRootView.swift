@@ -14,24 +14,25 @@ final class RitmNavigation {
   var scrollToNotifications = false
 }
 enum RitmSection: String, CaseIterable, Hashable {
-  case day, calendar, habits, finance, assistant, settings
+  case day, calendar, habits, finance, assistant, workouts, settings
   var symbol: String {
     switch self {
     case .day: "square.grid.2x2"
     case .calendar: "calendar"
     case .habits: "checklist"
     case .assistant: "sparkles"
+    case .workouts: "dumbbell"
     case .finance: "wallet.pass"
     case .settings: "slider.horizontal.3"
     }
   }
   /// Pages whose header scrolls with the content, as on the web. The other pages still keep
   /// their actions in the navigation bar, so their header stays pinned for now.
-  var embedsHeader: Bool { [.day, .habits, .settings].contains(self) }
+  var embedsHeader: Bool { [.day, .habits, .workouts, .settings].contains(self) }
   /// Tabs shown in the bottom bar, left to right; the last slot is «Ещё».
   static let barSections: [RitmSection] = [.day, .calendar, .habits, .finance]
   /// Pages reached through the «Ещё» panel.
-  static let moreSections: [RitmSection] = [.assistant, .settings]
+  static let moreSections: [RitmSection] = [.assistant, .workouts, .settings]
 }
 struct RitmRootView: View {
   @Environment(RitmStore.self) private var store
@@ -179,6 +180,7 @@ struct RitmRootView: View {
     case .calendar: CalendarView()
     case .habits: HabitsView()
     case .assistant: AssistantView()
+    case .workouts: WorkoutsView()
     case .finance: FinanceView()
     case .settings: AccountView()
     }
@@ -192,6 +194,7 @@ extension RitmSection {
     case .calendar: store.text("Календарь", "Calendar")
     case .habits: store.text("Привычки", "Habits")
     case .assistant: store.text("ИИ-помощник", "AI assistant")
+    case .workouts: store.text("Тренировки", "Workouts")
     case .finance: store.text("Финансы", "Finance")
     case .settings: store.text("Настройки", "Settings")
     }
@@ -460,10 +463,12 @@ private struct RitmBubble: Shape {
 /// «Ещё»: a compact panel above the bar, its tail pointing at the «Ещё» slot. It stays in the
 /// tree and animates (scale + fade from the tail) so it can also close smoothly.
 private struct RitmMorePanel: View {
-  private static let tileWidth: CGFloat = 108
+  private static let tileWidth: CGFloat = 92
   private static let padding: CGFloat = 10
   private static let spacing: CGFloat = 8
-  private static let panelWidth = tileWidth * 2 + spacing + padding * 2
+  private static let panelWidth =
+    tileWidth * CGFloat(RitmSection.moreSections.count)
+    + spacing * CGFloat(RitmSection.moreSections.count - 1) + padding * 2
 
   @Environment(RitmStore.self) private var store
   @Environment(\.accessibilityReduceMotion) private var reduceMotion

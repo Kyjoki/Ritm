@@ -6,8 +6,8 @@ import SwiftUI
 /// with Dynamic Type the buttons drop under the label instead of overlapping it.
 struct RitmDurationStepper: View {
   @Binding var duration: Int
-  var range: ClosedRange<Int> = 5...720
-  var step = 5
+  var range: ClosedRange<Int> = 15...720
+  var step = 15
   @Environment(RitmStore.self) private var store
 
   private var title: String {
@@ -55,8 +55,16 @@ struct RitmDurationStepper: View {
     }
   }
 
+  /// The value a tap leads to: always a multiple of `step`, so 1 h 5 min goes to 1 h 15 min on «+»
+  /// and back to 1 h on «−» (an existing off-grid duration snaps to the grid on the first tap).
+  private func target(_ delta: Int) -> Int {
+    let down = (duration / step) * step
+    let raw = delta > 0 ? down + step : (duration % step == 0 ? duration - step : down)
+    return min(range.upperBound, max(range.lowerBound, raw))
+  }
+
   private func button(_ symbol: String, _ label: String, _ delta: Int) -> some View {
-    let allowed = range.contains(duration + delta)
+    let allowed = delta > 0 ? target(delta) > duration : target(delta) < duration
     return Button {
       change(delta)
     } label: {
@@ -77,6 +85,7 @@ struct RitmDurationStepper: View {
   }
 
   private func change(_ delta: Int) {
-    duration = min(range.upperBound, max(range.lowerBound, duration + delta))
+    let next = target(delta)
+    if delta > 0 ? next > duration : next < duration { duration = next }
   }
 }

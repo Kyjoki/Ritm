@@ -45,6 +45,11 @@ final class RitmStore {
   let wallet = WalletInboxStore()
   /// The Files folder whose `purchases.txt` the Shortcuts automation appends to; local only.
   let walletFolder = WalletFolderSource()
+  /// Recurring payments («Обязательные платежи»); local to this iPhone, cleared with the account.
+  let payments = PaymentScheduleStore()
+  /// The training log («Тренировки»); local to this iPhone and NOT cleared by sign-out or a
+  /// server switch: it is the owner's own log, not account data held by the server.
+  let workouts = WorkoutStore()
 
   /// The Ritm server this device talks to. Changed only through `changeServer(to:)`.
   private(set) var serverAddress: ServerAddress
@@ -81,6 +86,7 @@ final class RitmStore {
     pollTask?.cancel()
     wallet.reset()
     walletFolder.disconnect()
+    payments.reset()
     vault.forgetLogin()
     await clearAccount()
     let newVault = SessionVault(server: address)
@@ -457,6 +463,7 @@ final class RitmStore {
     vault.forgetLogin()
     wallet.reset()
     walletFolder.disconnect()
+    payments.reset()
     await clearAccount()
     isMutating = false
     if revokeFailed {
