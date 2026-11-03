@@ -36,7 +36,7 @@ struct PaymentsSheet: View {
         VStack(alignment: .leading, spacing: 12) {
           header
           Button { editing = PaymentEditRoute(paymentID: nil) } label: {
-            Label(format.text("Добавить платёж", "Add payment"), systemImage: "plus")
+            Label { Text(format.text("Добавить платёж", "Add payment")) } icon: { RitmSymbol("plus") }
           }
           .buttonStyle(RitmPrimaryButtonStyle())
           .disabled(!cards.contains { $0.kind == .account })
@@ -258,7 +258,7 @@ private struct PaymentCard: View {
     let account = format.accountName(payment.accountID) ?? payment.currency.rawValue
     return VStack(alignment: .leading, spacing: 10) {
       HStack(alignment: .top, spacing: 10) {
-        Image(systemName: FinanceCategories.symbol(for: payment.category))
+        RitmSymbol(FinanceCategories.symbol(for: payment.category))
           .font(.system(size: 17))
           .foregroundStyle(RitmTheme.accentColor)
           .frame(width: 38, height: 38)

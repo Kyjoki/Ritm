@@ -75,8 +75,10 @@ struct WorkoutActiveView: View {
           .ritmPageReveal(index: min(index + 1, 7))
       }
       VStack(spacing: 10) {
-        Button(store.text("Завершить тренировку", "Finish workout")) { tryFinish(session) }
-          .buttonStyle(RitmPrimaryButtonStyle(minHeight: 48))
+        Button { tryFinish(session) } label: {
+          Text(store.text("Завершить тренировку", "Finish workout")).workoutButtonFont()
+        }
+        .buttonStyle(RitmPrimaryButtonStyle(minHeight: 48))
         Button(store.text("Отменить тренировку", "Cancel workout")) { confirmingCancel = true }
           .buttonStyle(WorkoutDangerButtonStyle())
       }
@@ -85,22 +87,25 @@ struct WorkoutActiveView: View {
   }
 
   private func stats(_ session: WorkoutSession) -> some View {
-    RitmCard(padding: 14, radius: 22) {
-      HStack(alignment: .top, spacing: 8) {
+    RitmCard(padding: 14) {
+      // `.wk-sr`: three columns weighted 1.3 : 1 : .8, 8 pt apart.
+      WorkoutWeightedRow(weights: [1.3, 1, 0.8], spacing: 8) {
         stat(store.text("Программа", "Program")) {
-          Text(session.programName).ritmFont(15, weight: .semibold).foregroundStyle(RitmTheme.text)
+          Text(session.programName).ritmFont(15, weight: .bold, tracking: -0.03)
+            .foregroundStyle(RitmTheme.text).fixedSize(horizontal: false, vertical: true)
         }
         stat(store.text("Выполнено", "Done")) {
           HStack(spacing: 0) {
-            RitmCountText(session.doneSets) { "\($0)" }
+            RitmCountText(session.doneSets) { "\($0)" }.fontWeight(.bold)
             Text(store.text(" из ", " of ") + "\(session.totalSets)")
           }
-          .ritmFont(15, weight: .semibold).foregroundStyle(RitmTheme.text)
+          .ritmFont(14).foregroundStyle(RitmTheme.text)
         }
         stat(store.text("Время", "Time")) {
           TimelineView(.periodic(from: session.startedAt, by: 1)) { context in
             Text(WorkoutClock.elapsed(from: session.startedAt, now: context.date))
-              .ritmFont(15, weight: .semibold).monospacedDigit().foregroundStyle(RitmTheme.text)
+              .ritmFont(15, weight: .bold, tracking: -0.03).monospacedDigit()
+              .foregroundStyle(RitmTheme.text)
           }
         }
       }
@@ -146,6 +151,42 @@ struct WorkoutActiveView: View {
   }
 }
 
+/// A row whose children share the width by weight (CSS `fr` columns), top aligned.
+private struct WorkoutWeightedRow: Layout {
+  let weights: [CGFloat]
+  let spacing: CGFloat
+
+  private func widths(_ total: CGFloat, count: Int) -> [CGFloat] {
+    let used = Array(weights.prefix(count))
+    let free = max(0, total - spacing * CGFloat(max(0, count - 1)))
+    let sum = used.reduce(0, +)
+    return used.map { sum > 0 ? free * $0 / sum : 0 }
+  }
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    let total = proposal.width ?? 320
+    let columns = widths(total, count: subviews.count)
+    var height: CGFloat = 0
+    for (index, subview) in subviews.enumerated() where index < columns.count {
+      height = max(height, subview.sizeThatFits(ProposedViewSize(width: columns[index], height: nil)).height)
+    }
+    return CGSize(width: total, height: height)
+  }
+
+  func placeSubviews(
+    in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+  ) {
+    let columns = widths(bounds.width, count: subviews.count)
+    var x = bounds.minX
+    for (index, subview) in subviews.enumerated() where index < columns.count {
+      subview.place(
+        at: CGPoint(x: x, y: bounds.minY), anchor: .topLeading,
+        proposal: ProposedViewSize(width: columns[index], height: nil))
+      x += columns[index] + spacing
+    }
+  }
+}
+
 /// The exercise of the workout being replaced; `Identifiable` so a sheet can be tied to it.
 private struct WorkoutSwapTarget: Identifiable {
   let id: String
@@ -170,26 +211,26 @@ private struct WorkoutExerciseCard: View {
         Button {
           withAnimation(RitmMotion.easeOut(0.25)) { store.workouts.addSet(item: itemID) }
         } label: {
-          Label(store.text("Подход", "Set"), systemImage: "plus")
-            .ritmFont(12.5, weight: .semibold).foregroundStyle(RitmTheme.accentColor)
+          Label { Text(store.text("Подход", "Set")) } icon: { RitmSymbol("plus") }
+            .ritmFont(12.5, weight: .bold).foregroundStyle(RitmTheme.accentColor)
             .frame(minHeight: 44).padding(.horizontal, 12).contentShape(Rectangle())
         }
         .buttonStyle(RitmPressStyle())
         .disabled(item.sets.count >= WorkoutSessionItem.maxSets)
         .accessibilityLabel(store.text("Добавить подход", "Add a set"))
       }
-      .padding(.horizontal, 10).padding(.top, 12).padding(.bottom, 4)
-      .background { RitmPanelBackground(radius: 22) }
+      .padding(.horizontal, 10).padding(.top, 12).padding(.bottom, 8)
+      .background { RitmPanelBackground(radius: 23) }
     }
   }
 
   private func header(_ item: WorkoutSessionItem) -> some View {
     HStack(spacing: 8) {
-      VStack(alignment: .leading, spacing: 1) {
-        Text(item.name).ritmFont(16, weight: .semibold).foregroundStyle(RitmTheme.text)
+      VStack(alignment: .leading, spacing: 0) {
+        Text(item.name).ritmFont(16, weight: .semibold, tracking: -0.035).foregroundStyle(RitmTheme.text)
           .fixedSize(horizontal: false, vertical: true)
           .accessibilityAddTraits(.isHeader)
-        Text(lastTime(item)).ritmFont(11.5).foregroundStyle(RitmTheme.muted)
+        Text(lastTime(item)).ritmFont(12).foregroundStyle(RitmTheme.muted)
       }
       Spacer(minLength: 4)
       WorkoutIconButton(
@@ -197,7 +238,7 @@ private struct WorkoutExerciseCard: View {
         label: store.text("Заменить упражнение «\(item.name)»", "Replace exercise “\(item.name)”"),
         action: replace)
     }
-    .padding(.leading, 4)
+    .padding(.leading, 4).padding(.bottom, 4)
   }
 
   private func lastTime(_ item: WorkoutSessionItem) -> String {
@@ -210,7 +251,8 @@ private struct WorkoutExerciseCard: View {
 
   private var columnTitles: some View {
     WorkoutSetColumns(
-      number: { Text("№") }, previous: { Text(store.text("Прошлый раз", "Last time")) },
+      number: { Text("№").frame(maxWidth: .infinity, alignment: .leading) },
+      previous: { Text(store.text("Прошлый раз", "Last time")) },
       weight: { Text(store.text("кг", "kg")) }, reps: { Text(store.text("повт.", "reps")) },
       tick: { Color.clear }, remove: { Color.clear })
     .ritmFont(10.5).foregroundStyle(RitmTheme.muted)
@@ -311,7 +353,7 @@ private struct WorkoutSetRow: View {
       Text(previous.map { "\(WorkoutFormat.weight($0.weight, comma: russian)) × \($0.reps)" } ?? "—")
         .ritmFont(11.5).monospacedDigit().foregroundStyle(RitmTheme.muted)
       if let delta {
-        Text(delta).ritmFont(10.5, weight: .semibold).foregroundStyle(RitmTheme.accentColor)
+        Text(delta).ritmFont(10.5, weight: .bold).foregroundStyle(WorkoutColors.income)
           .minimumScaleFactor(0.75)
           .transition(.opacity)
       }
@@ -329,7 +371,10 @@ private struct WorkoutSetRow: View {
     placeholder: String, text: Binding<String>, keyboard: UIKeyboardType, done: Bool, invalid: Bool,
     label: String
   ) -> some View {
-    TextField(placeholder, text: text)
+    TextField(
+      text: text,
+      prompt: Text(placeholder).foregroundStyle(RitmTheme.muted.opacity(0.55)).fontWeight(.medium)
+    ) { Text(label) }
       .keyboardType(keyboard)
       .multilineTextAlignment(.center)
       .autocorrectionDisabled()
@@ -350,16 +395,16 @@ private struct WorkoutSetRow: View {
     Button {
       toggle()
     } label: {
-      Image(systemName: "checkmark")
-        .font(.system(size: 16, weight: .bold))
+      RitmSymbol("checkmark")
+        .font(.system(size: 19, weight: .semibold))
         .foregroundStyle(set.done ? RitmTheme.ctaInk : Color.clear)
-        .frame(width: 40, height: 40)
+        .frame(width: 44, height: 44)
         .background {
           Circle().fill(set.done ? AnyShapeStyle(RitmTheme.ctaGradient) : AnyShapeStyle(RitmTheme.field))
         }
         .overlay { Circle().strokeBorder(set.done ? Color.clear : RitmTheme.line, lineWidth: 1.5) }
-        .frame(width: 44, height: 44)
         .contentShape(Circle())
+        .animation(reduceMotion ? nil : RitmMotion.easeOut(0.2), value: set.done)
     }
     .buttonStyle(RitmPressStyle(scale: 0.92))
     .accessibilityLabel(store.text("Подход \(index + 1) выполнен", "Set \(index + 1) done"))
@@ -376,7 +421,7 @@ private struct WorkoutSetRow: View {
           workouts.removeSet(item: itemID, set: setID)
         }
       } label: {
-        Image(systemName: "xmark").font(.system(size: 13, weight: .medium))
+        RitmSymbol("xmark").font(.system(size: 15, weight: .medium))
           .foregroundStyle(RitmTheme.muted)
           .frame(width: 40, height: 44).contentShape(Rectangle())
       }
@@ -402,6 +447,20 @@ private struct WorkoutSetRow: View {
 
 // MARK: - Rest timer
 
+/// Ticks four times a second while a rest runs and for the 3.5 s of glow after it ends, then
+/// stops: an idle timer or a finished one costs no frames.
+private struct WorkoutRestSchedule: TimelineSchedule {
+  let end: Date?
+
+  func entries(from start: Date, mode: Mode) -> some Sequence<Date> {
+    let last = end.map { max(start, $0).addingTimeInterval(3.5) } ?? start
+    return sequence(first: start) { date in
+      let next = date.addingTimeInterval(0.25)
+      return next <= last ? next : nil
+    }
+  }
+}
+
 /// The rest timer pinned above the bar. It shows `endDate - now`, never a negative number, and
 /// at zero only a soft glow appears (steady under Reduce Motion). No sound, no notification.
 private struct WorkoutRestBar: View {
@@ -412,7 +471,7 @@ private struct WorkoutRestBar: View {
 
   var body: some View {
     let rest = workouts.rest
-    TimelineView(.animation(minimumInterval: 0.25, paused: rest.endDate == nil)) { context in
+    TimelineView(WorkoutRestSchedule(end: rest.endDate)) { context in
       bar(rest: rest, now: context.date)
     }
     .padding(.horizontal, 16)
@@ -430,7 +489,7 @@ private struct WorkoutRestBar: View {
         VStack(alignment: .leading, spacing: 0) {
           Text(label(phase)).ritmFont(11).foregroundStyle(RitmTheme.muted)
           Text(WorkoutClock.rest(remaining: rest.remaining(now: now)))
-            .ritmFont(28, weight: .semibold, tracking: -0.04).monospacedDigit()
+            .ritmFont(28, weight: .bold, tracking: -0.04).monospacedDigit()
             .foregroundStyle(phase == .finished ? RitmTheme.accentColor : RitmTheme.text)
         }
         .accessibilityElement(children: .combine)
@@ -440,8 +499,8 @@ private struct WorkoutRestBar: View {
             Button {
               workouts.toggleRest()
             } label: {
-              Image(systemName: phase == .running ? "pause.fill" : "play.fill")
-                .font(.system(size: 17)).foregroundStyle(RitmTheme.ctaInk)
+              RitmSymbol(phase == .running ? "pause.fill" : "play.fill")
+                .font(.system(size: 19)).foregroundStyle(RitmTheme.ctaInk)
                 .frame(width: 44, height: 44)
                 .ritmGlass(in: Circle(), prominent: true, interactive: true)
                 .contentShape(Circle())
@@ -452,8 +511,8 @@ private struct WorkoutRestBar: View {
             Button {
               workouts.resetRest()
             } label: {
-              Image(systemName: "arrow.counterclockwise")
-                .font(.system(size: 16)).foregroundStyle(RitmTheme.accentColor)
+              RitmSymbol("arrow.counterclockwise")
+                .font(.system(size: 17, weight: .medium)).foregroundStyle(RitmTheme.accentColor)
                 .frame(width: 44, height: 44)
                 .ritmGlass(in: Circle(), interactive: true)
                 .contentShape(Circle())
@@ -464,8 +523,8 @@ private struct WorkoutRestBar: View {
               workouts.extendRest()
             } label: {
               Text(store.text("+15\u{00A0}с", "+15\u{00A0}s"))
-                .ritmFont(12.5, weight: .semibold).foregroundStyle(RitmTheme.accentColor)
-                .padding(.horizontal, 10).frame(minWidth: 44, minHeight: 44)
+                .ritmFont(12.5, weight: .bold).foregroundStyle(RitmTheme.accentColor)
+                .padding(.horizontal, 8).frame(minWidth: 44, minHeight: 44)
                 .ritmGlass(in: Capsule(), interactive: true)
                 .contentShape(Capsule())
             }
@@ -478,9 +537,11 @@ private struct WorkoutRestBar: View {
         label: store.text("Время отдыха", "Rest time"), values: RestTimer.presets,
         title: { store.text("\(Int($0))\u{00A0}с", "\(Int($0))\u{00A0}s") },
         selection: Binding(get: { workouts.rest.preset }, set: { workouts.setRestPreset($0) }),
-        fontSize: 12)
+        fontSize: 12
+      )
+      .padding(.trailing, 4)
     }
-    .padding(.leading, 14).padding(.trailing, 8).padding(.vertical, 8)
+    .padding(.leading, 14).padding(.trailing, 10).padding(.top, 8).padding(.bottom, 6)
     .background(RitmTheme.glassDense.opacity(0.55), in: shape)
     .ritmGlass(in: shape)
     .overlay {

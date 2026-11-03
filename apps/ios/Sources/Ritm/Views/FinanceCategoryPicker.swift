@@ -37,9 +37,9 @@ struct FinanceCategoryPicker: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
+    VStack(alignment: .leading, spacing: 5) {
       Text(store.text("Категория", "Category"))
-        .ritmFont(12, weight: .semibold)
+        .ritmFont(12, weight: .medium)
         .foregroundStyle(RitmTheme.muted)
       LazyVGrid(
         columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8
@@ -57,7 +57,6 @@ struct FinanceCategoryPicker: View {
         }
       }
     }
-    .padding(.vertical, 4)
   }
 
   private func tile(_ item: FinanceCategory) -> FinanceCategoryTile {
@@ -90,15 +89,15 @@ struct FinanceCategoryPicker: View {
 private extension View {
   /// The shared 56 pt picker tile: a rounded outline, accent-tinted and heavier when selected.
   func categoryTileChrome(selected: Bool) -> some View {
-    let shape = RoundedRectangle(cornerRadius: 12, style: .circular)
+    let shape = RoundedRectangle(cornerRadius: 14, style: .circular)
     return self
-      .foregroundStyle(selected ? RitmTheme.accentColor : RitmTheme.text)
-      .frame(maxWidth: .infinity, minHeight: 56)
-      .padding(.horizontal, 2)
-      .background(selected ? RitmTheme.soft : Color.clear, in: shape)
+      .foregroundStyle(selected ? RitmTheme.accentColor : RitmTheme.muted)
+      .frame(maxWidth: .infinity, minHeight: 66)
+      .padding(.horizontal, 3)
+      .background(selected ? RitmTheme.soft : RitmTheme.field, in: shape)
       .overlay {
         shape.strokeBorder(
-          selected ? RitmTheme.accentColor : RitmTheme.line, lineWidth: selected ? 1.5 : 1)
+          selected ? RitmTheme.accentColor : RitmTheme.line, lineWidth: selected ? 2 : 1)
       }
       .contentShape(shape)
   }
@@ -112,9 +111,9 @@ private struct FinanceCategoryTile: View {
 
   var body: some View {
     Button(action: action) {
-      VStack(spacing: 4) {
-        Image(systemName: symbol).font(.system(size: 19, weight: .regular)).frame(height: 22)
-        Text(title).ritmFont(10, weight: .medium).lineLimit(1).minimumScaleFactor(0.7)
+      VStack(spacing: 5) {
+        RitmSymbol(symbol).font(.system(size: 22, weight: .regular)).frame(height: 24)
+        Text(title).ritmFont(10.5, weight: .semibold).lineLimit(1).minimumScaleFactor(0.7)
       }
       .categoryTileChrome(selected: selected)
     }
@@ -135,17 +134,17 @@ private struct FinanceCategoryMoreTile: View {
 
   var body: some View {
     Button(action: action) {
-      VStack(spacing: 4) {
-        Image(systemName: "chevron.down")
-          .font(.system(size: 19, weight: .regular))
+      VStack(spacing: 5) {
+        RitmSymbol("chevron.down")
+          .font(.system(size: 22, weight: .regular))
           .rotationEffect(.degrees(expanded && !reduceMotion ? 180 : 0))
           .opacity(reduceMotion && expanded ? 0.7 : 1)
-          .frame(height: 22)
+          .frame(height: 24)
         ZStack {
           Text(title).opacity(expanded ? 0 : 1)
           Text(collapseTitle).opacity(expanded ? 1 : 0)
         }
-        .ritmFont(10, weight: .medium).lineLimit(1).minimumScaleFactor(0.7)
+        .ritmFont(10.5, weight: .semibold).lineLimit(1).minimumScaleFactor(0.7)
       }
       .categoryTileChrome(selected: false)
     }

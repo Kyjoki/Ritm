@@ -155,7 +155,7 @@ extension RitmStore {
     let input = WalletEntryBuilder.expense(from: purchase, category: category)
     guard await write({ try await $0.createFinanceEntry(input) }) != nil else { return false }
     wallet.confirmed(id: purchase.id, category: category)
-    toasts.show(text("Операция добавлена", "Transaction added"))
+    // The new expense raises the banner and a bell notice (notices.update), so no toast.
     return true
   }
 

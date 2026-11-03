@@ -7,7 +7,6 @@ struct DayHabitsCard: View {
   @Environment(RitmStore.self) private var store
   @Environment(RitmNavigation.self) private var navigation
   @State private var weekOffset = 0
-  @State private var busyID: String?
 
   private static let nameWidth: CGFloat = 148
   private static let dayWidth: CGFloat = 44
@@ -37,19 +36,22 @@ struct DayHabitsCard: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .background {
       let shape = RoundedRectangle(cornerRadius: 23, style: .circular)
-      shape.fill(surface)
-        .overlay(alignment: .top) {
-          // `radial-gradient(ellipse 70% 30px at 50% 0, var(--glass-wash), transparent)`.
-          EllipticalGradient(
-            colors: [Color(light: 0xFFFFFF, dark: 0xDABDFF, lightOpacity: 0.34, darkOpacity: 0.045), .clear],
-            center: .top, startRadiusFraction: 0, endRadiusFraction: 0.5
-          )
-          .frame(height: 60)
-          .scaleEffect(x: 1.4, y: 1, anchor: .top)
-        }
-        .clipShape(shape)
-        .overlay { shape.strokeBorder(RitmTheme.panelBorder, lineWidth: 1) }
-        .shadow(color: RitmTheme.panelShadow, radius: 11, y: 7)
+      // The shadow belongs to the plain fill only, so it is not re-blurred with the overlays.
+      ZStack {
+        shape.fill(surface).shadow(color: RitmTheme.panelShadow, radius: 11, y: 7)
+        shape.fill(surface)
+          .overlay(alignment: .top) {
+            // `radial-gradient(ellipse 70% 30px at 50% 0, var(--glass-wash), transparent)`.
+            EllipticalGradient(
+              colors: [Color(light: 0xFFFFFF, dark: 0xDABDFF, lightOpacity: 0.34, darkOpacity: 0.045), .clear],
+              center: .top, startRadiusFraction: 0, endRadiusFraction: 0.5
+            )
+            .frame(height: 60)
+            .scaleEffect(x: 1.4, y: 1, anchor: .top)
+          }
+          .clipShape(shape)
+        shape.strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
+      }
     }
     .ritmPageReveal(index: 5)
   }
@@ -85,7 +87,7 @@ struct DayHabitsCard: View {
   }
 
   private var actions: some View {
-    HStack(spacing: 12) {
+    HStack(spacing: 6) {
       Text(
         label(days.first, template: "d MMM") + " – " + label(days.last, template: "d MMM")
       )
@@ -93,23 +95,22 @@ struct DayHabitsCard: View {
       .foregroundStyle(RitmTheme.muted)
       .lineLimit(1)
       .fixedSize()
-      HStack(spacing: 0) {
-        weekButton("chevron.left", store.text("Предыдущая неделя", "Previous week")) {
-          weekOffset -= 1
-        }
-        weekButton("chevron.right", store.text("Следующая неделя", "Next week")) {
-          weekOffset = min(0, weekOffset + 1)
-        }
-        .disabled(weekOffset == 0)
-        .opacity(weekOffset == 0 ? 0.45 : 1)
+      .padding(.trailing, 6)
+      weekButton("chevron.left", store.text("Предыдущая неделя", "Previous week")) {
+        weekOffset -= 1
       }
+      weekButton("chevron.right", store.text("Следующая неделя", "Next week")) {
+        weekOffset = min(0, weekOffset + 1)
+      }
+      .disabled(weekOffset == 0)
+      .opacity(weekOffset == 0 ? 0.45 : 1)
       Spacer(minLength: 0)
       Button {
         navigation.section = .habits
       } label: {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
           Text(store.text("Все привычки", "All habits"))
-          Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .medium)).accessibilityHidden(true)
+          RitmSymbol("arrow.up.right").font(.system(size: 11, weight: .medium)).accessibilityHidden(true)
         }
       }
       .buttonStyle(RitmTextButtonStyle())
@@ -121,17 +122,15 @@ struct DayHabitsCard: View {
     -> some View
   {
     Button(action: action) {
-      Image(systemName: symbol)
-        .font(.system(size: 14, weight: .medium))
-        .foregroundStyle(RitmTheme.muted)
-        .frame(width: 32, height: 32)
-        .ritmGlass(in: Circle(), interactive: true)
-        .frame(width: 44, height: 44)
-        .contentShape(Rectangle())
+      DaySquareButtonLabel(
+        symbol: symbol, size: 32, radius: 10, iconSize: 14, weight: .medium,
+        tint: RitmTheme.muted
+      )
+      .frame(width: 44, height: 44)
+      .contentShape(Rectangle())
     }
     .buttonStyle(RitmPressStyle())
     .padding(.horizontal, -6)
-    .padding(.trailing, 12)
     .accessibilityLabel(label)
   }
 
@@ -155,7 +154,7 @@ struct DayHabitsCard: View {
     } label: {
       HStack(spacing: 8) {
         Text(store.text("Добавить привычку", "Add habit"))
-        Image(systemName: "arrow.up.right").font(.system(size: 13, weight: .medium)).accessibilityHidden(true)
+        RitmSymbol("arrow.up.right").font(.system(size: 13, weight: .medium)).accessibilityHidden(true)
       }
     }
     .buttonStyle(RitmSecondaryButtonStyle())
@@ -164,47 +163,59 @@ struct DayHabitsCard: View {
   // MARK: Matrix
 
   /// Names stay pinned while the seven days scroll underneath, as with `position: sticky`.
-  /// Each row takes the height its name needs; the day cells follow those heights.
+  /// The scrolling grid carries invisible copies of the names, so every row is exactly as tall as
+  /// its name needs and the pinned column on top lines up with it (no measuring pass).
   private var matrix: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      Text(store.text("Привычки", "Habits"))
-        .ritmFont(11)
-        .foregroundStyle(RitmTheme.muted)
-        .frame(height: 38)
-      ForEach(active) { habit in
-        nameCell(habit)
-          .background {
-            GeometryReader { proxy in
-              Color.clear.preference(key: HabitRowHeights.self, value: [habit.id: proxy.size.height])
-            }
-          }
-      }
-    }
-    .frame(width: Self.nameWidth, alignment: .leading)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .overlayPreferenceValue(HabitRowHeights.self) { heights in
+    ZStack(alignment: .topLeading) {
       ScrollView(.horizontal) {
         VStack(spacing: 0) {
-          HStack(spacing: 0) { ForEach(days, id: \.self) { dateHeader($0) } }
+          HStack(spacing: 0) {
+            Color.clear.frame(width: Self.nameWidth, height: 38)
+            ForEach(days, id: \.self) { dateHeader($0) }
+          }
           ForEach(active) { habit in
             HStack(spacing: 0) {
-              ForEach(days, id: \.self) { date in
-                dayCell(habit, date: date, height: heights[habit.id] ?? 52)
-              }
+              nameCell(habit).hidden()
+              ForEach(days, id: \.self) { dayCell(habit, date: $0) }
             }
+            .background { todayColumn }
+            .overlay(alignment: .top) { Rectangle().fill(RitmTheme.line).frame(height: 1) }
           }
         }
       }
       .scrollIndicators(.hidden)
-      .padding(.leading, Self.nameWidth)
       .accessibilityElement(children: .contain)
       .accessibilityLabel(store.text("Привычки на неделю", "Weekly habits"))
+      pinnedNames
     }
+  }
+
+  /// The `--soft` stripe behind today's cells of one row.
+  private var todayColumn: some View {
+    HStack(spacing: 0) {
+      Color.clear.frame(width: Self.nameWidth)
+      ForEach(days, id: \.self) { date in
+        (date == store.today ? RitmTheme.soft : Color.clear).frame(width: Self.dayWidth)
+      }
+    }
+  }
+
+  /// `.nm`: the sticky name column on the surface colour, above the scrolling days.
+  private var pinnedNames: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      Text(store.text("Привычки", "Habits"))
+        .ritmFont(11)
+        .foregroundStyle(RitmTheme.muted)
+        .frame(width: Self.nameWidth, height: 38, alignment: .leading)
+      ForEach(active) { nameCell($0) }
+    }
+    .background(surface)
+    .allowsHitTesting(false)
   }
 
   private func nameCell(_ habit: Habit) -> some View {
     HStack(spacing: 10) {
-      Image(systemName: habitSymbol(habit.icon))
+      RitmSymbol(habitSymbol(habit.icon))
         .font(.system(size: 15, weight: .medium))
         .foregroundStyle(RitmTheme.accentColor)
         .frame(width: 32, height: 32)
@@ -260,7 +271,7 @@ struct DayHabitsCard: View {
     .accessibilityHidden(true)
   }
 
-  private func dayCell(_ habit: Habit, date: String, height: CGFloat) -> some View {
+  private func dayCell(_ habit: Habit, date: String) -> some View {
     let done = HabitSchedule.isComplete(habit, on: date)
     let future = date > store.today
     let available = HabitSchedule.canMark(habit, on: date, today: store.today)
@@ -288,33 +299,26 @@ struct DayHabitsCard: View {
       Task { await toggle(habit, date: date) }
     } label: {
       HabitMark(done: done, off: off, future: future)
-        .frame(width: Self.dayWidth, height: height)
-        .background(date == store.today ? RitmTheme.soft : Color.clear)
-        .overlay(alignment: .top) { Rectangle().fill(RitmTheme.line).frame(height: 1) }
+        .frame(width: Self.dayWidth, height: 52)
         .contentShape(Rectangle())
     }
     .buttonStyle(RitmPressStyle(scale: 0.9))
-    .disabled(!available || busyID == habit.id || !store.canWrite)
+    .disabled(!available || !store.canWrite)
     .accessibilityLabel(available ? "\(action). \(state)" : "\(habit.title): \(dateLabel). \(state)")
     .accessibilityAddTraits(available && done ? .isSelected : [])
   }
 
   private func label(_ date: String?, template: String) -> String {
     guard let date else { return "" }
-    return FeatureDate.label(date, zone: store.timeZone, language: store.language, template: template)
+    return HabitDates.label(date, zone: store.timeZone, language: store.language, template: template)
   }
 
   /// A completed day goes back to zero; otherwise the whole target is recorded at once.
   private func toggle(_ habit: Habit, date: String) async {
-    guard busyID == nil else { return }
     let latest = store.habits.first { $0.id == habit.id } ?? habit
     let count = HabitSchedule.isComplete(latest, on: date) ? 0 : HabitSchedule.target(latest)
-    busyID = habit.id
-    _ = await store.write {
-      try await $0.setHabitProgress(
-        id: latest.id, date: date, count: count, expectedUpdatedAt: latest.updatedAt)
-    }
-    busyID = nil
+    // Instant: the store updates the habit now and sends the request in the background.
+    _ = await store.tickHabit(id: latest.id, date: date, count: count)
   }
 }
 
@@ -334,19 +338,12 @@ private struct HabitMark: View {
       }
       .overlay {
         if done {
-          Image(systemName: "checkmark")
+          RitmSymbol("checkmark")
             .font(.system(size: 11, weight: .heavy))
             .foregroundStyle(RitmTheme.accentInk)
         }
       }
       .frame(width: 28, height: 28)
       .opacity(done ? 1 : off ? 0.72 : future ? 0.66 : 1)
-  }
-}
-
-private struct HabitRowHeights: PreferenceKey {
-  static let defaultValue: [String: CGFloat] = [:]
-  static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
-    value.merge(nextValue()) { max($0, $1) }
   }
 }

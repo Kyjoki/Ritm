@@ -43,7 +43,8 @@ struct WorkoutExercisePicker: View {
             field(
               store.text("Например, Тяга гантели в наклоне", "For example, One-arm dumbbell row"),
               text: $newName, search: false)
-            Button(createLabel, action: create).buttonStyle(RitmPrimaryButtonStyle(minHeight: 48))
+            Button(action: create) { Text(createLabel).workoutButtonFont() }
+              .buttonStyle(RitmPrimaryButtonStyle(minHeight: 48))
             if let error {
               Text(error).ritmText(.body).foregroundStyle(RitmTheme.danger)
                 .accessibilityAddTraits(.updatesFrequently)
@@ -78,7 +79,7 @@ struct WorkoutExercisePicker: View {
       dismiss()
     } label: {
       HStack(spacing: 8) {
-        Text(exercise.name).ritmFont(14, weight: .medium).foregroundStyle(RitmTheme.text)
+        Text(exercise.name).ritmFont(14, weight: .semibold).foregroundStyle(RitmTheme.text)
           .multilineTextAlignment(.leading)
         Spacer(minLength: 8)
         if taken { Text(usedNote).ritmFont(11).foregroundStyle(RitmTheme.muted) }

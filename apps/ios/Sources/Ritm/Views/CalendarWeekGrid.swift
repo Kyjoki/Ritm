@@ -3,7 +3,8 @@ import SwiftUI
 
 /// The week timetable on a phone (CalendarPage.tsx with `.cal-mobile-week`): seven columns across
 /// the screen, 48 pt per hour, a 40 pt time column, overlaps behind a per-day button, swipe to
-/// change week and a long press that lifts an entry to move it (CalendarWeekDrag.swift).
+/// change week and a long press that lifts an entry to move it (CalendarWeekDrag.swift). The
+/// hour grid is the only vertical scroll; the rows above it stay put.
 struct CalendarWeekGrid: View {
   let days: [String]
   let entries: [String: [DayOccurrence]]
@@ -17,15 +18,11 @@ struct CalendarWeekGrid: View {
   let onAdd: (String, Int) -> Void
   let onSelectDay: (String) -> Void
   let onMove: (DayOccurrence, String, Int) async -> Void
-  let onDragActive: (Bool) -> Void
   let onSwipe: (Int) -> Void
   @Environment(RitmStore.self) private var store
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var swipeOffset: CGFloat = 0
-  @State private var swipeStart: Date?
-  @State private var swipeCancelled = false
   @State private var model = WeekDragModel()
-  @GestureState private var touching = false
 
   private let hour = CGFloat(CalendarPlan.hourHeight)
   private let timeColumn = CGFloat(CalendarPlan.timeColumn)
@@ -39,11 +36,14 @@ struct CalendarWeekGrid: View {
   private var hasUntimed: Bool { days.contains { (entries[$0] ?? []).contains { $0.start == nil } } }
 
   var body: some View {
+    let overlapMap = overlaps
     GeometryReader { proxy in
       let column = max(1, (proxy.size.width - timeColumn) / CGFloat(max(1, days.count)))
       VStack(spacing: 0) {
         header(column: column)
-        if overlaps.values.contains(where: { !$0.isEmpty }) { overlapRow(column: column) }
+        if overlapMap.values.contains(where: { !$0.isEmpty }) {
+          overlapRow(column: column, groups: overlapMap)
+        }
         if hasUntimed { allDayRow(column: column) }
         grid(column: column, width: proxy.size.width)
       }
@@ -73,7 +73,7 @@ struct CalendarWeekGrid: View {
               }
           }
           .frame(width: column)
-          .frame(minHeight: 43)
+          .frame(minHeight: 43, alignment: .top)
           .contentShape(Rectangle())
         }
         .buttonStyle(RitmPressStyle())
@@ -82,19 +82,18 @@ struct CalendarWeekGrid: View {
             + FeatureDate.label(day, zone: store.timeZone, language: store.language, template: "d MMMM"))
       }
     }
-    .padding(.bottom, 2)
     .overlay(alignment: .bottom) { Rectangle().fill(RitmTheme.line).frame(height: 1) }
   }
 
-  private func overlapRow(column: CGFloat) -> some View {
+  private func overlapRow(column: CGFloat, groups: [String: [DayOccurrence]]) -> some View {
     HStack(spacing: 0) {
-      Image(systemName: "square.stack")
+      RitmSymbol("square.stack")
         .font(.system(size: 12))
         .foregroundStyle(RitmTheme.muted)
         .frame(width: timeColumn)
         .accessibilityHidden(true)
       ForEach(days, id: \.self) { day in
-        let group = overlaps[day] ?? []
+        let group = groups[day] ?? []
         if group.isEmpty {
           Color.clear.frame(width: column, height: 32)
         } else {
@@ -102,7 +101,7 @@ struct CalendarWeekGrid: View {
             onPick(day, group)
           } label: {
             HStack(spacing: 3) {
-              Image(systemName: "square.stack").font(.system(size: 10)).accessibilityHidden(true)
+              RitmSymbol("square.stack").font(.system(size: 10)).accessibilityHidden(true)
               Text("\(group.count)").ritmFont(11, weight: .semibold)
             }
             .foregroundStyle(RitmTheme.accentColor)
@@ -123,6 +122,7 @@ struct CalendarWeekGrid: View {
         }
       }
     }
+    .padding(.top, 6)
     .padding(.bottom, 4)
     .overlay(alignment: .bottom) { Rectangle().fill(RitmTheme.line).frame(height: 1) }
   }
@@ -141,40 +141,39 @@ struct CalendarWeekGrid: View {
   }
 
   private func allDayContent(column: CGFloat) -> some View {
-      HStack(alignment: .top, spacing: 0) {
-        Text(store.text("Весь день / без времени", "All day / untimed"))
-          .ritmFont(10, lineSpacing: 2)
-          .foregroundStyle(RitmTheme.muted)
-          .frame(width: timeColumn, alignment: .leading)
-          .padding(.top, 5)
-        ForEach(days, id: \.self) { day in
-          VStack(spacing: 3) {
-            ForEach((entries[day] ?? []).filter { $0.start == nil }) { entry in
-              Button {
-                onOpen(entry)
-              } label: {
-                Text(entry.title)
-                  .ritmFont(10)
-                  .lineLimit(1)
-                  .foregroundStyle(RitmTheme.text)
-                  .padding(3)
-                  .frame(maxWidth: .infinity, alignment: .leading)
-                  .background { CalendarEntrySurface(colorID: entry.colorId, radius: 5) }
-              }
-              .buttonStyle(RitmPressStyle())
-              .accessibilityLabel(CalendarText.occurrenceLabel(entry, store: store))
+    HStack(alignment: .top, spacing: 0) {
+      Text(store.text("Весь день / без времени", "All day / untimed"))
+        .ritmFont(10, lineSpacing: 2)
+        .foregroundStyle(RitmTheme.muted)
+        .frame(width: timeColumn, alignment: .leading)
+        .padding(.top, 5)
+      ForEach(days, id: \.self) { day in
+        VStack(spacing: 3) {
+          ForEach((entries[day] ?? []).filter { $0.start == nil }) { entry in
+            Button {
+              onOpen(entry)
+            } label: {
+              Text(CalendarText.marker(entry) + entry.title)
+                .ritmFont(10)
+                .lineLimit(1)
+                .strikethrough(entry.completed)
+                .foregroundStyle(RitmTheme.text)
+                .padding(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background { CalendarEntrySurface(colorID: entry.colorId, radius: 5) }
             }
+            .buttonStyle(RitmPressStyle())
+            .accessibilityLabel(CalendarText.occurrenceLabel(entry, store: store))
           }
-          .padding(.horizontal, 4)
-          .frame(width: column, alignment: .top)
         }
+        .padding(.horizontal, 4)
+        .frame(width: column, alignment: .top)
       }
-      .padding(.vertical, 11)
+    }
+    .padding(.vertical, 11)
   }
 
   // MARK: Hours
-
-  private static let viewportSpace = "weekViewport"
 
   private func grid(column: CGFloat, width: CGFloat) -> some View {
     GeometryReader { viewport in
@@ -187,41 +186,35 @@ struct CalendarWeekGrid: View {
             }
           }
           .offset(x: swipeOffset)
-          .background {
-            GeometryReader { content in
-              Color.clear.preference(
-                key: WeekScrollOffsetKey.self,
-                value: -content.frame(in: .named(Self.viewportSpace)).minY)
-            }
-          }
           .overlay(alignment: .topLeading) {
             CalendarDragLayer(model: model, days: days, column: column)
           }
-          .simultaneousGesture(
-            lift(reader: reader, column: column, viewport: viewport.size))
+          .background {
+            CalendarGridTouches(
+              model: model,
+              makeEnv: { environment(reader: reader, column: column, viewport: viewport.size) },
+              swipeLimit: width * 0.4,
+              onSwipeChange: { swipeOffset = $0 },
+              onSwipeEnd: { dx, dy, elapsed in
+                finishSwipe(dx: dx, dy: dy, elapsed: elapsed, width: width)
+              })
+          }
         }
-        .coordinateSpace(name: Self.viewportSpace)
-        .onPreferenceChange(WeekScrollOffsetKey.self) { model.offset = max(0, $0) }
+        // The offset the drag model needs, read from the scroll view itself: no per-frame
+        // geometry reader or preference inside the content.
+        .onScrollGeometryChange(for: CGFloat.self) { max(0, $0.contentOffset.y + $0.contentInsets.top) } action: {
+          _, offset in model.offset = offset
+        }
+        .contentMargins(.bottom, 8, for: .scrollContent)
         .scrollIndicators(.hidden)
         .scrollDisabled(model.active)
         .overlay { CalendarEdgeCue(model: model) }
-        .simultaneousGesture(swipe(width: width))
         .task(id: model.liftedKey) { await autoScroll() }
-        .onChange(of: touching) { _, held in
-          if !held { model.pressInterrupted() }
-        }
         .onChange(of: model.active) { _, active in
-          if active {
-            // A swipe that began before the lift is dropped; `model.active` keeps new ones out.
-            swipeStart = nil
-            settle()
-          }
-          onDragActive(active)
+          // A swipe that began before the lift is dropped.
+          if active { settle() }
         }
-        .onDisappear {
-          model.reset()
-          onDragActive(false)
-        }
+        .onDisappear { model.reset() }
         .onAppear {
           reader.scrollTo("hour-\(CalendarPlan.initialHour)", anchor: .top)
         }
@@ -261,18 +254,14 @@ struct CalendarWeekGrid: View {
     .accessibilityHidden(true)
   }
 
+  /// One day's column. A single tap handler decides by position: a tap on a block opens it, a
+  /// tap on empty space adds an entry there (the blocks themselves take no touches, so the two
+  /// can never both fire).
   private func dayColumn(_ day: String, column: CGFloat) -> some View {
     ZStack(alignment: .topLeading) {
       (day == today ? RitmTheme.soft.opacity(0.34) : Color.clear)
       CalendarSlotLines(hour: hour).stroke(RitmTheme.line.opacity(0.5), lineWidth: 1)
       CalendarSlotLines(hour: hour, wholeHours: true).stroke(RitmTheme.line, lineWidth: 1)
-      // `.cal-free-slot`: a tap on an empty half hour adds an entry there.
-      Color.clear
-        .contentShape(Rectangle())
-        .gesture(
-          SpatialTapGesture().onEnded { value in
-            onAdd(day, min(1410, max(0, Int(value.location.y / (hour / 2)) * 30)))
-          })
       ForEach(CalendarPlan.layout(entries[day] ?? [])) { placed in
         CalendarGridEvent(
           placed: placed, column: column, hour: hour,
@@ -294,10 +283,25 @@ struct CalendarWeekGrid: View {
     }
     .frame(width: column, height: 24 * hour)
     .overlay(alignment: .leading) { Rectangle().fill(RitmTheme.line).frame(width: 1) }
+    .contentShape(Rectangle())
+    .gesture(SpatialTapGesture().onEnded { value in tapped(day, column: column, at: value.location) })
     .accessibilityElement(children: .contain)
     .accessibilityLabel(FeatureDate.label(day, zone: store.timeZone, language: store.language, template: "EEEE d MMMM"))
     .accessibilityAction(named: store.text("Добавить запись в 9 AM", "Add an entry at 9 AM")) {
       onAdd(day, 540)
+    }
+  }
+
+  private func tapped(_ day: String, column: CGFloat, at point: CGPoint) {
+    guard model.tapsAllowed else { return }
+    let placed = CalendarPlan.layout(entries[day] ?? [])
+    if let hit = CalendarPlan.entry(
+      at: Double(point.x), y: Double(point.y), in: placed, column: Double(column),
+      hourHeight: Double(hour))
+    {
+      onOpen(hit.entry)
+    } else {
+      onAdd(day, min(1410, max(0, Int(point.y / (hour / 2)) * 30)))
     }
   }
 
@@ -338,21 +342,6 @@ struct CalendarWeekGrid: View {
         dayIndex: index))
   }
 
-  /// A hold for 0.35 s lifts the entry under the finger. Until then a finger that moves is a
-  /// scroll or a week swipe, and while an entry is lifted both are switched off.
-  private func lift(reader: ScrollViewProxy, column: CGFloat, viewport: CGSize) -> some Gesture {
-    DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.viewportSpace))
-      .updating($touching) { _, state, _ in state = true }
-      .onChanged { value in
-        model.pressMoved(
-          to: value.location, env: environment(reader: reader, column: column, viewport: viewport))
-      }
-      .onEnded { value in
-        model.pressEnded(
-          at: value.location, env: environment(reader: reader, column: column, viewport: viewport))
-      }
-  }
-
   /// Edge auto-scroll and the week dwell run on a 60 Hz loop while an entry is lifted.
   private func autoScroll() async {
     guard model.liftedKey != nil else { return }
@@ -367,36 +356,12 @@ struct CalendarWeekGrid: View {
     }
   }
 
-  /// A deliberate horizontal swipe changes the week; vertical scrolling is left alone.
-  private func swipe(width: CGFloat) -> some Gesture {
-    DragGesture(minimumDistance: 12)
-      .onChanged { value in
-        guard !model.active, !swipeCancelled else { return }
-        if swipeStart == nil { swipeStart = value.time }
-        let dx = value.translation.width
-        let dy = value.translation.height
-        if abs(dy) > 12 && abs(dy) > abs(dx) * 1.2 {
-          swipeCancelled = true
-          settle()
-          return
-        }
-        if abs(dx) > 8 && abs(dx) > abs(dy) * 1.2 {
-          let limit = width * 0.4
-          swipeOffset = max(-limit, min(limit, dx))
-        }
-      }
-      .onEnded { value in
-        defer {
-          swipeStart = nil
-          swipeCancelled = false
-          settle()
-        }
-        guard !model.active, !swipeCancelled, let start = swipeStart else { return }
-        let direction = CalendarPlan.weekSwipe(
-          dx: value.translation.width, dy: value.translation.height,
-          elapsed: value.time.timeIntervalSince(start), width: width)
-        if direction != 0 { onSwipe(direction) }
-      }
+  /// A deliberate horizontal swipe changes the week; the grid then settles back.
+  private func finishSwipe(dx: CGFloat, dy: CGFloat, elapsed: TimeInterval, width: CGFloat) {
+    defer { settle() }
+    guard !model.active else { return }
+    let direction = CalendarPlan.weekSwipe(dx: dx, dy: dy, elapsed: elapsed, width: width)
+    if direction != 0 { onSwipe(direction) }
   }
 
   private func settle() {
@@ -460,13 +425,6 @@ struct CalendarEntrySurface: View {
   }
 }
 
-/// The offset of the grid content inside its scroll view, read to turn a finger position into a
-/// time slot and to know how far auto-scroll may go.
-private struct WeekScrollOffsetKey: PreferenceKey {
-  static let defaultValue: CGFloat = 0
-  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
 /// The card of one entry in the week grid: title and time on the tinted surface. It has no
 /// position and no gestures, so the lifted copy under the finger looks the same.
 struct CalendarEventCard: View {
@@ -491,10 +449,11 @@ struct CalendarEventCard: View {
       }
     }
     .foregroundStyle(RitmTheme.text)
-    .padding(.vertical, tiny ? 2 : 4)
-    .padding(.horizontal, tiny ? 5 : 2)
-    .padding(.leading, 2)
-    .frame(width: width, height: height, alignment: .topLeading)
+    // `.cal-ev`: padding 4 2 4 4 (tiny: 2 5) inside a 1 pt border, 2 pt on the leading edge.
+    .padding(.vertical, (tiny ? 2 : 4) + 1)
+    .padding(.leading, (tiny ? 5 : 4) + 2)
+    .padding(.trailing, (tiny ? 5 : 2) + 1)
+    .frame(width: width, height: height, alignment: tiny ? .leading : .topLeading)
     .background { CalendarEntrySurface(colorID: entry.colorId, outlined: true) }
   }
 
@@ -523,8 +482,8 @@ private struct CalendarGridEvent: View {
     .opacity(lifted ? 0.3 : 1)
     .offset(x: CGFloat(frame.x), y: CGFloat(frame.y))
     .zIndex(1)
-    .contentShape(Rectangle())
-    .onTapGesture(perform: onOpen)
+    // Touches are resolved by position in the column (dayColumn), never by this card.
+    .allowsHitTesting(false)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(CalendarText.occurrenceLabel(placed.entry, store: store))
     .accessibilityHint(hint)

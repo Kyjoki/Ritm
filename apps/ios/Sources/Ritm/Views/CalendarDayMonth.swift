@@ -50,89 +50,87 @@ struct CalendarAgenda: View {
   @Environment(RitmStore.self) private var store
 
   var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 0) {
-        HStack(spacing: 10) {
-          Text(
-            CalendarText.capitalizedWords(
-              FeatureDate.label(
-                date, zone: store.timeZone, language: store.language, template: "EEEE d MMMM"))
-          )
-          .ritmFont(13, weight: .semibold, tracking: -0.02)
-          .foregroundStyle(RitmTheme.text)
-          .accessibilityAddTraits(.isHeader)
-          Spacer(minLength: 0)
-          Text(store.text("Записей: \(entries.count)", "Entries: \(entries.count)"))
-            .ritmFont(11)
-            .foregroundStyle(RitmTheme.muted)
-        }
-        if entries.isEmpty {
-          VStack(spacing: 4) {
-            Image(systemName: "calendar")
-              .font(.system(size: 22))
-              .foregroundStyle(RitmTheme.accentColor.opacity(0.7))
-              .accessibilityHidden(true)
-            Text(
-              uncertain
-                ? store.text("В Ritm на этот день пока нет планов", "No plans in Ritm for this day yet")
-                : store.text("На этот день пока нет планов", "No plans for this day yet")
-            )
-            .ritmFont(12)
-            .foregroundStyle(RitmTheme.muted)
-          }
-          .frame(maxWidth: .infinity)
-          .padding(.top, 24)
-          .padding(.bottom, 12)
-        } else {
-          ForEach(entries) { row($0) }
-        }
-        let free = uncertain ? [] : Array(CalendarPlan.freeIntervals(entries).prefix(2))
-        if !free.isEmpty {
-          VStack(spacing: 8) {
-            ForEach(free, id: \.start) { interval in
-              Button {
-                onAdd(
-                  date, TaskSchedule.minuteTime(interval.start), min(60, interval.end - interval.start))
-              } label: {
-                Label {
-                  Text(
-                    (googleConnected
-                      ? store.text("Свободно", "Free") : store.text("Свободно в Ritm", "Free in Ritm"))
-                      + " " + DayPlan.clock(interval.start, compact: true) + "–"
-                      + DayPlan.clock(interval.end, compact: true))
-                } icon: {
-                  Image(systemName: "plus").font(.system(size: 14, weight: .medium))
-                }
-                .ritmFont(12)
-                .foregroundStyle(RitmTheme.accentColor)
-                .frame(maxWidth: .infinity, minHeight: 46)
-                .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 11, style: .circular))
-                .overlay {
-                  RoundedRectangle(cornerRadius: 11, style: .circular)
-                    .strokeBorder(
-                      RitmTheme.mix(RitmTheme.accentColor, 0.45, into: RitmTheme.line),
-                      style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                }
-              }
-              .buttonStyle(RitmPressStyle(scale: 0.97))
-            }
-          }
-          .padding(.top, 14)
-        }
-        Button {
-          onAdd(date, nil, 60)
-        } label: {
-          Label(store.text("Добавить запись", "Add entry"), systemImage: "plus")
-            .ritmFont(12, weight: .medium)
-            .foregroundStyle(RitmTheme.accentColor)
-            .frame(maxWidth: .infinity, minHeight: 46)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(RitmPressStyle(scale: 0.97))
-        .padding(.top, 6)
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(spacing: 10) {
+        Text(
+          CalendarText.capitalizedWords(
+            FeatureDate.label(
+              date, zone: store.timeZone, language: store.language, template: "EEEE d MMMM"))
+        )
+        .ritmFont(13, weight: .semibold, tracking: -0.02)
+        .foregroundStyle(RitmTheme.text)
+        .accessibilityAddTraits(.isHeader)
+        Spacer(minLength: 0)
+        Text(store.text("Записей: \(entries.count)", "Entries: \(entries.count)"))
+          .ritmFont(11)
+          .foregroundStyle(RitmTheme.muted)
       }
-      .padding(19)
+      if entries.isEmpty {
+        VStack(spacing: 4) {
+          RitmIcon(.calCalendar)
+            .font(.system(size: 22))
+            .foregroundStyle(RitmTheme.accentColor.opacity(0.7))
+            .accessibilityHidden(true)
+          Text(
+            uncertain
+              ? store.text("В Ritm на этот день пока нет планов", "No plans in Ritm for this day yet")
+              : store.text("На этот день пока нет планов", "No plans for this day yet")
+          )
+          .ritmFont(12)
+          .foregroundStyle(RitmTheme.muted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 24)
+        .padding(.bottom, 12)
+      } else {
+        ForEach(entries) { row($0) }
+      }
+      let free = uncertain ? [] : Array(CalendarPlan.freeIntervals(entries).prefix(2))
+      if !free.isEmpty {
+        VStack(spacing: 8) {
+          ForEach(free, id: \.start) { interval in
+            Button {
+              onAdd(
+                date, TaskSchedule.minuteTime(interval.start), min(60, interval.end - interval.start))
+            } label: {
+              Label {
+                Text(
+                  (googleConnected
+                    ? store.text("Свободно", "Free") : store.text("Свободно в Ritm", "Free in Ritm"))
+                    + " " + DayPlan.clock(interval.start, compact: true) + "–"
+                    + DayPlan.clock(interval.end, compact: true))
+              } icon: {
+                RitmSymbol("plus").font(.system(size: 14, weight: .medium))
+              }
+              .ritmFont(12)
+              .foregroundStyle(RitmTheme.accentColor)
+              .frame(maxWidth: .infinity, minHeight: 46)
+              .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 11, style: .circular))
+              .overlay {
+                RoundedRectangle(cornerRadius: 11, style: .circular)
+                  .strokeBorder(
+                    RitmTheme.mix(RitmTheme.accentColor, 0.45, into: RitmTheme.line),
+                    style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+              }
+            }
+            .buttonStyle(RitmPressStyle(scale: 0.97))
+          }
+        }
+        .padding(.top, 14)
+      }
+      Button {
+        onAdd(date, nil, 60)
+      } label: {
+        Label { Text(store.text("Добавить запись", "Add entry")) } icon: { RitmSymbol("plus") }
+          .ritmFont(12, weight: .medium)
+          .foregroundStyle(RitmTheme.accentColor)
+          .frame(maxWidth: .infinity, minHeight: 46)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(RitmPressStyle(scale: 0.97))
+      .padding(.top, 6)
     }
+    .padding(19)
   }
 
   private func row(_ entry: DayOccurrence) -> some View {
@@ -160,7 +158,7 @@ struct CalendarAgenda: View {
       HStack(spacing: 12) {
         Group {
           if entry.start == nil {
-            Image(systemName: "clock").font(.system(size: 16))
+            RitmSymbol("clock").font(.system(size: 16))
           } else {
             Text(CalendarPlan.entryTime(entry, start: true)).ritmFont(12).monospacedDigit()
           }
@@ -173,9 +171,11 @@ struct CalendarAgenda: View {
           Text(details).ritmFont(10, lineSpacing: 4)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        Image(systemName: entry.completed ? "checkmark" : "chevron.right")
-          .font(.system(size: 14, weight: .medium))
-          .accessibilityHidden(true)
+        Group {
+          if entry.completed { RitmSymbol("checkmark") } else { RitmIcon(.rightIcon) }
+        }
+        .font(.system(size: 14, weight: .medium))
+        .accessibilityHidden(true)
       }
       .foregroundStyle(RitmTheme.text)
       .padding(.vertical, 16)
@@ -210,18 +210,16 @@ struct CalendarMonthGrid: View {
 
   var body: some View {
     let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
-    ScrollView {
-      LazyVGrid(columns: columns, spacing: 4) {
-        ForEach(weekdays, id: \.self) { day in
-          Text(day).ritmFont(10).foregroundStyle(RitmTheme.muted).frame(height: 20)
-        }
-        ForEach(CalendarPlan.monthDays(containing: selected), id: \.self) { day in
-          cell(day)
-        }
+    LazyVGrid(columns: columns, spacing: 4) {
+      ForEach(weekdays, id: \.self) { day in
+        Text(day).ritmFont(10).foregroundStyle(RitmTheme.muted).frame(height: 20)
       }
-      .padding(.vertical, 14)
-      .padding(.horizontal, 10)
+      ForEach(CalendarPlan.monthDays(containing: selected), id: \.self) { day in
+        cell(day)
+      }
     }
+    .padding(.vertical, 14)
+    .padding(.horizontal, 10)
   }
 
   private func cell(_ day: String) -> some View {
@@ -314,7 +312,7 @@ struct CalendarOverlapPicker: View {
                   Text(time(entry)).ritmFont(12).foregroundStyle(RitmTheme.muted)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: "chevron.right").foregroundStyle(RitmTheme.muted)
+                RitmIcon(.rightIcon).foregroundStyle(RitmTheme.muted)
                   .accessibilityHidden(true)
               }
               .padding(.vertical, 13)

@@ -2,23 +2,26 @@ import Foundation
 import RitmCore
 import SwiftUI
 
-/// Finance colours that are not web tokens (the finance palette from the design context).
+/// Finance colours: `--income`, `--expense` and the chart palette `--c0…--c5` of the prototype
+/// (the chart palette is the same in both themes there).
 enum FinanceTone {
-  static var income: Color { Color(light: 0x348B71, dark: 0x6FCBA6) }
-  static var expense: Color { Color(light: 0xB3627E, dark: 0xE59AB3) }
+  static var income: Color { Color(light: 0x2A7F66, dark: 0x86D4B6) }
+  static var expense: Color { Color(light: 0xA4506C, dark: 0xEDA2B9) }
   static var incomeSoft: Color {
-    Color(light: 0x74BD9E, dark: 0x74BD9E, lightOpacity: 0.15, darkOpacity: 0.16)
+    Color(light: 0x74BD9E, dark: 0x74BD9E, lightOpacity: 0.16, darkOpacity: 0.16)
   }
   static var expenseSoft: Color {
-    Color(light: 0xD991A5, dark: 0xD991A5, lightOpacity: 0.16, darkOpacity: 0.16)
+    Color(light: 0xD991A5, dark: 0xD991A5, lightOpacity: 0.18, darkOpacity: 0.16)
   }
-  private static let lightChart: [UInt32] = [0x9C77DB, 0xD798BC, 0x77A6D4, 0x79B8A7, 0xD7AD76, 0xB79CB6]
-  private static let darkChart: [UInt32] = [0xB596EA, 0xE6AFCB, 0x94BEE6, 0x94CDBD, 0xE6C490, 0xC9B2C8]
+  /// `--chart-grid`.
+  static var grid: Color {
+    Color(light: 0x706577, dark: 0xAAA0BA, lightOpacity: 0.22, darkOpacity: 0.22)
+  }
+  private static let palette: [UInt32] = [0x9C77DB, 0xD798BC, 0x77A6D4, 0x79B8A7, 0xD7AD76, 0xB79CB6]
 
   static func chart(_ index: Int) -> Color {
-    let count = lightChart.count
-    let slot = ((index % count) + count) % count
-    return Color(light: lightChart[slot], dark: darkChart[slot])
+    let count = palette.count
+    return Color(rgb: palette[((index % count) + count) % count])
   }
 
   /// Green for money in, rose for money out, plain text for zero.
@@ -35,7 +38,8 @@ final class FinanceDrawLog {
 
 // MARK: - Balance area chart
 
-/// Scale of one balance series: «nice» axis ticks and normalised point positions.
+/// Scale of one balance series: «nice» axis ticks (finance.js `niceTicks`, 3 steps, 10 % padding)
+/// and normalised point positions.
 private struct FinanceScale {
   let ticks: [Int]
   let xs: [CGFloat]
@@ -44,20 +48,17 @@ private struct FinanceScale {
   init?(points: [FinancePoint]) {
     guard points.count >= 2 else { return nil }
     let values = points.map(\.valueMinor)
-    var low = Double(values.min() ?? 0)
-    var high = Double(values.max() ?? 0)
-    if high - low < 1 {
-      let pad = max(abs(high) * 0.1, 10_000)
-      // A zero or positive series never shows a negative axis: pad upward from 0.
-      low = low >= 0 ? max(0, low - pad) : low - pad
-      high += pad
-    }
-    let step = Self.niceStep((high - low) / 3)
-    let first = (low / step).rounded(.down) * step
-    let last = (high / step).rounded(.up) * step
+    let low = Double(values.min() ?? 0)
+    let high = Double(values.max() ?? 0)
+    var pad = (high - low) * 0.1
+    if pad == 0 { pad = abs(high) * 0.05 }
+    if pad == 0 { pad = 100 }
+    let step = Self.niceStep((high + pad - (low - pad)) / 3)
+    let first = ((low - pad) / step).rounded(.down) * step
+    let last = ((high + pad) / step).rounded(.up) * step
     var ticks: [Int] = []
     var tick = first
-    while tick <= last + step * 0.001 && ticks.count < 8 {
+    while tick <= last + step * 0.001 && ticks.count < 10 {
       ticks.append(Int(tick.rounded()))
       tick += step
     }
@@ -102,46 +103,66 @@ private struct FinanceScale {
     return Double(era * 146_097 + dayOfEra - 719_468)
   }
 
-  /// `700K`, `1.2M`: axis labels for amounts in minor units.
+  /// `700K`, `1,2M`: axis labels for amounts in minor units (finance.js `abbr`).
   static func compact(_ minor: Int) -> String {
-    let value = Double(abs(minor)) / 100
-    let sign = minor < 0 ? "−" : ""
-    func trimmed(_ number: Double, _ suffix: String) -> String {
-      let text =
-        number >= 100 || number == number.rounded()
-        ? String(Int(number.rounded())) : String(format: "%.1f", number)
-      return sign + text + suffix
+    let value = Double(minor) / 100
+    let magnitude = abs(value)
+    if magnitude >= 1_000_000 {
+      let text = String((value / 1_000_000 * 10).rounded() / 10).replacingOccurrences(of: ".", with: ",")
+      return (text.hasSuffix(",0") ? String(text.dropLast(2)) : text) + "M"
     }
-    if value >= 1_000_000 { return trimmed(value / 1_000_000, "M") }
-    if value >= 1_000 { return trimmed(value / 1_000, "K") }
-    return sign + String(Int(value.rounded()))
+    if magnitude >= 1_000 { return String(Int((value / 1_000).rounded())) + "K" }
+    return String(Int(value.rounded()))
   }
 }
 
-private struct FinanceLineShape: Shape {
-  let xs: [CGFloat]
-  let ys: [CGFloat]
-  let closed: Bool
+/// A monotone cubic curve through `points` (finance.js `monotone`), optionally closed down to
+/// `floor` for the area fill.
+private struct FinanceCurve: Shape {
+  let points: [CGPoint]
+  let floor: CGFloat?
 
   func path(in rect: CGRect) -> Path {
     var path = Path()
-    guard xs.count == ys.count, xs.count > 1 else { return path }
-    let points = zip(xs, ys).map { CGPoint(x: $0 * rect.width, y: (1 - $1) * rect.height) }
-    if closed {
-      path.move(to: CGPoint(x: points[0].x, y: rect.height))
-      path.addLine(to: points[0])
-    } else {
-      path.move(to: points[0])
+    let n = points.count
+    guard n > 1 else { return path }
+    var dx = [CGFloat](repeating: 0, count: n - 1)
+    var m = [CGFloat](repeating: 0, count: n - 1)
+    for i in 0..<(n - 1) {
+      dx[i] = points[i + 1].x - points[i].x
+      m[i] = dx[i] > 0.0001 ? (points[i + 1].y - points[i].y) / dx[i] : 0
     }
-    for index in 1..<points.count {
-      let from = points[index - 1]
-      let to = points[index]
-      let middle = (from.x + to.x) / 2
+    var t = [CGFloat](repeating: 0, count: n)
+    t[0] = m[0]
+    t[n - 1] = m[n - 2]
+    if n > 2 {
+      for i in 1..<(n - 1) { t[i] = m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2 }
+    }
+    for i in 0..<(n - 1) {
+      if m[i] == 0 {
+        t[i] = 0
+        t[i + 1] = 0
+        continue
+      }
+      let a = t[i] / m[i]
+      let b = t[i + 1] / m[i]
+      let s = a * a + b * b
+      if s > 9 {
+        let k = 3 / s.squareRoot()
+        t[i] = k * a * m[i]
+        t[i + 1] = k * b * m[i]
+      }
+    }
+    path.move(to: points[0])
+    for i in 0..<(n - 1) {
+      let h = dx[i] / 3
       path.addCurve(
-        to: to, control1: CGPoint(x: middle, y: from.y), control2: CGPoint(x: middle, y: to.y))
+        to: points[i + 1], control1: CGPoint(x: points[i].x + h, y: points[i].y + t[i] * h),
+        control2: CGPoint(x: points[i + 1].x - h, y: points[i + 1].y - t[i + 1] * h))
     }
-    if closed {
-      path.addLine(to: CGPoint(x: points[points.count - 1].x, y: rect.height))
+    if let floor {
+      path.addLine(to: CGPoint(x: points[n - 1].x, y: floor))
+      path.addLine(to: CGPoint(x: points[0].x, y: floor))
       path.closeSubpath()
     }
     return path
@@ -149,26 +170,24 @@ private struct FinanceLineShape: Shape {
 }
 
 private struct FinanceGridShape: Shape {
-  let rows: [CGFloat]
-  let columns: [CGFloat]
+  let ys: [CGFloat]
+  let left: CGFloat
+  let right: CGFloat
 
   func path(in rect: CGRect) -> Path {
     var path = Path()
-    for row in rows {
-      path.move(to: CGPoint(x: 0, y: (1 - row) * rect.height))
-      path.addLine(to: CGPoint(x: rect.width, y: (1 - row) * rect.height))
-    }
-    for column in columns {
-      path.move(to: CGPoint(x: column * rect.width, y: 0))
-      path.addLine(to: CGPoint(x: column * rect.width, y: rect.height))
+    for y in ys {
+      path.move(to: CGPoint(x: left, y: y))
+      path.addLine(to: CGPoint(x: right, y: y))
     }
     return path
   }
 }
 
-/// Hand-drawn balance chart in the style of `DayRhythmChart`: dashed grid, smooth line, soft
-/// fill and a value badge. The line draws in once per `drawKey` (MOTION.md §4): the stroke in
-/// 780 ms, the area fading in once the line passes 40 %, the end points popping at the end.
+/// The balance chart of the prototype, drawn in its 318 x 164 box (scaled to the panel):
+/// dashed grid, 3 axis labels, a monotone 2.2 pt line with a soft fill, one end dot and the end
+/// value. The line draws in once per `drawKey` (MOTION.md §4): the stroke in 780 ms, the area
+/// fading in once the line passes 40 %, the end dot and label popping at the end.
 struct FinanceAreaChart: View {
   let points: [FinancePoint]
   let period: FinancePeriod
@@ -178,17 +197,19 @@ struct FinanceAreaChart: View {
   let log: FinanceDrawLog
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-  private static let left: CGFloat = 44
-  private static let right: CGFloat = 8
-  private static let top: CGFloat = 12
-  private static let bottom: CGFloat = 26
+  private static let boxWidth: CGFloat = 318
+  private static let boxHeight: CGFloat = 164
+  private static let left: CGFloat = 40
+  private static let right: CGFloat = 12
+  private static let top: CGFloat = 14
+  private static let bottom: CGFloat = 24
 
   var body: some View {
     if let scale = FinanceScale(points: points) {
       RitmDrawGate(key: drawKey) { drawn in chart(scale, drawn: drawn) }
-        .frame(height: 196)
+        .aspectRatio(Self.boxWidth / Self.boxHeight, contentMode: .fit)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(summary(scale))
+        .accessibilityLabel(summary())
     } else {
       Text(format.text("Пока недостаточно данных для графика.", "Not enough data for a chart yet."))
         .ritmFont(11)
@@ -197,7 +218,7 @@ struct FinanceAreaChart: View {
     }
   }
 
-  private func summary(_ scale: FinanceScale) -> String {
+  private func summary() -> String {
     let values = points.map(\.valueMinor)
     let first = format.money(values.first ?? 0, currency)
     let last = format.money(values.last ?? 0, currency)
@@ -205,85 +226,91 @@ struct FinanceAreaChart: View {
       "Баланс за период: с \(first) до \(last)", "Balance over the period: from \(first) to \(last)")
   }
 
+  /// Five evenly spaced axis labels (fewer when the series is short).
   private func labelIndices() -> [Int] {
-    let count = min(points.count, period == .week ? 4 : 5)
-    guard count > 1 else { return [0] }
-    return (0..<count).map { Int((Double($0) * Double(points.count - 1) / Double(count - 1)).rounded()) }
+    let last = points.count - 1
+    var seen = Set<Int>()
+    return (0...4).map { Int((Double($0) * Double(last) / 4).rounded()) }.filter { seen.insert($0).inserted }
   }
 
   private func chart(_ scale: FinanceScale, drawn: Bool) -> some View {
     GeometryReader { proxy in
-      let box = CGRect(
-        x: Self.left, y: Self.top,
-        width: max(10, proxy.size.width - Self.left - Self.right),
-        height: max(10, proxy.size.height - Self.top - Self.bottom))
+      let k = proxy.size.width / Self.boxWidth
+      let left = Self.left * k
+      let right = proxy.size.width - Self.right * k
+      let top = Self.top * k
+      let plotHeight = proxy.size.height - (Self.top + Self.bottom) * k
+      let floor = top + plotHeight
+      let curve = zip(scale.xs, scale.ys).map {
+        CGPoint(x: left + $0 * (right - left), y: floor - $1 * plotHeight)
+      }
+      let end = curve[curve.count - 1]
       let labels = labelIndices()
-      let lastY = box.minY + (1 - (scale.ys.last ?? 0)) * box.height
       ZStack(alignment: .topLeading) {
-        FinanceGridShape(
-          rows: scale.ticks.map { scale.unit($0) }, columns: labels.map { scale.xs[$0] }
-        )
-        .stroke(
-          RitmTheme.accentColor.opacity(0.16), style: StrokeStyle(lineWidth: 0.8, dash: [3, 4])
-        )
-        .frame(width: box.width, height: box.height)
-        .offset(x: box.minX, y: box.minY)
-        FinanceLineShape(xs: scale.xs, ys: scale.ys, closed: true)
+        FinanceGridShape(ys: scale.ticks.map { floor - scale.unit($0) * plotHeight }, left: left, right: right)
+          .stroke(FinanceTone.grid, style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
+        FinanceCurve(points: curve, floor: floor)
           .fill(
             LinearGradient(
-              colors: [RitmTheme.accentColor.opacity(0.26), RitmTheme.accentColor.opacity(0.02)],
+              colors: [RitmTheme.accentColor.opacity(0.34), RitmTheme.accentColor.opacity(0)],
               startPoint: .top, endPoint: .bottom)
           )
           .opacity(drawn ? 1 : 0)
           .animation(reduceMotion ? nil : RitmMotion.areaFade, value: drawn)
-          .frame(width: box.width, height: box.height)
-          .offset(x: box.minX, y: box.minY)
-        FinanceLineShape(xs: scale.xs, ys: scale.ys, closed: false)
+        FinanceCurve(points: curve, floor: nil)
           .trim(from: 0, to: drawn ? 1 : 0)
           .stroke(
             RitmTheme.accentColor,
-            style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
+            style: StrokeStyle(lineWidth: 2.2 * k, lineCap: .round, lineJoin: .round)
           )
           .animation(reduceMotion ? nil : RitmMotion.lineDraw, value: drawn)
-          .frame(width: box.width, height: box.height)
-          .offset(x: box.minX, y: box.minY)
-        ForEach(labels, id: \.self) { index in
-          Circle()
-            .fill(RitmTheme.panel)
-            .overlay { Circle().strokeBorder(RitmTheme.accentColor, lineWidth: 2) }
-            .frame(width: 8, height: 8)
-            .scaleEffect(drawn ? 1 : 0.6)
-            .position(
-              x: box.minX + scale.xs[index] * box.width,
-              y: box.minY + (1 - scale.ys[index]) * box.height
-            )
-            .opacity(drawn ? 1 : 0)
-            .animation(reduceMotion ? nil : RitmMotion.dotPop, value: drawn)
-        }
-        ForEach(Array(scale.ticks.enumerated()), id: \.offset) { _, tick in
-          Text(FinanceScale.compact(tick))
-            .ritmFont(10)
-            .foregroundStyle(RitmTheme.muted)
-            .frame(width: Self.left - 6, alignment: .trailing)
-            .position(x: (Self.left - 6) / 2, y: box.minY + (1 - scale.unit(tick)) * box.height)
-        }
-        ForEach(labels, id: \.self) { index in
-          Text(format.date(points[index].date, template: period == .year ? "MMM" : "d MMM"))
-            .ritmFont(10)
-            .foregroundStyle(RitmTheme.muted)
-            .lineLimit(1)
-            .fixedSize()
-            .position(
-              x: min(max(box.minX + scale.xs[index] * box.width, 24), proxy.size.width - 24),
-              y: proxy.size.height - 7)
-        }
-        RitmCountText(points.last?.valueMinor ?? 0) { format.money($0, currency) }
-          .ritmFont(10, weight: .medium)
-          .foregroundStyle(RitmTheme.text)
-          .frame(width: 120, alignment: .trailing)
-          .position(x: proxy.size.width - Self.right - 60, y: max(6, lastY - 14))
+        Circle()
+          .fill(RitmTheme.panel)
+          .overlay { Circle().strokeBorder(RitmTheme.accentColor, lineWidth: 2) }
+          .frame(width: 9.6 * k, height: 9.6 * k)
+          .scaleEffect(drawn ? 1 : 0.6)
+          .position(end)
           .opacity(drawn ? 1 : 0)
           .animation(reduceMotion ? nil : RitmMotion.dotPop, value: drawn)
+        ForEach(Array(scale.ticks.enumerated()), id: \.offset) { _, tick in
+          Text(FinanceScale.compact(tick))
+            .ritmFont(9.5)
+            .monospacedDigit()
+            .foregroundStyle(RitmTheme.muted)
+            .fixedSize()
+            .frame(width: left - 6 * k, alignment: .trailing)
+            .position(x: (left - 6 * k) / 2, y: floor - scale.unit(tick) * plotHeight)
+        }
+        ForEach(labels, id: \.self) { index in
+          xLabel(index, x: curve[index].x, last: labels.last ?? 0, y: proxy.size.height - 10 * k)
+        }
+        RitmCountText(points.last?.valueMinor ?? 0) { format.money($0, currency) }
+          .ritmFont(10, weight: .semibold)
+          .foregroundStyle(RitmTheme.text)
+          .fixedSize()
+          .frame(width: 100, alignment: .trailing)
+          .position(
+            x: end.x - 50, y: end.y < top + 16 * k ? end.y + 16 * k - 3 : end.y - 9 * k - 3
+          )
+          .opacity(drawn ? 1 : 0)
+          .animation(reduceMotion ? nil : RitmMotion.dotPop, value: drawn)
+      }
+    }
+  }
+
+  /// A date under the plot: the first label starts at its x, the last one ends there.
+  private func xLabel(_ index: Int, x: CGFloat, last: Int, y: CGFloat) -> some View {
+    let text = Text(format.day(points[index].date))
+      .ritmFont(9.5)
+      .foregroundStyle(RitmTheme.muted)
+      .fixedSize()
+    return Group {
+      if index == 0 {
+        text.frame(width: 80, alignment: .leading).position(x: x + 40, y: y)
+      } else if index == last {
+        text.frame(width: 80, alignment: .trailing).position(x: x - 40, y: y)
+      } else {
+        text.position(x: x, y: y)
       }
     }
   }
@@ -308,8 +335,8 @@ private struct FinanceDonutSlice: Shape {
   }
 }
 
-/// Expense categories: a ring that sweeps in over 700 ms once per `drawKey`, with a legend
-/// beside it whose rows fade in one after another.
+/// Expense categories: a 136 pt ring that sweeps in over 700 ms once per `drawKey`, with the
+/// legend below it (icon, name, amount, share) whose rows fade in one after another.
 struct FinanceDonut: View {
   let slices: [FinanceCategoryShare]
   let currency: FinanceCurrency
@@ -317,8 +344,6 @@ struct FinanceDonut: View {
   let drawKey: String
   let log: FinanceDrawLog
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-  private static let ringWidth: CGFloat = 20
 
   private var total: Int { slices.reduce(0) { $0 + $1.amountMinor } }
 
@@ -330,19 +355,22 @@ struct FinanceDonut: View {
   /// Start/end fractions of each slice around the ring.
   private var spans: [(Double, Double)] {
     let sum = max(0.0001, slices.reduce(0) { $0 + $1.share })
-    let gap = slices.count > 1 ? 0.008 : 0
+    let gap = slices.count > 1 ? 2.5 / 276.5 : 0
     var cursor = 0.0
     return slices.map { slice in
       let begin = cursor
       cursor += slice.share / sum
-      return (begin + gap / 2, max(begin + gap / 2, cursor - gap / 2))
+      return (begin, max(begin + 0.002, cursor - gap))
     }
   }
 
   var body: some View {
     RitmDrawGate(key: drawKey) { drawn in
-      HStack(alignment: .center, spacing: 18) {
+      VStack(spacing: 0) {
         ring(drawn: drawn)
+          .frame(maxWidth: .infinity)
+          .padding(.top, 4)
+          .padding(.bottom, 10)
         legend(drawn: drawn)
       }
     }
@@ -351,63 +379,62 @@ struct FinanceDonut: View {
   private func ring(drawn: Bool) -> some View {
     let spans = self.spans
     return ZStack {
-      Circle().stroke(RitmTheme.ringTrack, lineWidth: Self.ringWidth)
       ForEach(Array(slices.enumerated()), id: \.offset) { index, _ in
         FinanceDonutSlice(start: spans[index].0, end: spans[index].1, progress: drawn ? 1 : 0)
-          .stroke(FinanceTone.chart(index), style: StrokeStyle(lineWidth: Self.ringWidth))
+          .stroke(FinanceTone.chart(index), style: StrokeStyle(lineWidth: 15.9))
       }
     }
     .animation(reduceMotion ? nil : RitmMotion.sweep, value: drawn)
-    .padding(Self.ringWidth / 2)
+    .padding(18.1)
     .rotationEffect(.degrees(-90))
-    .frame(width: 128, height: 128)
+    .frame(width: 136, height: 136)
     .overlay {
-      VStack(spacing: 2) {
+      VStack(spacing: 0) {
         RitmCountText(total) { format.money($0, currency) }
-          .ritmFont(12, weight: .semibold)
+          .ritmFont(13.5, weight: .bold, tracking: -0.03)
           .lineLimit(1)
           .minimumScaleFactor(0.6)
-        Text(format.text("Всего", "Total")).ritmFont(10).foregroundStyle(RitmTheme.muted)
+        Text(format.text("Всего", "Total")).ritmFont(10.5).foregroundStyle(RitmTheme.muted)
       }
-      .frame(width: 80)
+      .frame(width: 84)
     }
     .accessibilityHidden(true)
   }
 
   private func legend(drawn: Bool) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
+    VStack(spacing: 2) {
       ForEach(Array(slices.enumerated()), id: \.offset) { index, slice in
-        HStack(spacing: 8) {
-          Circle().fill(FinanceTone.chart(index)).frame(width: 9, height: 9)
-          Image(systemName: FinanceCategories.symbol(for: slice.name))
-            .font(.system(size: 12, weight: .regular))
-            .foregroundStyle(RitmTheme.muted)
-            .frame(width: 16)
+        HStack(spacing: 10) {
+          RitmSymbol(FinanceCategories.symbol(for: slice.name))
+            .font(.system(size: 15, weight: .regular))
+            .foregroundStyle(FinanceTone.chart(index))
+            .frame(width: 22, height: 22)
             .accessibilityHidden(true)
-          VStack(alignment: .leading, spacing: 1) {
-            Text(name(slice)).ritmFont(11, weight: .semibold).lineLimit(1)
-            RitmCountText(slice.amountMinor) { format.money($0, currency) }
-              .ritmFont(10)
-              .foregroundStyle(RitmTheme.muted)
-              .lineLimit(1)
-          }
-          Spacer(minLength: 4)
+          Text(name(slice)).ritmFont(12.5).lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+          RitmCountText(slice.amountMinor) { format.money($0, currency) }
+            .ritmFont(12.5)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
           RitmCountText(Int((slice.share * 100).rounded())) { "\($0)%" }
-            .ritmFont(11, weight: .semibold)
+            .ritmFont(11.5)
             .foregroundStyle(RitmTheme.muted)
+            .frame(width: 40, alignment: .trailing)
         }
+        .foregroundStyle(RitmTheme.text)
+        .frame(minHeight: 36)
         .opacity(drawn ? 1 : 0)
         .animation(reduceMotion ? nil : RitmMotion.legendFade(index: index), value: drawn)
         .accessibilityElement(children: .combine)
       }
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
 
 // MARK: - Distribution bar
 
-/// One capsule split by share, one colour per card, growing in from the left once per key.
+/// One 12 pt capsule split by share, one colour per account, 2 pt gaps, growing in from the left
+/// once per key.
 struct FinanceDistributionBar: View {
   let shares: [Double]
   let drawKey: String
@@ -416,17 +443,17 @@ struct FinanceDistributionBar: View {
 
   var body: some View {
     RitmDrawGate(key: drawKey) { drawn in bar(drawn: drawn) }
-      .frame(height: 14)
+      .frame(height: 12)
       .accessibilityHidden(true)
   }
 
   private func bar(drawn: Bool) -> some View {
     GeometryReader { proxy in
-      let gaps = 3 * CGFloat(max(0, shares.count - 1))
+      let gaps = 2 * CGFloat(max(0, shares.count - 1))
       let usable = max(0, proxy.size.width - gaps)
-      HStack(spacing: 3) {
+      HStack(spacing: 2) {
         ForEach(Array(shares.enumerated()), id: \.offset) { index, share in
-          RoundedRectangle(cornerRadius: 6, style: .continuous)
+          Rectangle()
             .fill(FinanceTone.chart(index))
             .frame(width: max(4, usable * CGFloat(share)))
         }
@@ -438,6 +465,7 @@ struct FinanceDistributionBar: View {
           .animation(reduceMotion ? nil : RitmMotion.sweep, value: drawn)
       }
     }
+    .clipShape(Capsule())
   }
 }
 
@@ -460,23 +488,32 @@ struct FinanceStat: Identifiable {
   }
 }
 
-/// Three figures in a row with hairline dividers (Доходы / Расходы / Разница).
+/// `.tiles`: three separate small tiles under a chart panel (label, then the figure).
 struct FinanceStatTiles: View {
   let stats: [FinanceStat]
 
   var body: some View {
-    HStack(spacing: 0) {
-      ForEach(Array(stats.enumerated()), id: \.element.id) { index, stat in
-        if index > 0 { Rectangle().fill(RitmTheme.line).frame(width: 1, height: 38) }
-        VStack(spacing: 5) {
-          Text(stat.title).ritmFont(10).foregroundStyle(RitmTheme.muted).lineLimit(1)
+    HStack(spacing: 8) {
+      ForEach(stats) { stat in
+        VStack(alignment: .leading, spacing: 3) {
+          Text(stat.title).ritmFont(11).foregroundStyle(RitmTheme.muted).lineLimit(1)
           figure(stat)
-            .ritmFont(15, weight: .semibold, tracking: -0.03)
+            .ritmFont(13, weight: .bold, tracking: -0.025)
             .foregroundStyle(stat.tone)
             .lineLimit(1)
-            .minimumScaleFactor(0.65)
+            .minimumScaleFactor(0.6)
         }
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+          RoundedRectangle(cornerRadius: 16, style: .circular)
+            .fill(RitmTheme.panel)
+            .overlay {
+              RoundedRectangle(cornerRadius: 16, style: .circular)
+                .strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
+            }
+        }
         .accessibilityElement(children: .combine)
       }
     }

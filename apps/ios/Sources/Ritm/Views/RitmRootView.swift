@@ -5,8 +5,12 @@ import UIKit
 
 @MainActor @Observable
 final class RitmNavigation {
-  var section: RitmSection = .day { didSet { visited.insert(section) } }
-  private(set) var visited: Set<RitmSection> = [.day]
+  var section: RitmSection = .day {
+    didSet { if section != oldValue { leaving = oldValue } }
+  }
+  /// The page being left: it stays alive, fading on top of the new one, for the length of the
+  /// exit. Set together with `section`, so the old page never leaves the tree in between.
+  var leaving: RitmSection?
   var assistantPrompt: String?
   var habitCelebration: String?
   /// One-shot: set by «Настройки уведомлений» in the bell popover, consumed by Settings once it
@@ -15,11 +19,23 @@ final class RitmNavigation {
 }
 enum RitmSection: String, CaseIterable, Hashable {
   case day, calendar, habits, finance, assistant, workouts, settings
+  /// The prototype glyph of the section (bottom bar and «Ещё» panel).
+  var icon: RitmIconName {
+    switch self {
+    case .day: .grid
+    case .calendar: .cal
+    case .habits: .habit
+    case .assistant: .ai
+    case .workouts: .dumbbell
+    case .finance: .wallet
+    case .settings: .sliders
+    }
+  }
   var symbol: String {
     switch self {
     case .day: "square.grid.2x2"
     case .calendar: "calendar"
-    case .habits: "checklist"
+    case .habits: "checkmark.circle"
     case .assistant: "sparkles"
     case .workouts: "dumbbell"
     case .finance: "wallet.pass"
@@ -40,11 +56,15 @@ struct RitmRootView: View {
   @State private var navigation = RitmNavigation()
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var showingMore = false
-  /// The page being left: it keeps fading on top of the new one for the length of the exit.
-  @State private var leaving: RitmSection?
   @State private var leaveTask: Task<Void, Never>?
-  private var visitedSections: [RitmSection] {
-    RitmSection.allCases.filter { navigation.visited.contains($0) }
+  /// Measured once from the screen: the heading's `cqw` size and the bar's distance from the edge.
+  @State private var screenWidth: CGFloat = 390
+  @State private var safeBottom: CGFloat = 34
+  /// Only the current page and the one still fading out are alive: a page that is not on screen
+  /// must not re-render on every store change. Page-local state (an open day/week/month mode, a
+  /// half-typed assistant message) starts fresh on each visit.
+  private var renderedSections: [RitmSection] {
+    RitmSection.allCases.filter { $0 == navigation.section || $0 == navigation.leaving }
   }
 
   private var preferredScheme: ColorScheme? {
@@ -56,58 +76,57 @@ struct RitmRootView: View {
   }
 
   var body: some View {
-    Group {
-      if store.isSignedIn {
-        ZStack {
-          ZStack {
-            ForEach(visitedSections, id: \.self) { section in
-              // The incoming page appears at once and plays its own reveal; the outgoing one
-              // fades for 0.12 s (MOTION.md §2) on top, then stays active until it is gone.
-              NavigationStack { sectionView(section) }
-                .modifier(RitmPageSwap(active: navigation.section == section))
-                .allowsHitTesting(navigation.section == section)
-                .accessibilityHidden(navigation.section != section)
-                .environment(\.ritmPageActive, navigation.section == section || leaving == section)
-                .zIndex(pageLayer(section))
-                .toolbarBackground(.hidden, for: .navigationBar)
-            }
-          }
-          // The pinned header is a top inset with its own backdrop: pages scroll under it, but
-          // never show crisp content behind the logo and the buttons.
-          .safeAreaInset(edge: .top, spacing: 0) {
-            if !navigation.section.embedsHeader {
-              RitmShellHeader()
-                .padding(.horizontal, 16)
-                .frame(maxWidth: .infinity)
-                .background(alignment: .top) { RitmScrollEdge(side: .top) }
-            }
-          }
-          .background { RitmBackground() }
-          .safeAreaInset(edge: .bottom, spacing: 0) {
-            RitmNavigationBar(
-              sections: RitmSection.barSections, current: navigation.section,
-              select: selectTab, toggleMore: toggleMore)
-              .background(alignment: .bottom) { RitmScrollEdge(side: .bottom) }
-          }
-          FinanceNotificationOverlay(openNotice: openNotice, openSettings: openNotificationSettings)
-            .zIndex(1)
-          RitmToastOverlay()
-            .zIndex(2)
+    ZStack {
+      ZStack {
+        ForEach(renderedSections, id: \.self) { section in
+          // The incoming page appears at once and plays its own reveal; the outgoing one
+          // fades for 0.12 s (MOTION.md §2) on top, then leaves the tree.
+          NavigationStack { sectionView(section) }
+            .modifier(RitmPageSwap(active: navigation.section == section))
+            .allowsHitTesting(navigation.section == section)
+            .accessibilityHidden(navigation.section != section)
+            .environment(\.ritmPageActive, navigation.section == section || navigation.leaving == section)
+            .zIndex(pageLayer(section))
+            .toolbarBackground(.hidden, for: .navigationBar)
         }
-        .overlayPreferenceValue(RitmMoreAnchorKey.self) { anchor in
-          GeometryReader { proxy in
-            if let anchor {
-              RitmMorePanel(
-                isOpen: showingMore, current: navigation.section, anchor: proxy[anchor],
-                container: proxy.size, choose: selectTab, dismiss: { setMore(false) })
-            }
-          }
+      }
+      // Every page draws its own background; this only fills the frame while pages swap.
+      .background(RitmTheme.background)
+      .overlay(alignment: .bottom) {
+        // The bar floats 22 pt above the screen edge (`.nav { bottom: 22px }`), over the home
+        // indicator's area. It reserves no room itself: each page does (`sectionView`), because
+        // the navigation stack around a page does not pass an inset set outside it to its scroll view.
+        RitmNavigationBar(
+          sections: RitmSection.barSections, current: navigation.section,
+          select: selectTab, toggleMore: toggleMore
+        )
+        .offset(y: safeBottom - 14)
+        .background(alignment: .bottom) {
+          RitmScrollEdge(side: .bottom, bottomInset: safeBottom)
         }
-        .environment(navigation)
-      } else {
-        LoginView()
+      }
+      FinanceNotificationOverlay(openNotice: openNotice, openSettings: openNotificationSettings)
+        .zIndex(1)
+      RitmToastOverlay()
+        .zIndex(2)
+    }
+    .overlayPreferenceValue(RitmMoreAnchorKey.self) { anchor in
+      GeometryReader { proxy in
+        if let anchor {
+          RitmMorePanel(
+            isOpen: showingMore, current: navigation.section, anchor: proxy[anchor],
+            container: proxy.size, choose: selectTab, dismiss: { setMore(false) })
+        }
       }
     }
+    .onGeometryChange(for: CGSize.self) { proxy in
+      CGSize(width: proxy.size.width, height: proxy.safeAreaInsets.bottom)
+    } action: { value in
+      screenWidth = value.width
+      safeBottom = value.height
+    }
+    .environment(\.ritmScreenWidth, screenWidth)
+    .environment(navigation)
     .tint(RitmTheme.accentColor)
     .foregroundStyle(RitmTheme.text)
     .preferredColorScheme(preferredScheme)
@@ -118,8 +137,8 @@ struct RitmRootView: View {
     .onChange(of: store.wallet.showRequest) { _, _ in
       navigation.section = .finance
     }
-    .onChange(of: navigation.section) { old, _ in
-      beginLeaving(old)
+    .onChange(of: navigation.section) { _, _ in
+      beginLeaving()
       setMore(false)
       store.notices.closePopover()
       UIApplication.shared.sendAction(
@@ -127,17 +146,40 @@ struct RitmRootView: View {
     }
   }
 
-  private func pageLayer(_ section: RitmSection) -> Double {
-    section == navigation.section ? 1 : section == leaving ? 2 : 0
+  /// What sits above a page's content. The pinned header (calendar, finance, assistant) and the
+  /// sign-in reminder are a top inset of the page itself, because the navigation stack around
+  /// each page does not pass an inset set outside it on to the scroll view; pages that scroll
+  /// their own header get the reminder alone. The backdrop keeps content soft beneath the inset.
+  @ViewBuilder private func pageTopInset(_ section: RitmSection) -> some View {
+    let reminder = store.startupFinished && !store.isSignedIn && section != .settings
+    if !section.embedsHeader || reminder {
+      VStack(spacing: 0) {
+        if !section.embedsHeader { RitmShellHeader() }
+        if reminder {
+          RitmSignInBanner()
+            .padding(.top, section.embedsHeader ? 6 : 0)
+            .padding(.bottom, 8)
+        }
+      }
+      .padding(.horizontal, 16)
+      .frame(maxWidth: .infinity)
+      .background(alignment: .top) { RitmScrollEdge(side: .top) }
+    } else {
+      // A page that scrolls its own header away still softens under the status bar.
+      Color.clear.frame(height: 0).background(alignment: .top) { RitmScrollEdge(side: .top) }
+    }
   }
 
-  private func beginLeaving(_ old: RitmSection) {
-    leaving = old
+  private func pageLayer(_ section: RitmSection) -> Double {
+    section == navigation.section ? 1 : section == navigation.leaving ? 2 : 0
+  }
+
+  private func beginLeaving() {
     leaveTask?.cancel()
     leaveTask = Task { @MainActor in
       try? await Task.sleep(for: .seconds(RitmMotion.pageExit + 0.04))
       guard !Task.isCancelled else { return }
-      leaving = nil
+      navigation.leaving = nil
     }
   }
 
@@ -174,7 +216,22 @@ struct RitmRootView: View {
     navigation.section = .settings
   }
 
+  /// Distance from the screen edge to where a page's scroll content must end: the bar's top is
+  /// 86 pt above the edge, the 16 pt gap makes it 102. The home indicator's safe area already
+  /// supplies part of it.
+  private static let contentClearance: CGFloat = 102
+
   @ViewBuilder private func sectionView(_ section: RitmSection) -> some View {
+    pageContent(section)
+      .safeAreaInset(edge: .top, spacing: 0) { pageTopInset(section) }
+      .safeAreaInset(edge: .bottom, spacing: 0) {
+        Color.clear.frame(height: max(0, Self.contentClearance - safeBottom))
+          .allowsHitTesting(false)
+          .accessibilityHidden(true)
+      }
+  }
+
+  @ViewBuilder private func pageContent(_ section: RitmSection) -> some View {
     switch section {
     case .day: DayView()
     case .calendar: CalendarView()
@@ -201,8 +258,10 @@ extension RitmSection {
   }
 }
 
-/// Web `.app-header`: 62 pt, 29 pt brand mark, wordmark, the finance bell and the 44 pt theme
-/// toggle. Day, Habits and Settings embed this same header, so they all get the same bell.
+/// Prototype `.topbar`: a 56 pt row (below the status bar), 29 pt brand mark, wordmark, the
+/// finance bell and the 44 pt theme toggle, 20 pt from the screen edges (the pages bring 16 pt,
+/// the header adds 4). Day, Habits and Settings embed this same header, so they all get the
+/// same bell.
 struct RitmShellHeader: View {
   @Environment(RitmStore.self) private var store
   @Environment(\.colorScheme) private var scheme
@@ -225,7 +284,7 @@ struct RitmShellHeader: View {
   }
 
   var body: some View {
-    HStack(spacing: 8) {
+    HStack(spacing: 10) {
       RitmMark()
         .fill(Color(rgb: 0x34234C))
         .frame(width: 18, height: 18)
@@ -236,22 +295,23 @@ struct RitmShellHeader: View {
              .init(color: Color(rgb: 0xC4ABEB), location: 1)], cssAngle: 130),
           in: RoundedRectangle(cornerRadius: 10, style: .circular)
         )
-        .shadow(color: Color(rgb: 0xB98DEB, opacity: 0.13), radius: 12)
+        .shadow(color: Color(rgb: 0xB98DEB, opacity: 0.13), radius: 6)
         .accessibilityHidden(true)
       Text("Ritm")
         .ritmText(.brand)
         .foregroundStyle(RitmTheme.text)
         .accessibilityAddTraits(.isHeader)
       Spacer(minLength: 0)
-      RitmGlassGroup(spacing: 8) {
+      // Not a GlassEffectContainer: it would clip the bell's badge at the button's edge.
+      Group {
         HStack(spacing: 8) {
           FinanceBellButton()
           Button(action: switchTheme) {
-            Image(systemName: showingDark ? "sun.max" : "moon")
-              .font(.system(size: 18))
+            RitmIcon(showingDark ? .sun : .moon)
+              .font(.system(size: 20))
               .foregroundStyle(RitmTheme.muted)
               .frame(width: 44, height: 44)
-              .ritmGlass(in: Circle(), interactive: true)
+              .ritmFloatingGlass(in: Circle(), interactive: true)
               .contentShape(Circle())
           }
           .buttonStyle(RitmGlassButtonStyle())
@@ -261,7 +321,8 @@ struct RitmShellHeader: View {
         }
       }
     }
-    .frame(height: 62)
+    .padding(.horizontal, 4)
+    .frame(height: 56)
   }
 }
 
@@ -287,17 +348,12 @@ private struct RitmPageSwap: ViewModifier {
 }
 
 extension View {
-  /// Reports the view's frame in window coordinates whenever it moves, while `active`. Pages
-  /// kept alive behind the visible one must not move a shared origin.
+  /// Reports the view's frame in window coordinates whenever it moves, while `active`. A page
+  /// that is only fading out must not move a shared origin. It does not rebuild any view while
+  /// the page scrolls: only `record` runs.
   func ritmFrameReader(active: Bool, record: @escaping (CGRect) -> Void) -> some View {
-    background {
-      GeometryReader { proxy in
-        let frame = proxy.frame(in: .global)
-        Color.clear
-          .onAppear { if active { record(frame) } }
-          .onChange(of: frame) { _, value in if active { record(value) } }
-          .onChange(of: active) { _, _ in if active { record(frame) } }
-      }
+    onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+      if active { record(frame) }
     }
   }
 }
@@ -308,18 +364,20 @@ extension View {
   var frame: CGRect = .zero
 }
 
-/// Motion of the bottom bar (prototype shell.html): the indicator slides in 0.28 s on
-/// cubic-bezier(.2, .8, .2, 1); the «Ещё» panel inflates out of its icon in 0.30 s with a tiny
-/// overshoot (cubic-bezier(.34, 1.32, .5, 1), about 3 %) and shrinks back in 0.18 s without one.
+/// Motion of the bottom bar (prototype shell.html + glass.css): the indicator slides in 0.5 s on
+/// `cubic-bezier(.2, .9, .25, 1.12)`; the «Ещё» panel inflates out of its icon in 0.30 s with a
+/// tiny overshoot (`cubic-bezier(.34, 1.32, .5, 1)`, about 3 %) and shrinks back in 0.18 s
+/// without one.
 private enum RitmMore {
-  static let slide = Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28)
+  static let slide = Animation.timingCurve(0.2, 0.9, 0.25, 1.12, duration: 0.5)
   static let inflate = Animation.timingCurve(0.34, 1.32, 0.5, 1, duration: 0.30)
   static let deflate = Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.18)
   static let reduced = Animation.easeOut(duration: 0.12)
   /// Scale of the panel at the moment it leaves the icon.
   static let seed: CGFloat = 0.35
-  /// Delay between neighbouring tiles when the panel opens.
+  /// Tile `n` starts `n * 40 ms + 70 ms` after the panel does.
   static let stagger = 0.04
+  static let firstTile = 0.07
 }
 
 /// Bounds of the «Ещё» slot in the bar, so the panel can be anchored right above it.
@@ -330,8 +388,8 @@ private struct RitmMoreAnchorKey: PreferenceKey {
   }
 }
 
-/// Prototype bottom navigation: an icon-only glass capsule with four section slots and «Ещё»,
-/// and one 56 × 42 indicator that slides between the slots.
+/// Prototype bottom navigation (`.nav`): an icon-only glass capsule with four section slots and
+/// «Ещё», 6 pt padding, 52 pt slots, and one 56 × 42 indicator that slides between the slots.
 private struct RitmNavigationBar: View {
   @Environment(RitmStore.self) private var store
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -346,7 +404,7 @@ private struct RitmNavigationBar: View {
   private var selectedIndex: Int { sections.firstIndex(of: current) ?? sections.count }
 
   var body: some View {
-    RitmGlassGroup(spacing: 8) { bar }
+    bar
       .padding(.horizontal, 16)
       .padding(.bottom, 8)
   }
@@ -354,12 +412,12 @@ private struct RitmNavigationBar: View {
   private var bar: some View {
     HStack(spacing: 0) {
       ForEach(sections, id: \.self) { section in
-        item(title: section.title(store), symbol: section.symbol, selected: current == section) {
+        item(title: section.title(store), icon: section.icon, selected: current == section) {
           select(section)
         }
       }
       item(
-        title: store.text("Ещё", "More"), symbol: "ellipsis", selected: moreSelected,
+        title: store.text("Ещё", "More"), icon: .dots, selected: moreSelected,
         value: moreSelected ? current.title(store) : "", action: toggleMore
       )
       .anchorPreference(key: RitmMoreAnchorKey.self, value: .bounds) { $0 }
@@ -367,7 +425,7 @@ private struct RitmNavigationBar: View {
     .background {
       GeometryReader { proxy in
         let slot = proxy.size.width / CGFloat(slotCount)
-        activeIndicator
+        RitmNavThumb()
           .frame(width: 56, height: 42)
           .frame(width: slot, height: proxy.size.height)
           .offset(x: slot * CGFloat(selectedIndex))
@@ -377,22 +435,20 @@ private struct RitmNavigationBar: View {
     }
     .animation(reduceMotion ? nil : RitmMore.slide, value: selectedIndex)
     .padding(6)
-    .ritmGlass(in: Capsule())
+    .ritmFloatingGlass(in: Capsule())
   }
 
   private func item(
-    title: String, symbol: String, selected: Bool, value: String = "", action: @escaping () -> Void
+    title: String, icon: RitmIconName, selected: Bool, value: String = "", action: @escaping () -> Void
   ) -> some View {
     Button(action: action) {
-      Image(systemName: symbol)
-        .font(.system(size: 22, weight: .regular))
+      RitmIcon(icon)
+        .font(.system(size: 23))
         .modifier(RitmIconSettle(active: selected))
         .frame(maxWidth: .infinity, minHeight: 52)
         .foregroundStyle(
           contrast == .increased
-            ? RitmTheme.text
-            : selected
-              ? Color(light: 0x643B96, dark: 0xE2CAFF) : Color(light: 0x645275, dark: 0xC1B3D4)
+            ? RitmTheme.text : selected ? RitmTheme.navActiveInk : RitmTheme.navInk
         )
         .contentShape(Rectangle())
     }
@@ -401,12 +457,28 @@ private struct RitmNavigationBar: View {
     .accessibilityValue(value)
     .accessibilityAddTraits(selected ? .isSelected : [])
   }
+}
 
-  /// The sliding thumb: a drop of glass under the active icon.
-  private var activeIndicator: some View {
-    Color.clear.ritmGlassThumb(
-      in: Capsule(),
-      tint: Color(light: 0xA574DF, dark: 0xC299F1, lightOpacity: 0.16, darkOpacity: 0.18))
+/// `.nav-pill::before`: a drop of glass under the active icon. A plain fill (the accent at 22 %
+/// over the thumb tint, lit from above) with a hairline rim and a short shadow: no second blur.
+private struct RitmNavThumb: View {
+  var body: some View {
+    let shape = Capsule()
+    let base = Color(light: 0xFFFFFF, dark: 0xFFFFFF, lightOpacity: 0.92, darkOpacity: 0.15)
+    shape
+      .fill(
+        LinearGradient(
+          colors: [RitmTheme.mix(RitmTheme.accentColor, 0.22, into: base), base],
+          startPoint: .top, endPoint: .bottom)
+      )
+      .overlay {
+        shape.strokeBorder(
+          Color(light: 0xFFFFFF, dark: 0xFFFFFF, lightOpacity: 0.5, darkOpacity: 0.09),
+          lineWidth: 1)
+      }
+      .shadow(
+        color: Color(light: 0x553086, dark: 0x000000, lightOpacity: 0.12, darkOpacity: 0.3),
+        radius: 5, y: 3)
   }
 }
 
@@ -427,45 +499,14 @@ private struct RitmIconSettle: ViewModifier {
   }
 }
 
-/// Speech-bubble outline: a rounded rectangle whose bottom edge carries a small tail at `tailX`.
-private struct RitmBubble: Shape {
-  static let tailHeight: CGFloat = 7
-  static let radius: CGFloat = 22
-  let tailX: CGFloat
-
-  func path(in rect: CGRect) -> Path {
-    let r = Self.radius
-    let half = Self.tailHeight
-    let bodyBottom = rect.maxY - Self.tailHeight
-    let x = min(max(tailX, rect.minX + r + half), rect.maxX - r - half)
-    var path = Path()
-    path.move(to: CGPoint(x: rect.minX + r, y: rect.minY))
-    path.addArc(
-      tangent1End: CGPoint(x: rect.maxX, y: rect.minY),
-      tangent2End: CGPoint(x: rect.maxX, y: bodyBottom), radius: r)
-    path.addArc(
-      tangent1End: CGPoint(x: rect.maxX, y: bodyBottom),
-      tangent2End: CGPoint(x: x + half, y: bodyBottom), radius: r)
-    path.addLine(to: CGPoint(x: x + half, y: bodyBottom))
-    path.addLine(to: CGPoint(x: x, y: rect.maxY))
-    path.addLine(to: CGPoint(x: x - half, y: bodyBottom))
-    path.addArc(
-      tangent1End: CGPoint(x: rect.minX, y: bodyBottom),
-      tangent2End: CGPoint(x: rect.minX, y: rect.minY), radius: r)
-    path.addArc(
-      tangent1End: CGPoint(x: rect.minX, y: rect.minY),
-      tangent2End: CGPoint(x: rect.maxX, y: rect.minY), radius: r)
-    path.closeSubpath()
-    return path
-  }
-}
-
-/// «Ещё»: a compact panel above the bar, its tail pointing at the «Ещё» slot. It stays in the
-/// tree and animates (scale + fade from the tail) so it can also close smoothly.
+/// «Ещё» (`.more-pop`): a compact glass panel 12 pt above the bar, right-aligned 16 pt from the
+/// edge, with one 100 × 72 tile per section. It stays in the tree and animates (scale + fade
+/// from the «Ещё» icon) so it can also close smoothly.
 private struct RitmMorePanel: View {
-  private static let tileWidth: CGFloat = 92
+  private static let tileWidth: CGFloat = 100
   private static let padding: CGFloat = 10
   private static let spacing: CGFloat = 8
+  private static let radius: CGFloat = 22
   private static let panelWidth =
     tileWidth * CGFloat(RitmSection.moreSections.count)
     + spacing * CGFloat(RitmSection.moreSections.count - 1) + padding * 2
@@ -479,28 +520,26 @@ private struct RitmMorePanel: View {
   let choose: (RitmSection) -> Void
   let dismiss: () -> Void
 
+  /// Top of the bar: the slot sits in the bar's 6 pt padding.
   private var barTop: CGFloat { anchor.minY - 6 }
   private var edgeInset: CGFloat { 16 }
-  /// Tail position inside the panel, measured from its leading edge.
-  private var tailX: CGFloat { Self.panelWidth - (container.width - edgeInset - anchor.midX) }
-  /// Where the bubble actually draws its tail tip (it keeps clear of the rounded corners).
-  private var tipX: CGFloat {
-    let margin = RitmBubble.radius + RitmBubble.tailHeight
-    return min(max(tailX, margin), Self.panelWidth - margin)
-  }
-  /// From the tail tip (the panel's bottom point) to the centre of the «Ещё» icon. Scaling the
-  /// panel about the tip and shifting it by `(1 - scale)` of this vector is the same as scaling
-  /// it about the icon, so the panel grows out of the icon without knowing its own height.
+  private var panelLeft: CGFloat { container.width - edgeInset - Self.panelWidth }
+  /// The panel's bottom edge, 12 pt above the bar.
+  private var panelBottom: CGFloat { barTop - 12 }
+  /// The icon's centre inside the panel's width (`transform-origin`).
+  private var originX: CGFloat { min(max(anchor.midX - panelLeft, 0), Self.panelWidth) }
+  /// Scaling the panel about its bottom edge at the icon's x and shifting it by `(1 - scale)` of
+  /// the way down to the icon is the same as scaling it about the icon, so the panel grows out of
+  /// the icon without knowing its own height.
   private var inflateShift: CGSize {
-    let leading = container.width - edgeInset - Self.panelWidth
-    return CGSize(width: anchor.midX - (leading + tipX), height: anchor.midY - (barTop - 8))
+    CGSize(width: anchor.midX - (panelLeft + originX), height: anchor.midY - panelBottom)
   }
 
   private func tileMotion(_ index: Int) -> Animation? {
     guard !reduceMotion else { return nil }
     return isOpen
-      ? Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24)
-        .delay(RitmMore.stagger * Double(index + 1))
+      ? Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.3)
+        .delay(RitmMore.firstTile + RitmMore.stagger * Double(index))
       : RitmMore.deflate
   }
 
@@ -520,28 +559,25 @@ private struct RitmMorePanel: View {
       panel
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .padding(.trailing, edgeInset)
-        .padding(.bottom, max(0, container.height - barTop + 8))
+        .padding(.bottom, max(0, container.height - panelBottom))
     }
     .frame(width: container.width, height: container.height)
   }
 
   private var panel: some View {
     let scale = reduceMotion || isOpen ? 1 : RitmMore.seed
-    return RitmGlassGroup(spacing: Self.spacing) {
-      HStack(spacing: Self.spacing) {
-        ForEach(Array(RitmSection.moreSections.enumerated()), id: \.element) { index, section in
-          tile(section, index: index)
-        }
+    let shape = RoundedRectangle(cornerRadius: Self.radius, style: .circular)
+    return HStack(spacing: Self.spacing) {
+      ForEach(Array(RitmSection.moreSections.enumerated()), id: \.element) { index, section in
+        tile(section, index: index)
       }
     }
     .padding(Self.padding)
-    .padding(.bottom, RitmBubble.tailHeight)
     // A dense under-layer keeps the labels readable on any content behind the glass.
-    .background(RitmTheme.glassDense.opacity(0.55), in: RitmBubble(tailX: tailX))
-    .ritmGlass(in: RitmBubble(tailX: tailX))
-    .scaleEffect(scale, anchor: UnitPoint(x: tipX / Self.panelWidth, y: 1))
-    .offset(
-      x: (1 - scale) * inflateShift.width, y: (1 - scale) * inflateShift.height)
+    .background(RitmTheme.glassDense.opacity(0.55), in: shape)
+    .ritmFloatingGlass(in: shape)
+    .scaleEffect(scale, anchor: UnitPoint(x: originX / Self.panelWidth, y: 1))
+    .offset(x: (1 - scale) * inflateShift.width, y: (1 - scale) * inflateShift.height)
     .opacity(isOpen ? 1 : 0)
     .allowsHitTesting(isOpen)
     .accessibilityHidden(!isOpen)
@@ -549,18 +585,21 @@ private struct RitmMorePanel: View {
     .accessibilityAction(.escape, dismiss)
   }
 
+  /// `.more-tile`: 100 × 72, radius 16, hairline border on a translucent tile; the current
+  /// section is the soft accent tile with an accent border.
   private func tile(_ section: RitmSection, index: Int) -> some View {
     let selected = section == current
     let shown = reduceMotion || isOpen
+    let shape = RoundedRectangle(cornerRadius: 16, style: .circular)
     return Button {
       choose(section)
     } label: {
       VStack(spacing: 6) {
-        Image(systemName: section.symbol)
-          .font(.system(size: 22))
+        RitmIcon(section.icon)
+          .font(.system(size: 24))
           .foregroundStyle(selected ? RitmTheme.accentColor : RitmTheme.muted)
         Text(section.title(store))
-          .font(.system(size: 12, weight: .semibold))
+          .ritmFont(11.5, weight: .semibold)
           .lineLimit(1)
           .minimumScaleFactor(0.8)
       }
@@ -568,14 +607,16 @@ private struct RitmMorePanel: View {
       .padding(.vertical, 8).padding(.horizontal, 6)
       .frame(width: Self.tileWidth)
       .frame(minHeight: 72)
-      .ritmGlassThumb(
-        in: RoundedRectangle(cornerRadius: 16, style: .circular),
-        tint: selected ? RitmTheme.accentColor.opacity(0.2) : nil)
-      .contentShape(Rectangle())
+      .background(selected ? RitmTheme.soft : RitmTheme.glassTile, in: shape)
+      .overlay {
+        shape.strokeBorder(selected ? RitmTheme.accentColor : RitmTheme.glassHair, lineWidth: 1)
+      }
+      .contentShape(shape)
     }
     .buttonStyle(RitmPressStyle(scale: 0.95))
     .opacity(shown ? 1 : 0)
-    .scaleEffect(shown ? 1 : 0.88)
+    .offset(y: shown ? 0 : 6)
+    .scaleEffect(shown ? 1 : 0.92)
     .animation(tileMotion(index), value: isOpen)
     .accessibilityAddTraits(selected ? .isSelected : [])
   }
@@ -632,10 +673,10 @@ struct SyncStatusView: View {
           store.text(
             "Нет связи · данные могут быть устаревшими", "Offline · data may be out of date"))
       } else if let date = store.lastSyncedAt {
-        Image(systemName: "checkmark.circle")
+        RitmIcon(.ok)
         Text(store.text("Обновлено", "Updated") + " " + clock(date))
       } else {
-        Image(systemName: "arrow.triangle.2.circlepath")
+        RitmIcon(.refresh)
         Text(store.text("Ожидаем обновления", "Waiting to refresh"))
       }
     }

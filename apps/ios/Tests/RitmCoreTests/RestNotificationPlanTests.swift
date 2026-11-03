@@ -21,7 +21,7 @@ final class RestNotificationPlanTests: XCTestCase {
   func testRunningRestFiresAtTheAbsoluteEndWithTheNextSet() throws {
     let plan = try XCTUnwrap(
       RestNotificationPlanner.plan(state: state(rest: running(t0)), privacy: false, russian: true, now: t0.addingTimeInterval(5)))
-    XCTAssertEqual(plan.fireDate, t0.addingTimeInterval(90))
+    XCTAssertEqual(plan.fireDate, t0.addingTimeInterval(180))
     XCTAssertEqual(plan.identifier, "ritm.workout.rest.w1")
     XCTAssertEqual(plan.title, "Отдых закончился")
     XCTAssertEqual(plan.body, "Дальше: Жим лёжа · подход 2/3 · 80 кг × 5")
@@ -38,7 +38,7 @@ final class RestNotificationPlanTests: XCTestCase {
     var rest = running(t0)
     rest.extend(now: t0.addingTimeInterval(10), by: 30)
     let plan = try XCTUnwrap(RestNotificationPlanner.plan(state: state(rest: rest), privacy: false, russian: true, now: t0.addingTimeInterval(10)))
-    XCTAssertEqual(plan.fireDate, t0.addingTimeInterval(120))
+    XCTAssertEqual(plan.fireDate, t0.addingTimeInterval(210))
   }
 
   func testNothingWhenSkippedPausedFinishedOrAllDone() {
@@ -49,7 +49,7 @@ final class RestNotificationPlanTests: XCTestCase {
     paused.pause(now: now)
     XCTAssertNil(RestNotificationPlanner.plan(state: state(rest: skipped), privacy: false, russian: true, now: now))
     XCTAssertNil(RestNotificationPlanner.plan(state: state(rest: paused), privacy: false, russian: true, now: now))
-    XCTAssertNil(RestNotificationPlanner.plan(state: state(rest: running(t0)), privacy: false, russian: true, now: t0.addingTimeInterval(95)))
+    XCTAssertNil(RestNotificationPlanner.plan(state: state(rest: running(t0)), privacy: false, russian: true, now: t0.addingTimeInterval(185)))
     XCTAssertNil(RestNotificationPlanner.plan(state: state(rest: running(t0), done: 3), privacy: false, russian: true, now: now))
     XCTAssertNil(RestNotificationPlanner.plan(state: SharedWorkoutState(), privacy: false, russian: true, now: now))
   }

@@ -48,183 +48,204 @@ struct NativeTaskEditor: View {
     _completed = State(initialValue: task?.completed ?? false)
   }
   var body: some View {
-    NavigationStack {
-      Form {
-        if let validation { Section { RitmErrorBanner(message: validation) } }
-        if let error = store.errorMessage { Section { RitmErrorBanner(message: error) } }
-        Section {
-          if task == nil && store.uncertainWrite {
-            Button(store.text("Закрыть и проверить список", "Close and check the list")) {
-              dismiss()
-            }
-            .disabled(busy)
-          } else {
-            MutationRecoveryView()
-          }
-        }
-        if let deleted {
-          Section {
-            Label(store.text("Задача удалена", "Task deleted"), systemImage: "trash")
-            Button(store.text("Восстановить", "Restore")) {
-              Task {
-                busy = true
-                let restored = await store.write { try await $0.restoreTask(deleted) }
-                busy = false
-                if restored != nil {
-                  self.deleted = nil
-                  await onSave?()
-                  dismiss()
-                }
-              }
-            }.disabled(!store.canWrite || busy)
-          }
-        } else {
-          Section {
-            TextField(store.text("Название", "Title"), text: $title, axis: .vertical).lineLimit(
-              1...4)
-            TextField(store.text("Описание", "Description"), text: $details, axis: .vertical)
-              .lineLimit(3...8)
-            Picker(store.text("Тип", "Type"), selection: $kind) {
-              Text(store.text("Задача", "Task")).tag(TaskKind.task)
-              Text(store.text("Событие", "Event")).tag(TaskKind.event)
-            }
-            Picker(store.text("Приоритет", "Priority"), selection: $priority) {
-              Text(store.text("Низкий", "Low")).tag(Priority.low)
-              Text(store.text("Обычный", "Normal")).tag(Priority.normal)
-              Text(store.text("Высокий", "High")).tag(Priority.high)
-            }
-          }
-          Section(store.text("Расписание", "Schedule")) {
-            Toggle(store.text("Назначить дату", "Set date"), isOn: $dated)
-            if dated {
-              DateKeyPicker(title: store.text("Дата", "Date"), value: $date, zone: store.timeZone)
-              Toggle(store.text("Указать время", "Set time"), isOn: $timed)
-              if timed { TextField("HH:mm", text: $time).keyboardType(.numbersAndPunctuation) }
-              RitmDurationStepper(duration: $duration)
-              Picker(store.text("Повтор", "Repeat"), selection: $recurrence) { recurrenceOptions }
-            }
-            if task != nil && task?.repeat != TaskRepeat.none {
-              Text(
-                store.text(
-                  "Изменение расписания относится ко всей серии. Отметка выполнения — к выбранной дате.",
-                  "Schedule edits affect the series. Completion applies to the selected date.")
-              ).font(.caption).foregroundStyle(.secondary)
-            }
-          }
-          Section(store.text("Цвет", "Color")) { CalendarColorPicker(colorID: $colorID) }
-          if let task {
-            Section {
-              Button(
-                task.isComplete(on: occurrenceDate ?? task.date ?? store.today)
-                  ? store.text("Вернуть в работу", "Mark incomplete")
-                  : store.text("Отметить выполненной", "Mark complete")
-              ) {
-                Task {
-                  busy = true
-                  let result = await store.write {
-                    try await $0.setTaskCompleted(
-                      id: task.id,
-                      completed: !task.isComplete(on: occurrenceDate ?? task.date ?? store.today),
-                      occurrenceDate: task.repeat == .none
-                        ? nil : occurrenceDate ?? task.date ?? store.today)
-                  }
-                  busy = false
-                  if result != nil {
-                    await onSave?()
-                    dismiss()
-                  }
-                }
-              }.disabled(!store.canWrite || busy)
-              if task.calendarEntry != false && task.date != nil && !task.completed
-                && task.completedDates.isEmpty
-              {
-                Button(store.text("Перенести в Google Calendar", "Move to Google Calendar")) {
-                  confirmTransfer = true
-                }.disabled(!store.canWrite || busy)
-              }
-              Button(store.text("Удалить задачу", "Delete task"), role: .destructive) {
-                confirmDelete = true
-              }.disabled(!store.canWrite || busy)
-            }
+    CalendarSheetFrame(
+      title: store.text(
+        task == nil ? "Новая задача" : "Задача Ritm", task == nil ? "New task" : "Ritm task"),
+      busy: busy
+    ) {
+      if let validation { CalendarSheetError(message: validation) }
+      if let error = store.errorMessage { RitmErrorBanner(message: error) }
+      if task == nil && store.uncertainWrite {
+        Button(store.text("Закрыть и проверить список", "Close and check the list")) { dismiss() }
+          .buttonStyle(CalendarSheetButtonStyle())
+          .disabled(busy)
+      } else {
+        MutationRecoveryView()
+      }
+      if let deleted {
+        deletedRows(deleted)
+      } else {
+        editorRows
+      }
+    }
+    .task { if date.isEmpty { date = store.today } }
+    .confirmationDialog(
+      store.text("Удалить задачу?", "Delete task?"), isPresented: $confirmDelete,
+      titleVisibility: .visible
+    ) {
+      Button(store.text("Удалить", "Delete"), role: .destructive) {
+        guard let task else { return }
+        Task {
+          busy = true
+          deleted = await store.write { try await $0.deleteTask(id: task.id) }
+          busy = false
+          if deleted != nil {
+            store.toasts.show(store.text("Задача удалена", "Task deleted"))
+            await onSave?()
           }
         }
       }
-      .scrollDismissesKeyboard(.interactively)
-      .navigationTitle(
-        store.text(task == nil ? "Новая задача" : "Задача", task == nil ? "New task" : "Task")
-      )
-      .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button(store.text("Закрыть", "Close")) { dismiss() }.disabled(busy)
-        }
-        ToolbarItem(placement: .confirmationAction) {
-          if deleted == nil {
-            Button(store.text("Сохранить", "Save")) { Task { await save() } }.disabled(
-              !store.canWrite || busy)
+    } message: {
+      Text(
+        task?.repeat != TaskRepeat.none && task != nil
+          ? store.text(
+            "Будет удалена вся серия с историей выполнения. После удаления здесь можно нажать «Восстановить».",
+            "The entire series and its completion history will be deleted. You can restore it here after deletion."
+          )
+          : store.text(
+            "После удаления здесь можно нажать «Восстановить».",
+            "You can restore the task here after deletion."))
+    }
+    .confirmationDialog(
+      store.text("Перенести запись в Google?", "Move this entry to Google?"),
+      isPresented: $confirmTransfer, titleVisibility: .visible
+    ) {
+      Button(store.text("Перенести", "Move")) {
+        guard let task else { return }
+        Task {
+          busy = true
+          let result = await store.write { try await $0.transferTaskToGoogle(id: task.id) }
+          busy = false
+          if result != nil {
+            await onSave?()
+            dismiss()
           }
         }
       }
-      .interactiveDismissDisabled(busy)
-      .task { if date.isEmpty { date = store.today } }
-      .confirmationDialog(
-        store.text("Удалить задачу?", "Delete task?"), isPresented: $confirmDelete,
-        titleVisibility: .visible
-      ) {
-        Button(store.text("Удалить", "Delete"), role: .destructive) {
-          guard let task else { return }
-          Task {
-            busy = true
-            deleted = await store.write { try await $0.deleteTask(id: task.id) }
-            busy = false
-            if deleted != nil {
-              store.toasts.show(store.text("Задача удалена", "Task deleted"))
-              await onSave?()
-            }
-          }
-        }
-      } message: {
-        Text(
-          task?.repeat != TaskRepeat.none && task != nil
-            ? store.text(
-              "Будет удалена вся серия с историей выполнения. После удаления здесь можно нажать «Восстановить».",
-              "The entire series and its completion history will be deleted. You can restore it here after deletion."
-            )
-            : store.text(
-              "После удаления здесь можно нажать «Восстановить».",
-              "You can restore the task here after deletion."))
-      }
-      .confirmationDialog(
-        store.text("Перенести запись в Google?", "Move this entry to Google?"),
-        isPresented: $confirmTransfer, titleVisibility: .visible
-      ) {
-        Button(store.text("Перенести", "Move")) {
-          guard let task else { return }
-          Task {
-            busy = true
-            let result = await store.write { try await $0.transferTaskToGoogle(id: task.id) }
-            busy = false
-            if result != nil {
-              await onSave?()
-              dismiss()
-            }
-          }
-        }
-      } message: {
-        Text(
-          store.text(
-            "После успешного переноса локальная запись будет заменена событием Google.",
-            "After a successful transfer the local entry is replaced by a Google event."))
-      }
+    } message: {
+      Text(
+        store.text(
+          "После успешного переноса локальная запись будет заменена событием Google.",
+          "After a successful transfer the local entry is replaced by a Google event."))
     }
   }
-  private var recurrenceOptions: some View {
-    Group {
-      Text(store.text("Не повторять", "Never")).tag(TaskRepeat.none)
-      Text(store.text("Каждый день", "Daily")).tag(TaskRepeat.daily)
-      Text(store.text("Каждую неделю", "Weekly")).tag(TaskRepeat.weekly)
-      Text(store.text("Каждый месяц", "Monthly")).tag(TaskRepeat.monthly)
+
+  /// After a delete: the restore row.
+  @ViewBuilder private func deletedRows(_ deleted: RitmTask) -> some View {
+    Label { Text(store.text("Задача удалена", "Task deleted")) } icon: { RitmSymbol("trash") }
+      .ritmFont(15)
+      .foregroundStyle(RitmTheme.text)
+    Button(store.text("Восстановить", "Restore")) {
+      Task {
+        busy = true
+        let restored = await store.write { try await $0.restoreTask(deleted) }
+        busy = false
+        if restored != nil {
+          self.deleted = nil
+          await onSave?()
+          dismiss()
+        }
+      }
     }
+    .buttonStyle(CalendarSheetButtonStyle(kind: .primary))
+    .disabled(!store.canWrite || busy)
+  }
+
+  @ViewBuilder private var editorRows: some View {
+    CalendarSheetField(store.text("Название", "Title")) {
+      CalendarTextInput(placeholder: store.text("Название", "Title"), text: $title)
+    }
+    CalendarSheetField(store.text("Описание", "Description")) {
+      CalendarTextInput(
+        placeholder: store.text("Описание", "Description"), text: $details, lines: 3...8,
+        minHeight: 76)
+    }
+    HStack(alignment: .top, spacing: 10) {
+      CalendarSheetField(store.text("Тип", "Type")) {
+        CalendarSelect(
+          options: [
+            (TaskKind.task, store.text("Задача", "Task")),
+            (TaskKind.event, store.text("Событие", "Event")),
+          ], selection: $kind)
+      }
+      CalendarSheetField(store.text("Приоритет", "Priority")) {
+        CalendarSelect(
+          options: [
+            (Priority.low, store.text("Низкий", "Low")),
+            (Priority.normal, store.text("Обычный", "Normal")),
+            (Priority.high, store.text("Высокий", "High")),
+          ], selection: $priority)
+      }
+    }
+    CalendarSwitchRow(title: store.text("Назначить дату", "Set date"), isOn: $dated)
+    if dated {
+      CalendarSheetField(store.text("Дата", "Date")) {
+        CalendarDateField(value: $date, zone: store.timeZone)
+      }
+      CalendarSwitchRow(title: store.text("Указать время", "Set time"), isOn: $timed)
+      if timed { CalendarTimeRange(start: $time, duration: $duration) }
+      CalendarSheetField(store.text("Повтор", "Repeat")) {
+        CalendarSelect(
+          options: [
+            (TaskRepeat.none, store.text("Не повторять", "Never")),
+            (TaskRepeat.daily, store.text("Каждый день", "Daily")),
+            (TaskRepeat.weekly, store.text("Каждую неделю", "Weekly")),
+            (TaskRepeat.monthly, store.text("Каждый месяц", "Monthly")),
+          ], selection: $recurrence)
+      }
+    }
+    if task != nil && task?.repeat != TaskRepeat.none {
+      CalendarSheetNote(
+        text: store.text(
+          "Изменение расписания относится ко всей серии. Отметка выполнения — к выбранной дате.",
+          "Schedule edits affect the series. Completion applies to the selected date."))
+    }
+    VStack(alignment: .leading, spacing: 4) {
+      Text(store.text("Цвет", "Color")).ritmFont(12).foregroundStyle(RitmTheme.muted)
+      CalendarColorPicker(colorID: $colorID)
+    }
+    if let task { completionRow(task) }
+    if let task { taskActions(task) }
+    CalendarSheetButtons(
+      cancelTitle: store.text("Отмена", "Cancel"), saveTitle: store.text("Сохранить", "Save"),
+      canSave: store.canWrite && !busy,
+      cancel: { dismiss() }, save: { Task { await save() } })
+  }
+
+  /// «Выполнено»: a switch saved with the task; a repeating task is marked for one date at once.
+  @ViewBuilder private func completionRow(_ task: RitmTask) -> some View {
+    if dated && recurrence != .none {
+      let done = task.isComplete(on: occurrenceDate ?? task.date ?? store.today)
+      Button(
+        done
+          ? store.text("Вернуть в работу", "Mark incomplete")
+          : store.text("Отметить выполненной", "Mark complete")
+      ) {
+        Task {
+          busy = true
+          let result = await store.write {
+            try await $0.setTaskCompleted(
+              id: task.id, completed: !done,
+              occurrenceDate: task.repeat == .none
+                ? nil : occurrenceDate ?? task.date ?? store.today)
+          }
+          busy = false
+          if result != nil {
+            await onSave?()
+            dismiss()
+          }
+        }
+      }
+      .buttonStyle(CalendarSheetButtonStyle())
+      .disabled(!store.canWrite || busy)
+    } else {
+      CalendarSwitchRow(title: store.text("Выполнено", "Done"), isOn: $completed)
+    }
+  }
+
+  @ViewBuilder private func taskActions(_ task: RitmTask) -> some View {
+    if task.calendarEntry != false && task.date != nil && !task.completed
+      && task.completedDates.isEmpty
+    {
+      Button(store.text("Перенести в Google Calendar", "Move to Google Calendar")) {
+        confirmTransfer = true
+      }
+      .buttonStyle(CalendarSheetButtonStyle())
+      .disabled(!store.canWrite || busy)
+    }
+    Button(store.text("Удалить задачу", "Delete task")) { confirmDelete = true }
+      .buttonStyle(CalendarSheetButtonStyle(kind: .danger))
+      .disabled(!store.canWrite || busy)
   }
   private func save() async {
     let title = title.trimmingCharacters(in: .whitespacesAndNewlines)

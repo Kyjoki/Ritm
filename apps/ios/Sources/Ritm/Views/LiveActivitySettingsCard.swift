@@ -1,36 +1,27 @@
 import RitmCore
 import SwiftUI
 
-/// «Тренировка вне приложения»: the end-of-rest notification and the lock-screen card. The state
-/// lines say only what is confirmed: whether the extension is in this build, what iOS allows,
-/// and what the last request returned. They never claim a working card without the extension.
-struct LiveActivitySettingsCard: View {
+/// The lock-screen switches of the «Apple Здоровье» card (proto: «Показывать тренировку на экране
+/// блокировки», «Скрывать веса…», «Уведомление об окончании отдыха»): the end-of-rest notification
+/// and the lock-screen card. A status line appears only when something is wrong, so the card never
+/// claims a working lock-screen card without the extension.
+struct LiveActivitySettingsRows: View {
   @Environment(RitmStore.self) private var store
 
   private var alerts: WorkoutAlerts { store.workouts.alerts }
   private var settings: WorkoutAlertSettings { alerts.settings }
 
   var body: some View {
-    SettingsCard(symbol: "lock.iphone", title: store.text("Тренировка вне приложения", "Workout outside the app")) {
+    VStack(alignment: .leading, spacing: 0) {
       SettingsSwitchRow(
         title: store.text("Показывать тренировку на экране блокировки", "Show the workout on the lock screen"),
-        note: store.text(
-          "Отдых, упражнение и подход. Веса там только плановые, не выполненные.",
-          "Rest, exercise and set. Weights there are planned ones, never done."),
         isOn: binding(\.showsLiveActivity))
-      statusLine(liveActivityStatus, isProblem: liveActivityIsProblem)
-      Rectangle().fill(RitmTheme.line).frame(height: 1)
+      if liveActivityIsProblem { statusLine(liveActivityStatus) }
       SettingsSwitchRow(
         title: store.text("Скрывать веса на экране блокировки", "Hide weights on the lock screen"),
-        note: store.text(
-          "Касается карточки и уведомления об отдыхе.", "Applies to the card and the rest notification."),
         isOn: binding(\.hidesWeights))
-      Rectangle().fill(RitmTheme.line).frame(height: 1)
       SettingsSwitchRow(
         title: store.text("Уведомление об окончании отдыха", "Rest-over notification"),
-        note: store.text(
-          "Один сигнал, когда таймер отдыха дойдёт до нуля, пока Ritm свёрнут.",
-          "One alert when the rest timer reaches zero while Ritm is in the background."),
         isOn: Binding(
           get: { settings.notifiesRestEnd },
           set: { value in
@@ -40,7 +31,7 @@ struct LiveActivitySettingsCard: View {
               store.workouts.alerts.resync()
             }
           }))
-      statusLine(notificationStatus, isProblem: notificationIsProblem)
+      if notificationIsProblem { statusLine(notificationStatus) }
     }
     .task { await alerts.notifications.refreshPermission() }
   }
@@ -54,10 +45,10 @@ struct LiveActivitySettingsCard: View {
       })
   }
 
-  private func statusLine(_ text: String, isProblem: Bool) -> some View {
+  private func statusLine(_ text: String) -> some View {
     Text(text)
-      .ritmFont(10, lineSpacing: 4)
-      .foregroundStyle(isProblem ? RitmTheme.danger : RitmTheme.muted)
+      .ritmFont(10, lineSpacing: 3.5)
+      .foregroundStyle(RitmTheme.danger)
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(.bottom, 12)
       .fixedSize(horizontal: false, vertical: true)
@@ -81,9 +72,7 @@ struct LiveActivitySettingsCard: View {
         "iOS не запустила карточку: \(reason). Тренировка это не затрагивает.",
         "iOS did not start the card: \(reason). The workout is not affected.")
     }
-    return store.text(
-      "Расширение есть в сборке и iOS разрешает Live Activities. Карточка появится, когда начнётся тренировка.",
-      "The extension is in this build and iOS allows Live Activities. The card appears when a workout starts.")
+    return ""
   }
 
   private var liveActivityIsProblem: Bool {
@@ -94,18 +83,9 @@ struct LiveActivitySettingsCard: View {
   }
 
   private var notificationStatus: String {
-    switch alerts.notifications.permission {
-    case .notDetermined:
-      return store.text(
-        "Разрешение iPhone попросим, когда вы включите это уведомление.",
-        "iPhone permission is asked when you turn this notification on.")
-    case .denied:
-      return store.text(
-        "iPhone не разрешил уведомления Ritm. Включите их в Настройках iPhone. Тренировка работает и без них.",
-        "iPhone does not allow Ritm notifications. Turn them on in iPhone Settings. Workouts work without them.")
-    case .allowed:
-      return store.text("Разрешение iPhone выдано.", "iPhone permission is granted.")
-    }
+    store.text(
+      "iPhone не разрешил уведомления Ritm. Включите их в Настройках iPhone. Тренировка работает и без них.",
+      "iPhone does not allow Ritm notifications. Turn them on in iPhone Settings. Workouts work without them.")
   }
 
   private var notificationIsProblem: Bool {

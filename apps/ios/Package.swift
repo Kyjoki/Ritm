@@ -16,7 +16,7 @@ if !coreTestsOnly {
 
 let package = Package(
   name: "Ritm",
-  platforms: [.iOS(.v17)],
+  platforms: [.iOS("27.0")],
   products: coreTestsOnly ? [] : [.library(name: "Ritm", targets: ["Ritm"])],
   targets: targets
 )

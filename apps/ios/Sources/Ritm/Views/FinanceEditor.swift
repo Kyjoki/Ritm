@@ -1,12 +1,19 @@
 import RitmCore
 import SwiftUI
 
+/// The account types of the form: the server's `account` and `stock`, and its `deposit` in two
+/// flavours the owner tells apart on this device («Счёт» and «Депозит»).
+private enum FinanceAccountTab: Hashable { case main, plain, deposit, stock }
+
 struct FinanceEditor: View {
   @Environment(RitmStore.self) private var store
   @Environment(\.dismiss) private var dismiss
   let entry: FinanceEntry?
   let entries: [FinanceEntry]
+  let accountKinds: FinanceAccountKindStore
   let onSave: () async -> Void
+  /// A `deposit` entry saved as «Счёт» (no deposit wording); remembered in `accountKinds`.
+  @State private var plain: Bool
   @State private var kind: FinanceEntryKind
   @State private var currency: FinanceCurrency
   @State private var amount = ""
@@ -26,11 +33,15 @@ struct FinanceEditor: View {
 
   init(
     entry: FinanceEntry?, kind: FinanceEntryKind, currency: FinanceCurrency,
-    entries: [FinanceEntry], onSave: @escaping () async -> Void
+    entries: [FinanceEntry], accountKinds: FinanceAccountKindStore,
+    onSave: @escaping () async -> Void
   ) {
     self.entry = entry
     self.entries = entries
+    self.accountKinds = accountKinds
     self.onSave = onSave
+    // A new extra account starts as «Счёт»; an existing one keeps what the owner chose.
+    _plain = State(initialValue: entry.map { accountKinds.isPlain($0.id) } ?? true)
     _kind = State(initialValue: entry?.type ?? kind)
     _currency = State(initialValue: entry?.currency ?? currency)
     _amount = State(initialValue: FinanceDisplay.decimal(entry?.amountMinor ?? entry?.valueMinor))
@@ -51,139 +62,260 @@ struct FinanceEditor: View {
   }
   private var isTransaction: Bool { kind == .income || kind == .expense || kind == .transfer }
 
+  private var isAccountGroup: Bool { kind == .account || kind == .deposit || kind == .stock }
+  private var title: String {
+    guard entry == nil else {
+      return kind == .deposit
+        ? (plain ? store.text("Изменить счёт", "Edit account") : store.text("Изменить депозит", "Edit deposit"))
+        : FinanceDisplay.title(kind, language: store.language)
+    }
+    return isTransaction
+      ? store.text("Новая операция", "New operation") : store.text("Новый счёт", "New account")
+  }
+
   var body: some View {
-    NavigationStack {
-      Form {
-        if let validation { Section { RitmErrorBanner(message: validation) } }
-        if let message = store.errorMessage { Section { RitmErrorBanner(message: message) } }
-        Section {
-          if entry == nil && store.uncertainWrite {
-            Button(store.text("Закрыть и проверить список", "Close and check the list")) {
-              dismiss()
-            }
-            .disabled(saving)
-          } else {
-            MutationRecoveryView()
-          }
-        }
-        Section {
-          Picker(store.text("Валюта", "Currency"), selection: $currency) {
-            ForEach([FinanceCurrency.KZT, .USD, .EUR, .RUB], id: \.self) {
-              Text($0.rawValue).tag($0)
-            }
-          }.disabled(entry != nil)
-          DateKeyPicker(title: store.text("Дата", "Date"), value: $date, zone: store.timeZone)
-          if kind == .deposit || kind == .stock {
-            TextField(store.text("Название", "Name"), text: $name)
-          }
-          if kind == .income || kind == .expense {
-            categoryPicker
-          }
-          if kind != .stock || quantity.isEmpty {
-            TextField(
-              store.text(
-                isTransaction ? "Сумма" : "Начальная стоимость",
-                isTransaction ? "Amount" : "Opening value"), text: $amount
-            ).keyboardType(.decimalPad)
-          }
-        } footer: {
-          if kind == .account || kind == .deposit {
-            Text(
-              store.text(
-                "Остаток до операций в указанную дату. Переводы после этой даты учитываются отдельно.",
-                "Balance before transactions on this date. Later transfers are calculated separately."
-              ))
-          }
-        }
-        if kind == .transfer {
-          Section {
-            accountPicker(store.text("Откуда", "From"), selection: $fromID)
-            accountPicker(store.text("Куда", "To"), selection: $toID)
-          } footer: {
-            Text(
-              store.text(
-                "Перевод между двумя разными счетами одной валюты. Доходом или расходом не считается.",
-                "Move money between different accounts in the same currency. It is not income or spending."
-              ))
-          }
-        }
-        if kind == .stock { stockFields }
-        Section(store.text("Заметка", "Note")) {
-          TextField(store.text("Необязательно", "Optional"), text: $note, axis: .vertical)
-            .lineLimit(3...7)
-        }
-        if saving { Section { ProgressView(store.text("Сохраняем…", "Saving…")) } }
+    FinanceSheetFrame(title: title) {
+      if entry == nil && store.uncertainWrite {
+        Button(store.text("Закрыть и проверить список", "Close and check the list")) { dismiss() }
+          .buttonStyle(RitmSecondaryButtonStyle(minHeight: 48))
+          .disabled(saving)
+      } else {
+        MutationRecoveryView()
       }
-      .scrollDismissesKeyboard(.interactively)
-      .navigationTitle(FinanceDisplay.title(kind, language: store.language))
-      .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button(store.text("Отмена", "Cancel")) { dismiss() }.disabled(saving)
-        }
-        ToolbarItem(placement: .confirmationAction) {
-          Button(store.text("Сохранить", "Save")) { Task { await save() } }.disabled(
-            !store.canWrite || saving)
+      if entry == nil || kind == .deposit { typeControl }
+      FinanceField(store.text("Валюта", "Currency")) {
+        FinanceSelect(
+          options: [FinanceCurrency.KZT, .USD, .EUR, .RUB].map { ($0, currencyTitle($0)) },
+          selection: $currency, disabled: entry != nil)
+      }
+      FinanceField(store.text("Дата", "Date")) {
+        DateKeyPicker(title: store.text("Дата", "Date"), value: $date, zone: store.timeZone)
+          .labelsHidden()
+          .tint(RitmTheme.accentColor)
+          .financeInput()
+      }
+      if kind == .deposit || kind == .stock {
+        FinanceField(store.text("Название", "Name")) {
+          FinanceTextInput(placeholder: namePlaceholder, text: $name)
         }
       }
-      .interactiveDismissDisabled(saving)
-      .task {
-        if date.isEmpty { date = store.today }
-        if fromID.isEmpty {
-          fromID = accounts.first(where: { $0.type == .account })?.id ?? accounts.first?.id ?? ""
+      if kind == .transfer { transferFields }
+      if kind == .stock { stockFields }
+      if kind != .stock || quantity.isEmpty {
+        FinanceField(
+          store.text(
+            isTransaction ? "Сумма" : "Начальная стоимость",
+            isTransaction ? "Amount" : "Opening value")
+        ) {
+          FinanceAmountInput(placeholder: "0", text: $amount, symbol: sign)
         }
-        if toID.isEmpty { toID = accounts.first(where: { $0.id != fromID })?.id ?? "" }
+        if kind == .account || kind == .deposit {
+          FinanceFormNote(
+            text: store.text(
+              "Остаток до операций в указанную дату. Переводы после этой даты учитываются отдельно.",
+              "Balance before transactions on this date. Later transfers are calculated separately."
+            ))
+        }
       }
-      .onChange(of: currency) { _, _ in
-        fromID = ""
-        toID = ""
+      if kind == .income || kind == .expense { categoryPicker }
+      FinanceField(store.text("Заметка", "Note")) {
+        TextField(store.text("Необязательно", "Optional"), text: $note, axis: .vertical)
+          .lineLimit(1...4)
+          .financeInput()
       }
+      FinanceFormError(message: validation)
+      FinanceFormError(message: store.errorMessage)
+      if saving { ProgressView(store.text("Сохраняем…", "Saving…")) }
+      FinanceFormButtons(
+        cancelTitle: store.text("Отмена", "Cancel"),
+        saveTitle: entry == nil && isAccountGroup
+          ? store.text("Добавить", "Add") : store.text("Сохранить", "Save"),
+        canSave: store.canWrite && !saving,
+        cancel: { dismiss() }, save: { Task { await save() } })
+    }
+    .interactiveDismissDisabled(saving)
+    .task {
+      if entry == nil, kind == .account, !mainAvailable { kind = .deposit }
+      if date.isEmpty { date = store.today }
+      if fromID.isEmpty {
+        fromID = accounts.first(where: { $0.type == .account })?.id ?? accounts.first?.id ?? ""
+      }
+      if toID.isEmpty { toID = accounts.first(where: { $0.id != fromID })?.id ?? "" }
+    }
+    .onChange(of: currency) { _, _ in
+      fromID = ""
+      toID = ""
+      // A second main account in one currency is refused: use a named account instead.
+      if entry == nil, kind == .account, !mainAvailable { kind = .deposit }
     }
   }
+
+  /// The server keeps one unnamed main account per currency; every further account is a named
+  /// `deposit` record (it takes transfers, not income or expenses).
+  private var mainAvailable: Bool {
+    !entries.contains { $0.type == .account && $0.currency == currency }
+  }
+
+  private var namePlaceholder: String {
+    kind == .deposit && plain
+      ? store.text("Например, Kaspi Gold", "For example, Kaspi Gold")
+      : store.text("Название", "Name")
+  }
+
+  private var sign: String {
+    switch currency {
+    case .KZT: "₸"
+    case .USD: "$"
+    case .EUR: "€"
+    case .RUB: "₽"
+    }
+  }
+
+  private func currencyTitle(_ code: FinanceCurrency) -> String {
+    switch code {
+    case .KZT: store.text("Тенге (₸)", "Tenge (₸)")
+    case .USD: store.text("Доллар США ($)", "US dollar ($)")
+    case .EUR: store.text("Евро (€)", "Euro (€)")
+    case .RUB: store.text("Рубль (₽)", "Rouble (₽)")
+    }
+  }
+
+  /// `Расход / Поступление / Перевод` or `Счёт / Депозит / Акции`: only for a new record.
+  @ViewBuilder private var typeControl: some View {
+    if isTransaction {
+      RitmSegmentedControl(
+        label: store.text("Тип операции", "Operation type"),
+        values: [FinanceEntryKind.expense, .income, .transfer],
+        title: { typeTitle($0) }, selection: kindBinding, fontSize: 12.5)
+    } else {
+      RitmSegmentedControl(
+        label: store.text("Тип счёта", "Account type"),
+        values: accountTabs,
+        title: { tabTitle($0) }, selection: tabBinding, fontSize: 12.5)
+    }
+  }
+
+  /// «Основной» only while the currency has no main account; an existing deposit-type record
+  /// can switch between «Счёт» and «Депозит» but not become another kind of entry.
+  private var accountTabs: [FinanceAccountTab] {
+    if entry != nil { return [.plain, .deposit] }
+    return mainAvailable ? [.main, .plain, .deposit, .stock] : [.plain, .deposit, .stock]
+  }
+
+  private func tabTitle(_ tab: FinanceAccountTab) -> String {
+    switch tab {
+    case .main: store.text("Основной", "Main")
+    case .plain: store.text("Счёт", "Account")
+    case .deposit: store.text("Депозит", "Deposit")
+    case .stock: store.text("Акции", "Stocks")
+    }
+  }
+
+  private var tabBinding: Binding<FinanceAccountTab> {
+    Binding(
+      get: {
+        switch kind {
+        case .account: .main
+        case .stock: .stock
+        default: plain ? .plain : .deposit
+        }
+      },
+      set: { next in
+        switch next {
+        case .main: kind = .account
+        case .plain:
+          kind = .deposit
+          plain = true
+        case .deposit:
+          kind = .deposit
+          plain = false
+        case .stock: kind = .stock
+        }
+      })
+  }
+
+  private func typeTitle(_ value: FinanceEntryKind) -> String {
+    switch value {
+    case .expense: store.text("Расход", "Expense")
+    case .income: store.text("Поступление", "Income")
+    case .transfer: store.text("Перевод", "Transfer")
+    case .account: store.text("Основной", "Main")
+    case .deposit: store.text("Счёт", "Account")
+    case .stock: store.text("Акции", "Stocks")
+    }
+  }
+
+  private var kindBinding: Binding<FinanceEntryKind> {
+    Binding(
+      get: { kind },
+      set: { next in
+        if next != kind { category = "" }
+        kind = next
+      })
+  }
+
   private var categoryPicker: some View {
     FinanceCategoryPicker(
-      income: kind == .income, selection: $category, stored: entry?.category)
+      income: kind == .income, selection: $category, stored: entry?.category
+    )
+    .id(kind)
   }
+
+  private var transferFields: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      FinanceField(store.text("Откуда", "From")) { accountSelect($fromID) }
+      FinanceField(store.text("Куда", "To")) { accountSelect($toID) }
+      FinanceFormNote(
+        text: store.text(
+          "Перевод между двумя разными счетами одной валюты. Доходом или расходом не считается.",
+          "Move money between different accounts in the same currency. It is not income or spending."
+        ))
+    }
+  }
+
   private var stockFields: some View {
-    Section {
-      Picker(store.text("Биржа", "Exchange"), selection: $exchange) {
-        Text("KASE").tag("KASE")
-        Text("AIX").tag("AIX")
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(alignment: .top, spacing: 10) {
+        FinanceField(store.text("Биржа", "Exchange")) {
+          FinanceSelect(
+            options: [("KASE", "KASE"), ("AIX", "AIX")], selection: $exchange)
+        }
+        FinanceField(store.text("Тикер", "Ticker")) {
+          FinanceTextInput(
+            placeholder: "HSBK", text: $ticker, capitalization: .characters)
+        }
       }
-      TextField(store.text("Тикер", "Ticker"), text: $ticker).textInputAutocapitalization(
-        .characters
-      ).autocorrectionDisabled()
-      TextField(store.text("Количество акций", "Share quantity"), text: $quantity).keyboardType(
-        .numberPad)
-      TextField(store.text("Текущая цена одной акции", "Current price per share"), text: $unitPrice)
-        .keyboardType(.decimalPad)
-      TextField(
-        store.text("Цена покупки одной акции", "Purchase price per share"), text: $purchasePrice
-      ).keyboardType(.decimalPad)
+      HStack(alignment: .top, spacing: 10) {
+        FinanceField(store.text("Количество", "Quantity")) {
+          FinanceTextInput(placeholder: "0", text: $quantity, keyboard: .numberPad)
+        }
+        FinanceField(store.text("Цена покупки", "Purchase price")) {
+          FinanceAmountInput(placeholder: "0", text: $purchasePrice, symbol: sign)
+        }
+      }
+      FinanceField(store.text("Текущая цена", "Current price")) {
+        FinanceAmountInput(placeholder: "0", text: $unitPrice, symbol: sign)
+      }
       if let count = Int(quantity), count > 0, count <= 1_000_000_000,
         let price = FinanceDisplay.minor(unitPrice), price <= 1_000_000_000_000 / count
       {
-        LabeledContent(
-          store.text("Текущая стоимость", "Current valuation"),
-          value: FinanceDisplay.money(price * count, currency: currency, language: store.language))
+        FinanceFormNote(
+          text: store.text("Текущая стоимость: ", "Current valuation: ")
+            + FinanceDisplay.money(price * count, currency: currency, language: store.language))
       }
-    } header: {
-      Text(store.text("Ручная оценка акций", "Manual stock valuation"))
-    } footer: {
-      Text(
-        store.text(
+      FinanceFormNote(
+        text: store.text(
           "Укажите цену самостоятельно. Автоматического обновления котировок нет. Для изменения цены отредактируйте эту запись.",
           "Enter the price yourself. Quotes do not update automatically. Edit this record to update its price."
         ))
     }
   }
-  private func accountPicker(_ title: String, selection: Binding<String>) -> some View {
-    Picker(title, selection: selection) {
-      Text(store.text("Выберите счёт", "Choose account")).tag("")
-      ForEach(accounts) { account in
-        Text(account.name ?? store.text("Основной счёт", "Main account")).tag(account.id)
-      }
-    }
+
+  private func accountSelect(_ selection: Binding<String>) -> some View {
+    let named = accounts.map { ($0.id, $0.name ?? store.text("Основной счёт", "Main account")) }
+    return FinanceSelect(
+      options: [("", store.text("Выберите счёт", "Choose account"))] + named,
+      selection: selection)
   }
   private func savedToast(name: String) -> String {
     if entry != nil { return store.text("Запись сохранена", "Record saved") }
@@ -287,8 +419,11 @@ struct FinanceEditor: View {
       return try await client.createFinanceEntry(input)
     }
     saving = false
-    if result != nil {
-      store.toasts.show(savedToast(name: trimmedName))
+    if let saved = result {
+      if saved.type == .deposit { accountKinds.set(plain: plain, for: saved.id) }
+      // A new operation announces itself with the banner (store.notices), not a toast.
+      let announcedByBanner = entry == nil && (kind == .income || kind == .expense || kind == .transfer)
+      if !announcedByBanner { store.toasts.show(savedToast(name: trimmedName)) }
       await onSave()
       dismiss()
     }

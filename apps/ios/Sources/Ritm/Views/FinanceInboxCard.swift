@@ -41,21 +41,31 @@ struct FinanceInboxCard: View {
   // MARK: Card
 
   private func card(_ items: [WalletPurchase]) -> some View {
-    RitmCard(raised: true) {
-      VStack(alignment: .leading, spacing: 0) {
-        header(count: items.count)
-        ForEach(items) { purchase in
-          row(purchase).transition(rowTransition)
-        }
-        if items.count > 1, store.wallet.state.allHaveCategory { confirmAll(items) }
+    VStack(alignment: .leading, spacing: 0) {
+      header(count: items.count)
+      Text(
+        store.text(
+          "Эти покупки ждут вашего подтверждения: выберите категорию и подтвердите.",
+          "These purchases wait for your confirmation: pick a category and confirm.")
+      )
+      .ritmFont(11, lineSpacing: 3)
+      .foregroundStyle(RitmTheme.muted)
+      .padding(.bottom, 4)
+      ForEach(items) { purchase in
+        row(purchase).transition(rowTransition)
       }
+      if items.count > 1, store.wallet.state.allHaveCategory { confirmAll(items) }
     }
-    .padding(.bottom, 14)
+    .padding(.horizontal, 16)
+    .padding(.top, 16)
+    .padding(.bottom, 6)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background { RitmPanelBackground(radius: 23) }
   }
 
   private func header(count: Int) -> some View {
     HStack(spacing: 10) {
-      Image(systemName: "wallet.pass")
+      RitmSymbol("wallet.bifold")
         .font(.system(size: 17))
         .foregroundStyle(RitmTheme.accentColor)
         .frame(width: 19)
@@ -144,7 +154,7 @@ struct FinanceInboxCard: View {
       picking = PickRoute(id: purchase.id)
     } label: {
       HStack(spacing: 10) {
-        Image(systemName: category?.symbol ?? "square.grid.2x2")
+        RitmSymbol(category?.symbol ?? "square.grid.2x2")
           .font(.system(size: 17))
           .foregroundStyle(RitmTheme.accentColor)
           .frame(width: 34, height: 34)
@@ -162,7 +172,7 @@ struct FinanceInboxCard: View {
           }
         }
         Spacer(minLength: 8)
-        Image(systemName: "chevron.right")
+        RitmSymbol("chevron.right")
           .font(.system(size: 11, weight: .semibold))
           .foregroundStyle(RitmTheme.muted)
       }
@@ -189,12 +199,12 @@ struct FinanceInboxCard: View {
       Button(store.text("Подтвердить", "Confirm")) {
         Task { await store.confirmWalletPurchase(purchase) }
       }
-      .buttonStyle(RitmPrimaryButtonStyle())
+      .buttonStyle(RitmPrimaryButtonStyle(minHeight: 48))
       .disabled(!state.canConfirm)
       .accessibilityLabel(
         store.text("Подтвердить: \(purchase.merchant)", "Confirm: \(purchase.merchant)"))
       Button(store.text("Пропустить", "Skip")) { store.wallet.skip(id: purchase.id) }
-        .buttonStyle(RitmSecondaryButtonStyle())
+        .buttonStyle(RitmSecondaryButtonStyle(minHeight: 48))
         .disabled(state.isBooking)
         .accessibilityLabel(
           store.text("Пропустить: \(purchase.merchant)", "Skip: \(purchase.merchant)"))
@@ -206,7 +216,7 @@ struct FinanceInboxCard: View {
     return Button(store.text("Подтвердить все (\(items.count))", "Confirm all (\(items.count))")) {
       Task { await store.confirmAllWalletPurchases() }
     }
-    .buttonStyle(RitmSecondaryButtonStyle())
+    .buttonStyle(RitmSecondaryButtonStyle(minHeight: 48))
     .frame(maxWidth: .infinity)
     .disabled(!ready)
     .padding(.top, 4)
@@ -289,28 +299,23 @@ private struct FinanceInboxCategorySheet: View {
   private var purchase: WalletPurchase? { store.wallet.pending.first { $0.id == purchaseID } }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      VStack(alignment: .leading, spacing: 4) {
-        Text(store.text("Категория покупки", "Purchase category"))
-          .ritmFont(16, weight: .semibold, tracking: -0.02)
-          .foregroundStyle(RitmTheme.text)
-          .accessibilityAddTraits(.isHeader)
-        if let purchase {
-          Text(purchase.merchant).ritmFont(12).foregroundStyle(RitmTheme.muted).lineLimit(1)
-        }
+    FinanceSheetFrame(
+      title: store.text("Категория покупки", "Purchase category"), detents: [.medium, .large]
+    ) {
+      if let purchase {
+        let amount = FinanceDisplay.money(
+          purchase.amountMinor, currency: purchase.currency, language: store.language)
+        Text(purchase.merchant + " · " + amount)
+          .ritmFont(12.5)
+          .foregroundStyle(RitmTheme.muted)
+          .lineLimit(1)
       }
       FinanceCategoryPicker(
         income: false,
         selection: Binding(
           get: { purchase?.suggestedCategory ?? "" },
           set: { choose($0) }))
-      Spacer(minLength: 0)
     }
-    .padding(20)
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    .background(RitmTheme.background.ignoresSafeArea())
-    .presentationDetents([.medium, .large])
-    .ritmSheetGrabber()
     .onChange(of: purchase == nil) { _, gone in if gone { dismiss() } }
   }
 

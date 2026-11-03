@@ -124,7 +124,8 @@ struct FinanceFormat {
   }
 }
 
-/// A tappable operation line: icon tile, title with date and account, signed amount.
+/// A tappable operation line: icon tile, title with its details, signed amount. In the dated
+/// history (`capsule`) it is the prototype's `.fh-row`: a 56 pt panel capsule of radius 22.
 struct FinanceOperationRow: View {
   let entry: FinanceEntry
   let format: FinanceFormat
@@ -136,50 +137,48 @@ struct FinanceOperationRow: View {
   var body: some View {
     Button(action: action) {
       HStack(spacing: 12) {
-        Image(systemName: symbol)
-          .font(.system(size: 16, weight: .medium))
-          .foregroundStyle(FinanceDetailStyle.accent(entry.type))
+        RitmSymbol(symbol)
+          .font(.system(size: 17, weight: .regular))
+          .foregroundStyle(entry.type == .income ? FinanceTone.income : RitmTheme.accentColor)
           .frame(width: 40, height: 40)
           .background(
-            FinanceDetailStyle.soft(entry.type),
-            in: RoundedRectangle(cornerRadius: 10, style: .circular)
+            entry.type == .income ? FinanceTone.incomeSoft : RitmTheme.soft,
+            in: RoundedRectangle(cornerRadius: 12, style: .circular)
           )
           .accessibilityHidden(true)
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 1) {
           Text(format.title(entry))
-            .ritmFont(12, weight: .bold)
+            .ritmFont(12.5, weight: .bold, tracking: -0.02)
             .foregroundStyle(RitmTheme.text)
-            .lineLimit(2)
-          Text(format.subtitle(entry, includeAccount: includeAccount))
-            .ritmFont(10)
+            .lineLimit(1)
+          Text(meta)
+            .ritmFont(10.5)
             .foregroundStyle(RitmTheme.muted)
-            .lineLimit(2)
+            .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         // The amount keeps its own column: the title and meta truncate, never the sum.
         Text(format.amount(entry))
-          .ritmFont(12, weight: .semibold)
+          .ritmFont(12.5, weight: .bold, tracking: -0.02)
           .monospacedDigit()
-          .foregroundStyle(format.tone(entry))
+          .foregroundStyle(amountTone)
           .lineLimit(1)
           .minimumScaleFactor(0.6)
           .layoutPriority(1)
-        Image(systemName: "chevron.right")
+        RitmSymbol("chevron.right")
           .font(.system(size: 11, weight: .semibold))
           .foregroundStyle(RitmTheme.muted)
+          .padding(.leading, -4)
           .accessibilityHidden(true)
       }
       .frame(minHeight: 56)
       .padding(.horizontal, capsule ? 12 : 0)
       .background {
         if capsule {
-          RoundedRectangle(cornerRadius: 22, style: .circular)
-            .fill(RitmTheme.panel)
-            .overlay {
-              RoundedRectangle(cornerRadius: 22, style: .circular)
-                .strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
-            }
-            .ritmCalmRim(in: RoundedRectangle(cornerRadius: 22, style: .circular))
+          let shape = RoundedRectangle(cornerRadius: 22, style: .circular)
+          shape.fill(RitmTheme.panel)
+            .overlay { shape.fill(RitmTheme.panelSheen) }
+            .overlay { shape.strokeBorder(RitmTheme.panelBorder, lineWidth: 1) }
         }
       }
       .contentShape(Rectangle())
@@ -189,6 +188,35 @@ struct FinanceOperationRow: View {
   }
 
   private var symbol: String { FinanceDetailStyle.symbol(entry) }
+
+  /// `.op-a`: income green, a transfer muted, an expense in the plain text colour.
+  private var amountTone: Color {
+    switch entry.type {
+    case .income: FinanceTone.income
+    case .transfer: RitmTheme.muted
+    default: RitmTheme.text
+    }
+  }
+
+  /// `.op-m`: the note and the account (the date is in the gutter); transfers name both ends.
+  private var meta: String {
+    guard capsule else { return format.subtitle(entry, includeAccount: includeAccount) }
+    var parts: [String] = []
+    let note = entry.note.trimmingCharacters(in: .whitespacesAndNewlines)
+    if entry.type == .transfer {
+      if let from = format.name(of: entry.fromAccountId), let to = format.name(of: entry.toAccountId) {
+        parts.append("\(from) → \(to)")
+      }
+    } else {
+      if !note.isEmpty, note != format.title(entry) { parts.append(note) }
+      if includeAccount,
+        let account = format.name(of: FinanceWallet.cardID(for: entry, cards: format.cards))
+      {
+        parts.append(account)
+      }
+    }
+    return parts.isEmpty ? format.typeName(entry.type) : parts.joined(separator: " · ")
+  }
 }
 
 enum FinanceDetailStyle {
@@ -225,6 +253,16 @@ struct FinanceDetailSheet: View {
   @Environment(RitmStore.self) private var store
   @Environment(\.dismiss) private var dismiss
 
+  @State private var bodyHeight: CGFloat = 0
+  @State private var actionsHeight: CGFloat = 0
+
+  /// The sheet is as tall as its content (header, facts, buttons), up to the full screen; the
+  /// facts scroll while the buttons stay pinned and fully visible.
+  private var detents: Set<PresentationDetent> {
+    let total = bodyHeight + actionsHeight
+    return total > 0 ? [.height(total), .large] : [.medium, .large]
+  }
+
   var body: some View {
     let entries = store.financeEntries
     let cards = FinanceWallet.cards(entries, today: store.today)
@@ -232,17 +270,24 @@ struct FinanceDetailSheet: View {
     return ZStack {
       RitmBackground()
       if let entry = entries.first(where: { $0.id == entryID }) {
-        ScrollView {
-          VStack(alignment: .leading, spacing: 16) {
-            header(entry, format)
-            facts(entry, format, cards)
-            actions(entry)
+        VStack(spacing: 0) {
+          ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+              header(entry, format)
+              facts(entry, format, cards)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 28)
+            .padding(.bottom, 16)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bodyHeight = $0 }
           }
-          .padding(.horizontal, 20)
-          .padding(.top, 28)
-          .padding(.bottom, 24)
+          .scrollIndicators(.hidden)
+          .scrollBounceBehavior(.basedOnSize)
+          actions(entry)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 24)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { actionsHeight = $0 }
         }
-        .scrollIndicators(.hidden)
       } else {
         RitmEmptyState(
           symbol: "tray",
@@ -251,14 +296,14 @@ struct FinanceDetailSheet: View {
           .padding(20)
       }
     }
-    .presentationDetents([.medium, .large])
+    .presentationDetents(detents)
     .ritmSheetGrabber()
     .presentationCornerRadius(22)
   }
 
   private func header(_ entry: FinanceEntry, _ format: FinanceFormat) -> some View {
     HStack(alignment: .center, spacing: 14) {
-      Image(systemName: FinanceDetailStyle.symbol(entry))
+      RitmSymbol(FinanceDetailStyle.symbol(entry))
       .font(.system(size: 20, weight: .medium))
       .foregroundStyle(FinanceDetailStyle.accent(entry.type))
       .frame(width: 52, height: 52)
@@ -366,7 +411,7 @@ struct FinanceDetailSheet: View {
           onEdit(entry)
           dismiss()
         } label: {
-          Label(store.text("Изменить", "Edit"), systemImage: "pencil").frame(maxWidth: .infinity)
+          Label { Text(store.text("Изменить", "Edit")) } icon: { RitmSymbol("pencil") }.frame(maxWidth: .infinity)
         }
         .buttonStyle(RitmSecondaryButtonStyle())
         .disabled(!store.canWrite)
@@ -374,7 +419,7 @@ struct FinanceDetailSheet: View {
           onDelete(entry)
           dismiss()
         } label: {
-          Label(store.text("Удалить", "Delete"), systemImage: "trash")
+          Label { Text(store.text("Удалить", "Delete")) } icon: { RitmSymbol("trash") }
             .ritmText(.button)
             .foregroundStyle(RitmTheme.danger)
             .frame(maxWidth: .infinity, minHeight: 44)

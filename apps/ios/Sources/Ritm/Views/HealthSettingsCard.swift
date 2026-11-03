@@ -2,37 +2,37 @@ import RitmCore
 import SwiftUI
 import UIKit
 
-/// «Apple Здоровье»: whether finished workouts are saved to Apple Health. Ritm only writes a
-/// strength-training record (type, start, end, duration); it reads nothing and computes no
-/// calories. The connection state shows only what iOS confirms for WRITE access.
+/// «Apple Здоровье»: whether finished workouts are saved to Apple Health, with the lock-screen
+/// switches below (proto settings.js `healthCard`). Ritm only writes a strength-training record
+/// (type, start, end, duration); it reads nothing and computes no calories. The connection state
+/// shows only what iOS confirms for WRITE access.
 struct HealthSettingsCard: View {
   @Environment(RitmStore.self) private var store
   @Environment(\.openURL) private var openURL
   @Environment(\.scenePhase) private var scenePhase
 
   private var health: HealthExportStore { store.health }
+  private var allowed: Bool { health.shareStatus == .allowed }
 
   var body: some View {
     SettingsCard(symbol: "heart.text.square", title: store.text("Apple Здоровье", "Apple Health")) {
       VStack(alignment: .leading, spacing: 0) {
         SettingsHint(
           text: store.text(
-            "Ritm сохраняет в Здоровье только завершённые тренировки: тип «Силовая тренировка», время начала и окончания и длительность. Подходы, веса и упражнения остаются в журнале Ritm. Тренировка может появиться в приложении «Фитнес». Калории Ritm не считает и ничего не читает из Здоровья.",
-            "Ritm saves only finished workouts to Health: the Strength Training type, start and end time and duration. Sets, weights and exercises stay in the Ritm journal. The workout may appear in the Fitness app. Ritm computes no calories and reads nothing from Health."
+            "Завершённые тренировки: тип — силовая, время начала и окончания, длительность. Подходы, веса и упражнения остаются в журнале Ritm. Тренировки могут отображаться в Apple «Фитнес».",
+            "Finished workouts: type strength, start and end time, duration. Sets, weights and exercises stay in the Ritm journal. Workouts may show in Apple Fitness."
           ))
-        stateRow.padding(.top, 14)
+        connectionRow.padding(.top, 16)
         SettingsSwitchRow(
           title: store.text(
             "Сохранять завершённые тренировки в Apple Здоровье",
             "Save finished workouts to Apple Health"),
-          note: store.text(
-            "Если тренировку записывают и Apple Watch, в Здоровье могут быть две записи: Ritm сохраняет свою и ничего не объединяет сам. Выключите переключатель, если это не нужно.",
-            "If an Apple Watch also records the workout, Health may show two entries: Ritm saves its own and merges nothing by itself. Turn the switch off if you do not want that."
-          ),
-          isOn: Binding(get: { health.saveToHealth }, set: { health.saveToHealth = $0 })
+          isOn: Binding(
+            get: { allowed && health.saveToHealth }, set: { health.saveToHealth = $0 })
         )
-        .disabled(health.shareStatus == .unavailable)
-        resultSection
+        .disabled(!allowed)
+        resultLine
+        LiveActivitySettingsRows()
       }
     }
     .task { await health.refreshStatus() }
@@ -43,108 +43,97 @@ struct HealthSettingsCard: View {
 
   // MARK: Connection
 
-  private var stateRow: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Text(stateTitle).ritmFont(13, weight: .semibold).foregroundStyle(RitmTheme.text)
-      if let hint = stateHint {
-        Text(hint).ritmFont(10, lineSpacing: 3).foregroundStyle(RitmTheme.muted)
-      }
+  private var connectionRow: some View {
+    SettingsConnectionRow(
+      symbol: "heart", name: store.text("Доступ к Здоровью", "Health access"),
+      status: statusText, connected: allowed, notes: stateHint.map { [$0] } ?? []
+    ) {
       switch health.shareStatus {
       case .notDetermined:
         SettingsSmallButton(title: store.text("Подключить", "Connect")) {
           Task { await health.connect() }
         }
       case .denied:
-        SettingsSmallButton(title: store.text("Открыть Настройки iOS", "Open iOS Settings")) {
+        SettingsSmallButton(title: store.text("Открыть настройки", "Open Settings")) {
           if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
         }
       case .allowed, .unavailable:
         EmptyView()
       }
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .accessibilityElement(children: .contain)
   }
 
-  private var stateTitle: String {
+  private var statusText: String {
     switch health.shareStatus {
     case .unavailable: store.text("Здоровье недоступно на этом устройстве", "Health is not available on this device")
     case .notDetermined: store.text("Не подключено", "Not connected")
-    case .allowed: store.text("Запись разрешена", "Writing is allowed")
-    case .denied: store.text("Запись запрещена", "Writing is denied")
+    case .allowed: store.text("Подключено", "Connected")
+    case .denied: store.text("Доступ запрещён", "Access denied")
     }
   }
 
   private var stateHint: String? {
-    switch health.shareStatus {
-    case .denied:
-      store.text(
-        "Откройте Настройки iOS → Здоровье → Доступ к данным и устройства → Ritm и разрешите запись тренировок.",
-        "Open iOS Settings → Health → Data Access & Devices → Ritm and allow writing workouts.")
-    case .notDetermined:
-      store.text(
-        "iOS спросит разрешение только на запись тренировок.",
-        "iOS will ask only for permission to write workouts.")
-    default: nil
+    guard health.shareStatus == .denied else { return nil }
+    return store.text(
+      "Откройте Настройки iOS → Здоровье → Доступ к данным и устройства → Ritm и разрешите запись тренировок.",
+      "Open iOS Settings → Health → Data Access & Devices → Ritm and allow writing workouts.")
+  }
+
+  // MARK: Last save
+
+  /// `.s-hl`: one line with the result of the last save, and Retry when something failed.
+  @ViewBuilder private var resultLine: some View {
+    if health.shareStatus == .allowed {
+      if let last = health.lastAttempt, let result = line(of: last) {
+        HStack(spacing: 6) {
+          RitmSymbol(result.symbol).font(.system(size: 13))
+          Text(result.text).fixedSize(horizontal: false, vertical: true)
+          if health.hasRetryable {
+            Button(store.text("Повторить", "Retry")) { health.retryAllFailed() }
+              .buttonStyle(SettingsTextButtonStyle())
+          }
+        }
+        .ritmFont(12, weight: .medium)
+        .foregroundStyle(result.color)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 2)
+        .padding(.bottom, 8)
+      } else if health.hasRetryable {
+        Button(store.text("Повторить", "Retry")) { health.retryAllFailed() }
+          .buttonStyle(SettingsTextButtonStyle())
+      }
     }
   }
 
-  // MARK: Results
-
-  @ViewBuilder private var resultSection: some View {
-    if let last = health.lastAttempt, let summary = summary(of: last) {
-      VStack(alignment: .leading, spacing: 10) {
-        Text(summary).ritmFont(12).foregroundStyle(RitmTheme.text)
-          .fixedSize(horizontal: false, vertical: true)
-        if health.hasRetryable {
-          SettingsSmallButton(title: store.text("Повторить", "Retry")) { health.retryAllFailed() }
-        }
-      }
-      .padding(.top, 4)
-    } else if health.hasRetryable {
-      SettingsSmallButton(title: store.text("Повторить", "Retry")) { health.retryAllFailed() }
-    }
-    let recent = health.recent(limit: 3)
-    if !recent.isEmpty {
-      VStack(alignment: .leading, spacing: 6) {
-        Text(store.text("Последние записи", "Recent saves"))
-          .ritmFont(11, weight: .semibold).foregroundStyle(RitmTheme.muted)
-        ForEach(recent) { record in
-          Text(row(record)).ritmFont(11).foregroundStyle(RitmTheme.text)
-            .fixedSize(horizontal: false, vertical: true)
-        }
-      }
-      .padding(.top, 14)
-    }
+  private struct ResultLine {
+    let symbol: String
+    let text: String
+    let color: Color
   }
 
-  private func summary(of record: HealthExportRecord) -> String? {
+  private static var saved: Color { Color(light: 0x2A7F66, dark: 0x86D4B6) }
+
+  private func line(of record: HealthExportRecord) -> ResultLine? {
     guard let result = record.lastResult else { return nil }
     switch result {
-    case .saved(_, let at): return store.text("Сохранено \(stamp(at))", "Saved \(stamp(at))")
+    case .saved(_, let at):
+      return ResultLine(
+        symbol: "checkmark.circle", text: store.text("Сохранено \(stamp(at))", "Saved \(stamp(at))"),
+        color: Self.saved)
     case .failed(let reason, _, _):
-      return store.text("Не удалось сохранить: \(reasonText(reason))", "Could not save: \(reasonText(reason))")
+      return ResultLine(
+        symbol: "exclamationmark.circle",
+        text: store.text("Не удалось сохранить: \(reasonText(reason))", "Could not save: \(reasonText(reason))"),
+        color: RitmTheme.danger)
     case .uncertain:
-      return store.text(
-        "Результат неизвестен, проверим при следующем запуске",
-        "The result is unknown; Ritm will check at the next launch")
+      return ResultLine(
+        symbol: "questionmark.circle",
+        text: store.text(
+          "Результат неизвестен, проверим при следующем запуске",
+          "The result is unknown; Ritm will check at the next launch"),
+        color: RitmTheme.muted)
     case .notRequested, .pending, .saving: return nil
     }
-  }
-
-  private func row(_ record: HealthExportRecord) -> String {
-    let minutes = max(1, Int((record.payload.activeDuration / 60).rounded()))
-    let state: String
-    switch record.status {
-    case .saved: state = store.text("сохранено", "saved")
-    case .failed: state = store.text("не сохранено", "not saved")
-    case .uncertain: state = store.text("результат неизвестен", "result unknown")
-    case .saving: state = store.text("сохраняется", "saving")
-    case .pending, .notRequested: state = store.text("ожидает", "waiting")
-    }
-    return store.text(
-      "\(stamp(record.payload.end)) · \(minutes) мин · \(state)",
-      "\(stamp(record.payload.end)) · \(minutes) min · \(state)")
   }
 
   private func reasonText(_ reason: HealthExportFailure) -> String {
@@ -157,10 +146,17 @@ struct HealthSettingsCard: View {
     }
   }
 
-  private func stamp(_ date: Date) -> String {
+  private static let formatterRU = makeFormatter("ru_RU")
+  private static let formatterEN = makeFormatter("en_GB")
+
+  private static func makeFormatter(_ locale: String) -> DateFormatter {
     let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: store.language == .ru ? "ru_RU" : "en_GB")
+    formatter.locale = Locale(identifier: locale)
     formatter.dateFormat = "dd.MM, HH:mm"
-    return formatter.string(from: date)
+    return formatter
+  }
+
+  private func stamp(_ date: Date) -> String {
+    (store.language == .ru ? Self.formatterRU : Self.formatterEN).string(from: date)
   }
 }

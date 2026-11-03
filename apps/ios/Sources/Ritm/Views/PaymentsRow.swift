@@ -14,11 +14,11 @@ struct PaymentsEntryRow: View {
     let active = store.payments.payments.filter { !$0.paused }.count
     return Button { showing = true } label: {
       HStack(spacing: 12) {
-        Image(systemName: "calendar.badge.clock")
+        RitmSymbol("calendar")
           .font(.system(size: 18))
           .foregroundStyle(RitmTheme.accentColor)
           .frame(width: 38, height: 38)
-          .background(RitmTheme.soft, in: Circle())
+          .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 12, style: .circular))
           .accessibilityHidden(true)
         VStack(alignment: .leading, spacing: 1) {
           Text(
@@ -26,9 +26,9 @@ struct PaymentsEntryRow: View {
               ? format.text("Предстоящие платежи · \(summary.count)", "Upcoming payments · \(summary.count)")
               : format.text("Регулярные платежи", "Recurring payments")
           )
-          .ritmFont(13, weight: .semibold, tracking: -0.02)
+          .ritmFont(13, weight: .bold, tracking: -0.02)
           .foregroundStyle(RitmTheme.text)
-          .lineLimit(2)
+          .lineLimit(1)
           if let sub = subtitle(summary, active: active) {
             Text(sub).ritmFont(11).foregroundStyle(RitmTheme.muted).lineLimit(1)
           }
@@ -38,14 +38,14 @@ struct PaymentsEntryRow: View {
           VStack(alignment: .trailing, spacing: 0) {
             ForEach(summary.totals, id: \.currency) { total in
               RitmCountText(total.amountMinor) { format.money($0, total.currency) }
-                .ritmFont(13, weight: .semibold, tracking: -0.02)
-                .foregroundStyle(summary.hasOverdue ? RitmTheme.danger : RitmTheme.text)
+                .ritmFont(13, weight: .bold, tracking: -0.02)
+                .foregroundStyle(summary.hasOverdue ? FinanceTone.expense : RitmTheme.text)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             }
           }
         }
-        Image(systemName: "chevron.right")
+        RitmSymbol("chevron.right")
           .font(.system(size: 12, weight: .semibold))
           .foregroundStyle(RitmTheme.muted)
           .accessibilityHidden(true)
@@ -61,7 +61,7 @@ struct PaymentsEntryRow: View {
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(label(summary))
     .accessibilityAddTraits(.isButton)
-    .ritmPageReveal(index: 2)
+    .ritmPageReveal(index: 1)
     .sheet(isPresented: $showing) {
       PaymentsSheet(cards: cards, format: format).environment(store)
     }
@@ -71,10 +71,12 @@ struct PaymentsEntryRow: View {
   private func subtitle(_ summary: UpcomingPayments, active: Int) -> String? {
     if summary.count > 0 {
       return summary.hasOverdue
-        ? format.text("есть просроченные", "some are overdue")
+        ? format.text("есть просроченные · ближайшие 7 дней", "some are overdue · next 7 days")
         : format.text("в ближайшие 7 дней", "in the next 7 days")
     }
-    return active > 0 ? format.text("ближайших нет", "none due soon") : nil
+    return active > 0
+      ? format.text("ближайших платежей нет", "no payments due soon")
+      : format.text("пока ничего не добавлено", "nothing added yet")
   }
 
   private func label(_ summary: UpcomingPayments) -> String {

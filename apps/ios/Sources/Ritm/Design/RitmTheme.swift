@@ -53,8 +53,29 @@ enum RitmTheme {
   static var glassDense: Color {
     Color(light: 0xFCFAFF, dark: 0x20192D, lightOpacity: 0.96, darkOpacity: 0.97)
   }
-  /// `0 7px 22px rgba(44, 24, 72, .08)` in both themes.
-  static var panelShadow: Color { Color(rgb: 0x2C1848, opacity: 0.08) }
+  /// `0 7px 22px rgba(44, 24, 72, .08)` in light, `rgba(0, 0, 0, .24)` in dark.
+  static var panelShadow: Color {
+    Color(light: 0x2C1848, dark: 0x000000, lightOpacity: 0.08, darkOpacity: 0.24)
+  }
+  /// `--hover`.
+  static var hover: Color { Color(light: 0xE8DDF5, dark: 0x3B2D50) }
+  /// `--scrim`: the dim behind sheets and dialogs.
+  static var scrim: Color {
+    Color(light: 0x190E2D, dark: 0x080410, lightOpacity: 0.5, darkOpacity: 0.62)
+  }
+  /// `--seg-off`: label of an unselected segment.
+  static var segmentOff: Color { Color(light: 0x5F5470, dark: 0xBCB2CC) }
+  /// `--nav-ink` / `--nav-active-ink`: bottom bar icons.
+  static var navInk: Color { Color(light: 0x645275, dark: 0xC1B3D4) }
+  static var navActiveInk: Color { Color(light: 0x643B96, dark: 0xE2CAFF) }
+  /// `--lg-tile`: a translucent tile or segmented track on a calm surface.
+  static var glassTile: Color {
+    Color(light: 0xFFFFFF, dark: 0xFFFFFF, lightOpacity: 0.5, darkOpacity: 0.06)
+  }
+  /// `--lg-hair`: the hairline around such a tile.
+  static var glassHair: Color {
+    Color(light: 0x3E236B, dark: 0xFFFFFF, lightOpacity: 0.12, darkOpacity: 0.10)
+  }
 
   // Names kept from the first native draft; they now resolve to the web tokens.
   static var lavender: Color { accentColor }
@@ -108,8 +129,8 @@ enum RitmTheme {
     linear(
       [
         .init(color: Color(light: 0x6540AE, dark: 0xB390E9), location: 0),
-        .init(color: Color(light: 0x855ACC, dark: 0xC8A6EF), location: 0.72),
-        .init(color: Color(light: 0x8A5EC8, dark: 0xD0AFF1), location: 1),
+        .init(color: Color(light: 0x7A52C2, dark: 0xC8A6EF), location: 0.7),
+        .init(color: Color(light: 0x8A60CC, dark: 0xD0AFF1), location: 1),
       ], cssAngle: 125)
   }
   static var ctaInk: Color { Color(light: 0xFFFFFF, dark: 0x21162F) }
@@ -150,7 +171,8 @@ enum RitmTextRole {
     case .pageTitle: 27
     case .eyebrow, .cardCaption, .navLabel: 10
     case .cardTitle: 15
-    case .body, .button: 12
+    case .body: 12
+    case .button: 12.5
     case .message: 13
     case .brand, .sectionTitle: 22
     case .footer: 9
@@ -160,9 +182,9 @@ enum RitmTextRole {
 
   var weight: Font.Weight {
     switch self {
-    case .pageTitle, .cardTitle, .button, .sectionTitle, .value: .semibold
+    case .pageTitle, .cardTitle, .sectionTitle, .value: .semibold
     // `font-weight: 650` renders with Inter's 700 face.
-    case .eyebrow, .brand: .bold
+    case .eyebrow, .brand, .button: .bold
     case .cardCaption, .navLabel: .medium
     case .body, .message, .footer: .regular
     }
@@ -174,7 +196,7 @@ enum RitmTextRole {
     case .pageTitle: -0.055
     case .eyebrow: 0.065
     case .cardTitle: -0.025
-    case .brand: -0.06
+    case .brand: -0.045
     case .sectionTitle, .value: -0.03
     default: 0
     }
@@ -301,18 +323,18 @@ struct RitmPanelBackground: View {
 
   var body: some View {
     let shape = RoundedRectangle(cornerRadius: radius, style: .circular)
-    shape
-      .fill(raised && !reduceTransparency ? RitmTheme.glassRaised : RitmTheme.panel)
-      .overlay {
-        if !reduceTransparency { shape.fill(RitmTheme.panelSheen) }
-      }
-      .overlay {
-        // One contour; lighting is a fill, never a second inset outline.
-        shape.strokeBorder(
-          contrast == .increased ? RitmTheme.text : RitmTheme.panelBorder, lineWidth: 1)
-      }
-      .ritmCalmRim(in: shape)
-      .shadow(color: RitmTheme.panelShadow, radius: 11, y: 7)
+    // The shadow belongs to the plain fill only: blurring the whole stack of overlays for every
+    // card on every scrolled frame is what made long pages heavy.
+    ZStack {
+      shape
+        .fill(raised && !reduceTransparency ? RitmTheme.glassRaised : RitmTheme.panel)
+        .shadow(color: RitmTheme.panelShadow, radius: 11, y: 7)
+      if !reduceTransparency { shape.fill(RitmTheme.panelSheen) }
+      // One contour; lighting is a fill, never a second inset outline.
+      shape.strokeBorder(
+        contrast == .increased ? RitmTheme.text : RitmTheme.panelBorder, lineWidth: 1)
+      RitmCalmRim(shape: shape)
+    }
   }
 }
 
@@ -365,13 +387,13 @@ struct RitmPressStyle: ButtonStyle {
 
 /// Prominent glass capsule: the accent gradient on a glass base, strong contrast for the label.
 struct RitmPrimaryButtonStyle: ButtonStyle {
-  var minHeight: CGFloat = 44
+  var minHeight: CGFloat = 48
   @Environment(\.isEnabled) private var isEnabled
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
       .ritmText(.button)
-      .padding(.horizontal, 14)
+      .padding(.horizontal, minHeight >= 48 ? 18 : 14)
       .frame(maxWidth: .infinity, minHeight: minHeight)
       .foregroundStyle(RitmTheme.ctaInk)
       .ritmGlass(in: Capsule(), prominent: true, interactive: true)
@@ -397,13 +419,13 @@ struct RitmTextButtonStyle: ButtonStyle {
 
 /// Secondary button: a glass capsule with an accent label.
 struct RitmSecondaryButtonStyle: ButtonStyle {
-  var minHeight: CGFloat = 44
+  var minHeight: CGFloat = 48
   @Environment(\.isEnabled) private var isEnabled
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
       .ritmText(.button)
-      .padding(.horizontal, 14)
+      .padding(.horizontal, minHeight >= 48 ? 18 : 14)
       .frame(minHeight: minHeight)
       .foregroundStyle(RitmTheme.accentColor)
       .ritmGlass(in: Capsule(), interactive: true)
@@ -412,8 +434,8 @@ struct RitmSecondaryButtonStyle: ButtonStyle {
   }
 }
 
-/// The 44 × 44 icon-only call to action next to a page title (DashboardPage «+»): a prominent
-/// glass circle.
+/// The 44 × 44 icon-only call to action next to a page title (`.sd-cta`, `.sh-cta`): the lit
+/// accent circle with the on-accent icon.
 struct RitmIconCTA: View {
   let symbol: String
   let label: String
@@ -421,9 +443,9 @@ struct RitmIconCTA: View {
 
   var body: some View {
     Button(action: action) {
-      Image(systemName: symbol)
-        .font(.system(size: 21, weight: .regular))
-        .foregroundStyle(RitmTheme.ctaInk)
+      RitmSymbol(symbol)
+        .font(.system(size: 22))
+        .foregroundStyle(RitmTheme.accentInk)
         .frame(width: 44, height: 44)
         .ritmGlass(in: Circle(), prominent: true, interactive: true)
         .contentShape(Circle())
@@ -435,42 +457,72 @@ struct RitmIconCTA: View {
 
 // MARK: - Page structure
 
-/// The page heading: the gradient title and an optional action beside it.
+/// The page heading (`.rt-head`, `h1.gt`): the gradient title and an optional action beside it.
+///
+/// The title is 27 pt / weight 600 / line height 1.18; next to an action it is
+/// `clamp(20pt, 6.2cqw, 27pt)` of the screen width (24.2 pt on a 390 pt screen) and the action
+/// (44 pt, 40 pt on narrow screens) is centred on its first line, hanging into the 14 pt top
+/// padding. The heading brings 14 pt above it, `gap` (16 pt) below it and nothing sideways: the page
+/// sets the space after the heading and its own side inset.
 struct RitmPageHeading<Action: View>: View {
   let title: String
   private let action: Action
+  private let hasAction: Bool
+  private let gap: CGFloat
 
-  init(title: String, @ViewBuilder action: () -> Action) {
+  init(title: String, gap: CGFloat = 16, @ViewBuilder action: () -> Action) {
+    self.init(title: title, hasAction: true, gap: gap, action: action())
+  }
+
+  fileprivate init(title: String, hasAction: Bool, gap: CGFloat, action: Action) {
+    self.gap = gap
     self.title = title
-    self.action = action()
+    self.hasAction = hasAction
+    self.action = action
   }
 
   @Environment(\.dynamicTypeSize) private var typeSize
+  @Environment(\.ritmScreenWidth) private var screenWidth
 
-  /// Title left, action right, one row. The title stays on one line (shrinking to 80 %) up to
-  /// the large sizes and wraps only at accessibility sizes, where the action sits beside the
-  /// first line. The row is never shorter than the 44 pt action, so every page starts alike.
   var body: some View {
     let wraps = typeSize.isAccessibilitySize
-    HStack(alignment: wraps ? .top : .center, spacing: 12) {
+    let narrow = screenWidth <= 370
+    let fontSize: CGFloat = hasAction ? min(27, max(20, screenWidth * 0.062)) : 27
+    let lineHeight = fontSize * 1.18
+    let button: CGFloat = narrow ? 40 : 44
+    // The action is centred on the first line, so it sticks out above the row by this much.
+    let overshoot = hasAction ? max(0, (button - lineHeight) / 2) : 0
+    HStack(alignment: .top, spacing: narrow ? 10 : 12) {
       Text(title)
-        .ritmText(.pageTitle)
+        .ritmFont(fontSize, weight: .semibold, tracking: -0.055)
         .foregroundStyle(RitmTheme.titleGradient)
-        .lineLimit(wraps ? nil : 1)
-        .minimumScaleFactor(wraps ? 1 : 0.8)
-        .fixedSize(horizontal: false, vertical: wraps)
+        .lineLimit(wraps ? nil : 3)
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityAddTraits(.isHeader)
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: lineHeight, alignment: .leading)
       action
+        .offset(y: -overshoot)
     }
-    .padding(.top, 16)
-    .padding(.bottom, 20)
+    .padding(.top, 14)
+    // The action hangs into the top padding, so the row ends where the button does; the gap
+    // (the prototype heading wrapper's margin-bottom: 16 pt, Мой день 14 pt) follows it.
+    .padding(.bottom, gap - overshoot)
   }
 }
 
 extension RitmPageHeading where Action == EmptyView {
-  init(title: String) {
-    self.init(title: title) { EmptyView() }
+  init(title: String, gap: CGFloat = 16) {
+    self.init(title: title, hasAction: false, gap: gap, action: EmptyView())
+  }
+}
+
+private struct RitmScreenWidthKey: EnvironmentKey { static let defaultValue: CGFloat = 390 }
+
+extension EnvironmentValues {
+  /// Width of the screen, set once by RitmRootView (the prototype's container width, `cqw`).
+  var ritmScreenWidth: CGFloat {
+    get { self[RitmScreenWidthKey.self] }
+    set { self[RitmScreenWidthKey.self] = newValue }
   }
 }
 
@@ -499,7 +551,7 @@ struct RitmEmptyState: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Image(systemName: symbol)
+      RitmSymbol(symbol)
         .font(.system(size: 20))
         .foregroundStyle(RitmTheme.accentColor)
         .accessibilityHidden(true)
@@ -510,21 +562,82 @@ struct RitmEmptyState: View {
   }
 }
 
-/// Web error: danger text on danger-soft, radius 10.
+/// Web error: danger text on danger-soft, radius 10. Errors are transient: the banner fades in
+/// with a short slide, hides itself after about 4 s (6 s for a long text), and can be dismissed
+/// with a tap or the close button. Dismissing clears `store.errorMessage` only while it still
+/// holds this same message, so a newer error is never wiped.
 struct RitmErrorBanner: View {
   let message: String
+  @Environment(RitmStore.self) private var store
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  /// Faded in; false while it fades out.
+  @State private var shown = false
+  /// Gone from the layout once the fade-out has finished.
+  @State private var dismissed = false
+
+  private static let fade = 0.2
 
   var body: some View {
-    Label {
-      Text(message).ritmText(.body).textSelection(.enabled)
-    } icon: {
-      Image(systemName: "exclamationmark.circle")
+    Group {
+      if !dismissed {
+        banner
+          .opacity(shown ? 1 : 0)
+          .offset(y: shown || reduceMotion ? 0 : -6)
+          .transition(.opacity)
+      }
+    }
+    .task(id: message) { await run() }
+  }
+
+  private var banner: some View {
+    HStack(alignment: .top, spacing: 8) {
+      Label {
+        Text(message).ritmText(.body)
+      } icon: {
+        RitmIcon(.alert)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      Button {
+        Task { await hide() }
+      } label: {
+        RitmIcon(.close)
+          .font(.system(size: 14))
+          .frame(width: 32, height: 24)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel(store.text("Закрыть", "Close"))
     }
     .foregroundStyle(RitmTheme.danger)
-    .padding(12)
+    .padding(.vertical, 12)
+    .padding(.leading, 12)
+    .padding(.trailing, 6)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(RitmTheme.dangerSoft, in: RoundedRectangle(cornerRadius: 10, style: .circular))
-    .accessibilityElement(children: .combine)
+    .contentShape(Rectangle())
+    .onTapGesture { Task { await hide() } }
+  }
+
+  /// Fade in, stay for the reading time, fade out.
+  private func run() async {
+    dismissed = false
+    shown = false
+    withAnimation(reduceMotion ? RitmMotion.reducedFade : RitmMotion.easeOut(Self.fade)) {
+      shown = true
+    }
+    try? await Task.sleep(for: .seconds(RitmStore.errorLifetime(for: message)))
+    guard !Task.isCancelled else { return }
+    await hide()
+  }
+
+  private func hide() async {
+    guard !dismissed else { return }
+    withAnimation(reduceMotion ? RitmMotion.reducedFade : RitmMotion.easeOut(Self.fade)) {
+      shown = false
+    }
+    try? await Task.sleep(for: .seconds(Self.fade + 0.02))
+    dismissed = true
+    store.dismissError(ifMatching: message)
   }
 }
 

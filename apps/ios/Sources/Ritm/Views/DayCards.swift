@@ -42,9 +42,9 @@ struct DayProgressCard: View {
     .frame(maxWidth: .infinity, minHeight: 245, alignment: .topLeading)
     .background {
       // Only the glow is clipped, so the panel keeps its shadow.
-      RitmPanelBackground(raised: true)
+      RitmPanelBackground()
         .overlay {
-          CornerGlow(color: Color(rgb: 0xAF87E5, opacity: 0.34), x: 0.9, y: 0.02, reach: 0.42)
+          DayGlow(color: Color(rgb: 0xAF87E5, opacity: 0.34), x: 0.9, y: 0.02, radius: 150)
             .clipShape(RoundedRectangle(cornerRadius: 23, style: .circular))
         }
     }
@@ -81,7 +81,7 @@ private struct DayProgressRing: View {
           .animation(reduceMotion ? nil : RitmMotion.sweep, value: drawn)
           .animation(reduceMotion ? nil : RitmMotion.easeOut(RitmMotion.countChange), value: progress)
         Circle().fill(RitmTheme.panel).padding(5)
-        Image(systemName: "sparkles")
+        RitmSymbol("sparkles")
           .font(.system(size: 15, weight: .medium))
           .foregroundStyle(RitmTheme.accentColor)
       }
@@ -116,6 +116,16 @@ private struct DayRhythmChart: View {
             .animation(reduceMotion ? nil : RitmMotion.lineDraw, value: drawn)
         }
         .frame(height: 65)
+        .overlay(alignment: .topTrailing) {
+          // `.sd-dot`: 7 pt end point at `right: -3px`, popping in when the line arrives.
+          Circle()
+            .fill(RitmTheme.accentColor)
+            .frame(width: 7, height: 7)
+            .scaleEffect(drawn ? 1 : 0.6)
+            .opacity(drawn ? 1 : 0)
+            .offset(x: 3, y: (66 - CGFloat(values.last ?? 0) * 49) * 65 / 76 - 3.5)
+            .animation(reduceMotion ? nil : RitmMotion.dotPop, value: drawn)
+        }
         HStack {
           Text("9 AM")
           Spacer()
@@ -192,6 +202,24 @@ struct CornerGlow: View {
   }
 }
 
+/// `radial-gradient(circle Rpx at x y, colour, transparent)` with a fixed radius and no layout pass.
+struct DayGlow: View {
+  let color: Color
+  let x: CGFloat
+  let y: CGFloat
+  let radius: CGFloat
+
+  var body: some View {
+    Rectangle()
+      .fill(
+        RadialGradient(
+          colors: [color, color.opacity(0)], center: UnitPoint(x: x, y: y), startRadius: 0,
+          endRadius: radius)
+      )
+      .allowsHitTesting(false)
+  }
+}
+
 /// `.focus-card`: the violet hero with the next entry and its start time.
 struct DayFocusCard: View {
   let eyebrow: String
@@ -221,7 +249,7 @@ struct DayFocusCard: View {
         HStack {
           Text(meta).ritmFont(9)
           Spacer()
-          Image(systemName: "arrow.up.right").font(.system(size: 14, weight: .medium)).accessibilityHidden(true)
+          RitmSymbol("arrow.up.right").font(.system(size: 14, weight: .medium)).accessibilityHidden(true)
         }
         .foregroundStyle(soft)
       }
@@ -230,22 +258,17 @@ struct DayFocusCard: View {
       .frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
       .background {
         let shape = RoundedRectangle(cornerRadius: 23, style: .circular)
-        shape.fill(RitmTheme.heroGradient)
-          .overlay { CornerGlow(color: Color(rgb: 0xDDB9FF, opacity: 0.3), x: 0.94, y: 0, reach: 0.44) }
-          .overlay(alignment: .topTrailing) {
-            // The soft falloff circle of `.focus-card::after`.
-            Circle()
-              .fill(
-                RadialGradient(
-                  colors: [Color(rgb: 0xBF99ED, opacity: 0.12), .clear], center: .center,
-                  startRadius: 0, endRadius: 77)
-              )
-              .frame(width: 220, height: 220)
-              .offset(x: 90, y: -108)
-          }
-          .clipShape(shape)
-          .overlay { shape.strokeBorder(Color(rgb: 0xDABCFC, opacity: 0.32), lineWidth: 1) }
-          .shadow(color: Color(rgb: 0x4E307D, opacity: 0.22), radius: 22, y: 20)
+        ZStack {
+          // `0 20px 22px -8px`: the -8 pt spread is a shape shrunk by 8 pt casting the shadow.
+          RoundedRectangle(cornerRadius: 15, style: .circular)
+            .fill(Color(rgb: 0x4E307D))
+            .padding(8)
+            .shadow(color: Color(rgb: 0x4E307D, opacity: 0.22), radius: 11, y: 20)
+          shape.fill(RitmTheme.heroGradient)
+            .overlay { DayGlow(color: Color(rgb: 0xDDB9FF, opacity: 0.3), x: 0.94, y: 0, radius: 160) }
+            .clipShape(shape)
+            .overlay { shape.strokeBorder(Color(rgb: 0xDABCFC, opacity: 0.32), lineWidth: 1) }
+        }
       }
       .contentShape(RoundedRectangle(cornerRadius: 23, style: .circular))
     }
@@ -273,7 +296,7 @@ struct DayAssistantCard: View {
         Button(action: action) {
           HStack(spacing: 8) {
             Text(store.text("Спланировать день", "Plan my day")).lineLimit(1)
-            Image(systemName: "arrow.up.right").font(.system(size: 13, weight: .medium)).accessibilityHidden(true)
+            RitmSymbol("arrow.up.right").font(.system(size: 13, weight: .medium)).accessibilityHidden(true)
           }
           .ritmFont(10, weight: .semibold)
           .padding(.horizontal, 10)
@@ -294,7 +317,7 @@ struct DayAssistantCard: View {
     }
     .padding(20)
     .frame(maxWidth: .infinity, minHeight: 110, alignment: .leading)
-    .background { RitmPanelBackground(raised: true) }
+    .background { RitmPanelBackground() }
     .ritmPageReveal(index: 2)
   }
 }
@@ -309,22 +332,55 @@ struct DayAssistantDock: View {
       HStack(spacing: 10) {
         RitmOrb(size: 32)
         Text(store.text("Спросить ИИ", "Ask AI")).ritmFont(12, weight: .medium)
-        Image(systemName: "sparkles").font(.system(size: 14, weight: .medium)).accessibilityHidden(true)
+        RitmSymbol("sparkles").font(.system(size: 14, weight: .medium)).accessibilityHidden(true)
       }
       .foregroundStyle(Color(rgb: 0xF4EAFF))
       .padding(.leading, 8)
       .padding(.trailing, 18)
       .padding(.vertical, 7)
-      // The dark under-layer keeps the light label readable in both themes.
-      .background(
-        RitmTheme.linear([.init(color: Color(rgb: 0x352449), location: 0), .init(color: Color(rgb: 0x30243F), location: 1)], cssAngle: 130)
-          .opacity(0.88),
-        in: Capsule()
-      )
-      .ritmGlass(in: Capsule(), interactive: true)
+      // `.sd-dock`: a dark 130° capsule with a 1 px #72558A border and a soft violet shadow.
+      .background {
+        Capsule()
+          .fill(
+            RitmTheme.linear(
+              [
+                .init(color: Color(rgb: 0x352449), location: 0),
+                .init(color: Color(rgb: 0x30243F), location: 1),
+              ], cssAngle: 130)
+          )
+          .overlay { Capsule().strokeBorder(Color(rgb: 0x72558A), lineWidth: 1) }
+          .shadow(color: Color(rgb: 0x613A8F, opacity: 0.15), radius: 6, y: 9)
+      }
       .contentShape(Capsule())
     }
-    .buttonStyle(RitmGlassButtonStyle())
+    .buttonStyle(RitmPressStyle())
     .frame(maxWidth: .infinity)
+  }
+}
+
+/// `.rt-head.rt-act` of the prototype: the 24.2 pt gradient title indented 20 pt inside the page
+/// gutter, the 44 pt add button on the title's first line (its box sticks out above the row).
+struct DayHeading: View {
+  let title: String
+  let actionLabel: String
+  let action: () -> Void
+
+  /// `clamp(20px, 6.2cqw, 27px)` at the 390 pt screen, line height 1.18.
+  private static let titleSize: CGFloat = 24.2
+  private static let buttonOverhang: CGFloat = (44 - titleSize * 1.18) / 2
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 12) {
+      Text(title)
+        .ritmFont(Self.titleSize, weight: .semibold, tracking: -0.055)
+        .foregroundStyle(RitmTheme.titleGradient)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityAddTraits(.isHeader)
+      RitmIconCTA(symbol: "plus.circle", label: actionLabel, action: action)
+        .padding(.top, -Self.buttonOverhang)
+    }
+    .padding(.horizontal, 16)
+    .padding(.top, 14)
+    .padding(.bottom, 14)
   }
 }

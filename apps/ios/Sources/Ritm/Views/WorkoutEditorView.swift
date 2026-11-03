@@ -92,14 +92,11 @@ struct WorkoutEditorView: View {
     VStack(alignment: .leading, spacing: 12) {
       header(program).ritmPageReveal(index: 0)
       if program.items.isEmpty {
-        Text(store.text("В программе пока нет упражнений", "No exercises in this program yet"))
-          .ritmText(.body).foregroundStyle(RitmTheme.muted)
-          .frame(maxWidth: .infinity, minHeight: 72)
-          .background { RitmPanelBackground(radius: 20) }
+        WorkoutEmptyText(text: store.text("В программе пока нет упражнений.", "No exercises in this program yet."))
           .ritmPageReveal(index: 1)
       } else {
         WorkoutReorderList(
-          items: program.items, spacing: 10,
+          items: program.items, spacing: 10, handleSize: 22,
           onMove: { workouts.moveItem(in: programID, from: $0, to: $1) }
         ) { item, handle in
           let index = program.items.firstIndex { $0.id == item.id } ?? 0
@@ -110,7 +107,8 @@ struct WorkoutEditorView: View {
       Button {
         picker = .add
       } label: {
-        Label(store.text("Добавить упражнение", "Add exercise"), systemImage: "plus")
+        Label { Text(store.text("Добавить упражнение", "Add exercise")) } icon: { RitmSymbol("plus") }
+          .workoutButtonFont()
           .frame(maxWidth: .infinity)
       }
       .buttonStyle(RitmSecondaryButtonStyle(minHeight: 48))
@@ -121,11 +119,11 @@ struct WorkoutEditorView: View {
   private func header(_ program: WorkoutProgram) -> some View {
     let index = workouts.library.programs.firstIndex { $0.id == program.id } ?? 0
     let count = workouts.library.programs.count
-    return RitmCard(padding: 14, radius: 22) {
+    return RitmCard(padding: 14) {
       VStack(alignment: .leading, spacing: 12) {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
           Text(store.text("Название программы", "Program name"))
-            .ritmFont(11.5, weight: .medium).foregroundStyle(RitmTheme.muted)
+            .ritmFont(12, weight: .medium).foregroundStyle(RitmTheme.muted)
           TextField(store.text("Название", "Name"), text: $name)
             .focused($nameFocused)
             .submitLabel(.done)
@@ -136,32 +134,32 @@ struct WorkoutEditorView: View {
               workouts.renameProgram(programID, to: limited)
             }
             .onChange(of: nameFocused) { _, focused in if !focused { commitName() } }
-            .ritmFont(16, weight: .semibold)
+            .ritmFont(14, weight: .medium)
             .foregroundStyle(RitmTheme.text)
             .padding(.horizontal, 12)
-            .frame(minHeight: 48)
-            .background(RitmTheme.field, in: RoundedRectangle(cornerRadius: 14, style: .circular))
+            .frame(minHeight: 46)
+            .background(RitmTheme.field, in: RoundedRectangle(cornerRadius: 12, style: .circular))
             .overlay {
-              RoundedRectangle(cornerRadius: 14, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1)
+              RoundedRectangle(cornerRadius: 12, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1)
             }
         }
         HStack(spacing: 6) {
           WorkoutIconButton(symbol: "arrow.up", label: store.text("Переместить программу выше", "Move program up")) {
             moveProgram(index, by: -1)
           }
-          .disabled(index == 0).opacity(index == 0 ? 0.35 : 1)
+          .disabled(index == 0)
           WorkoutIconButton(symbol: "arrow.down", label: store.text("Переместить программу ниже", "Move program down")) {
             moveProgram(index, by: 1)
           }
-          .disabled(index >= count - 1).opacity(index >= count - 1 ? 0.35 : 1)
+          .disabled(index >= count - 1)
           Button {
             duplicate()
           } label: {
             Text(store.text("Дублировать", "Duplicate")).frame(maxWidth: .infinity)
           }
-          .buttonStyle(RitmSecondaryButtonStyle())
+          .buttonStyle(WorkoutRaisedButtonStyle())
           WorkoutIconButton(
-            symbol: "trash", label: store.text("Удалить программу", "Delete program"), tint: RitmTheme.danger
+            symbol: "trash", label: store.text("Удалить программу", "Delete program")
           ) { deletingProgram = true }
         }
       }
@@ -175,16 +173,18 @@ struct WorkoutEditorView: View {
     return VStack(alignment: .leading, spacing: 8) {
       HStack(spacing: 8) {
         handle.padding(.leading, -6)
-        VStack(alignment: .leading, spacing: 1) {
-          Text(title).ritmFont(15, weight: .semibold).foregroundStyle(RitmTheme.text)
+        VStack(alignment: .leading, spacing: 0) {
+          Text(title).ritmFont(15, weight: .semibold, tracking: -0.03).foregroundStyle(RitmTheme.text)
             .fixedSize(horizontal: false, vertical: true)
-          Text(store.text("Подходов: \(item.sets)", "Sets: \(item.sets)"))
-            .ritmFont(11.5).foregroundStyle(RitmTheme.muted)
+          HStack(spacing: 0) {
+            Text(store.text("Подходов: ", "Sets: "))
+            Text("\(item.sets)").fontWeight(.bold)
+          }
+          .ritmFont(12).foregroundStyle(RitmTheme.muted)
         }
         Spacer(minLength: 4)
         WorkoutIconButton(
-          symbol: "trash", label: store.text("Удалить упражнение «\(title)»", "Delete exercise “\(title)”"),
-          tint: RitmTheme.danger
+          symbol: "trash", label: store.text("Удалить упражнение «\(title)»", "Delete exercise “\(title)”")
         ) { deletingItem = item.id }
       }
       HStack(spacing: 6) {
@@ -192,24 +192,23 @@ struct WorkoutEditorView: View {
         Button {
           picker = .replace(item.id)
         } label: {
-          Label(store.text("Заменить", "Replace"), systemImage: "arrow.left.arrow.right")
-            .lineLimit(1).minimumScaleFactor(0.8)
+          Label { Text(store.text("Заменить", "Replace")) } icon: { RitmSymbol("arrow.left.arrow.right") }
             .frame(maxWidth: .infinity)
         }
-        .buttonStyle(RitmSecondaryButtonStyle())
+        .buttonStyle(WorkoutRaisedButtonStyle())
         .accessibilityLabel(store.text("Заменить упражнение «\(title)»", "Replace exercise “\(title)”"))
         WorkoutIconButton(symbol: "arrow.up", label: store.text("Переместить выше", "Move up")) {
           moveItem(index, by: -1)
         }
-        .disabled(index == 0).opacity(index == 0 ? 0.35 : 1)
+        .disabled(index == 0)
         WorkoutIconButton(symbol: "arrow.down", label: store.text("Переместить ниже", "Move down")) {
           moveItem(index, by: 1)
         }
-        .disabled(index >= count - 1).opacity(index >= count - 1 ? 0.35 : 1)
+        .disabled(index >= count - 1)
       }
     }
     .padding(12)
-    .background { RitmPanelBackground(radius: 22) }
+    .background { RitmPanelBackground(radius: 23) }
     .accessibilityElement(children: .contain)
     .accessibilityAction(named: store.text("Вверх", "Move up")) { moveItem(index, by: -1) }
     .accessibilityAction(named: store.text("Вниз", "Move down")) { moveItem(index, by: 1) }
@@ -220,7 +219,7 @@ struct WorkoutEditorView: View {
       stepButton("minus", store.text("Меньше подходов", "Fewer sets"), enabled: item.sets > WorkoutProgramItem.setRange.lowerBound) {
         workouts.setPlannedSets(item.sets - 1, item: item.id, in: programID)
       }
-      Text("\(item.sets)").ritmFont(15, weight: .semibold).monospacedDigit()
+      Text("\(item.sets)").ritmFont(15, weight: .bold).monospacedDigit()
         .frame(minWidth: 22).foregroundStyle(RitmTheme.text)
         .accessibilityLabel(store.text("Подходов: \(item.sets)", "Sets: \(item.sets)"))
       stepButton("plus", store.text("Больше подходов", "More sets"), enabled: item.sets < WorkoutProgramItem.setRange.upperBound) {
@@ -235,7 +234,7 @@ struct WorkoutEditorView: View {
     _ symbol: String, _ label: String, enabled: Bool, action: @escaping () -> Void
   ) -> some View {
     Button(action: action) {
-      Image(systemName: symbol).font(.system(size: 15, weight: .semibold))
+      RitmSymbol(symbol).font(.system(size: 17, weight: .medium))
         .foregroundStyle(RitmTheme.accentColor)
         .frame(width: 44, height: 44).contentShape(Rectangle())
     }

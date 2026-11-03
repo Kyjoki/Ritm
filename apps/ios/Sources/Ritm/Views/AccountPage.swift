@@ -46,6 +46,7 @@ struct AccountView: View {
   @State private var revealFrames = SettingsRevealFrames()
   @State private var themeReveal: ThemeRevealRequest?
   @State private var scrollTick = 0
+  @State private var confirmingSignOut = false
   private static let notificationsAnchor = "settings-notifications"
 
   private var dirty: Bool { baseline.map { $0 != draft } ?? false }
@@ -82,33 +83,39 @@ struct AccountView: View {
             RitmPageHeading(title: store.text("Настройки", "Settings"))
             if let message = store.errorMessage { RitmErrorBanner(message: message).padding(.bottom, 12) }
             MutationRecoveryView()
-            if baseline != nil {
+            if !store.isSignedIn {
+              VStack(spacing: 14) {
+                LoginCard().ritmPageReveal(index: 0)
+                ServerAddressCard().ritmPageReveal(index: 1)
+              }
+            } else if baseline != nil {
               VStack(spacing: 14) {
                 languageCard.ritmPageReveal(index: 0)
                 accountCard.ritmPageReveal(index: 1)
                 appearanceCard.ritmPageReveal(index: 2)
                 notificationsCard.ritmPageReveal(index: 3).id(Self.notificationsAnchor)
                 connectionsCard.ritmPageReveal(index: 4)
-                WalletSettingsCard().ritmPageReveal(index: 5)
-                ServerAddressCard().ritmPageReveal(index: 6)
-                LiveActivitySettingsCard().ritmPageReveal(index: 7)
-                HealthSettingsCard().ritmPageReveal(index: 8)
+                HealthSettingsCard().ritmPageReveal(index: 5)
+                WalletSettingsCard().ritmPageReveal(index: 6)
+                ServerAddressCard().ritmPageReveal(index: 7)
               }
-              .padding(.top, 22)
+              .opacity(saving ? 0.6 : 1)
               .disabled(saving)
               saveBar
             }
-            Button {
-              Task { await store.signOut() }
-            } label: {
-              Label(store.text("Выйти из аккаунта", "Sign out"), systemImage: "rectangle.portrait.and.arrow.right")
-                .ritmFont(12, weight: .medium)
-                .foregroundStyle(RitmTheme.muted)
-                .frame(maxWidth: .infinity, minHeight: 44)
+            if store.isSignedIn {
+              Button {
+                confirmingSignOut = true
+              } label: {
+                Label { Text(store.text("Выйти из аккаунта", "Sign out")) } icon: { RitmSymbol("rectangle.portrait.and.arrow.right") }
+                  .ritmFont(12, weight: .medium)
+                  .foregroundStyle(RitmTheme.muted)
+                  .frame(maxWidth: .infinity, minHeight: 44)
+              }
+              .buttonStyle(RitmPressStyle(scale: 0.97))
+              .disabled(store.isMutating)
+              .padding(.top, 17)
             }
-            .buttonStyle(RitmPressStyle(scale: 0.97))
-            .disabled(store.isMutating)
-            .padding(.top, 17)
             RitmPageFooter()
           }
           .padding(.horizontal, 16)
@@ -135,6 +142,15 @@ struct AccountView: View {
       if navigation.section == .settings { await loadIntegrations() }
     }
     .onChange(of: store.bootstrap?.settings) { _, settings in mergeSettings(settings) }
+    .onChange(of: store.isSignedIn) { _, signedIn in
+      // Signing out forgets what this page held, so the next account starts from its own settings.
+      guard !signedIn else { return }
+      baseline = nil
+      draft = AccountSettings()
+      google = nil
+      googleSetup = nil
+      telegram = nil
+    }
     .onChange(of: store.lastSyncedAt) { _, _ in
       if navigation.section == .settings { Task { await loadIntegrations() } }
     }
@@ -153,6 +169,14 @@ struct AccountView: View {
       }
     ) {
       IntegrationBrowser(server: store.serverAddress, onDismiss: { showingBrowser = false })
+    }
+    .confirmationDialog(
+      store.text("Выйти из аккаунта?", "Sign out?"), isPresented: $confirmingSignOut,
+      titleVisibility: .visible
+    ) {
+      Button(store.text("Выйти", "Sign out"), role: .destructive) { Task { await store.signOut() } }
+    } message: {
+      Text(store.text("Чтобы войти снова, потребуется ввести данные аккаунта.", "You will need your account details to sign in again."))
     }
     .sheet(item: $secretEditor, onDismiss: { Task { await loadIntegrations() } }) { kind in
       IntegrationSecretEditor(kind: kind, googleSetup: googleSetup)
@@ -193,10 +217,10 @@ struct AccountView: View {
       }
       HStack(spacing: 10) {
         SettingsField(label: store.text("Начало дня", "Day starts")) {
-          TimeStringPicker(title: "", value: $draft.workDayStart, zone: draft.timeZone).labelsHidden()
+          TimeStringPicker(title: store.text("Начало дня", "Day starts"), value: $draft.workDayStart, zone: draft.timeZone)
         }
         SettingsField(label: store.text("Конец дня", "Day ends")) {
-          TimeStringPicker(title: "", value: $draft.workDayEnd, zone: draft.timeZone).labelsHidden()
+          TimeStringPicker(title: store.text("Конец дня", "Day ends"), value: $draft.workDayEnd, zone: draft.timeZone)
         }
       }
       SettingsHint(text: store.text("Помощник учитывает эти часы при планировании.", "The assistant uses these hours when planning."))
@@ -253,9 +277,6 @@ struct AccountView: View {
       }
       .accessibilityElement(children: .contain)
       .accessibilityLabel(store.text("Тема приложения", "App theme"))
-      SettingsField(label: store.text("Боковая панель", "Sidebar")) {
-        SettingsSelect(options: [("dark", store.text("Графитовая", "Graphite")), ("light", store.text("Светлая", "Light"))], selection: $draft.sidebar)
-      }
       SettingsHint(text: store.text("Новое оформление появится после сохранения.", "The new look appears after you save."))
     }
   }
@@ -273,21 +294,21 @@ struct AccountView: View {
         title: store.text("Напоминания о задачах", "Task reminders"),
         note: store.text("За 15 минут до начала, пока Ritm открыт", "15 minutes before the start, while Ritm is open"),
         isOn: Binding(get: { draft.notifications }, set: { value in Task { await setNotifications(value) } }))
-      Rectangle().fill(RitmTheme.line).frame(height: 1)
+      SettingsDivider()
       SettingsSwitchRow(
         title: store.text("Утренний план", "Morning plan"),
         note: store.text("Сводка в начале рабочего дня, пока Ritm открыт", "A summary at the start of the workday, while Ritm is open"),
         isOn: $draft.dailyBriefing)
         .disabled(!draft.notifications)
       if let notificationError {
-        Label(notificationError, systemImage: "exclamationmark.circle")
+        Label { Text(notificationError) } icon: { RitmSymbol("exclamationmark.circle") }
           .ritmFont(11, lineSpacing: 3)
           .foregroundStyle(RitmTheme.danger)
       } else {
         SettingsHint(text: store.text("Для напоминаний понадобится разрешение iPhone.", "Reminders need permission on this iPhone."))
       }
       HStack(spacing: 12) {
-        Image(systemName: "moon").font(.system(size: 15)).accessibilityHidden(true)
+        RitmSymbol("moon").font(.system(size: 15)).accessibilityHidden(true)
         Text(store.text("Только полезные напоминания.\nВ твоём ритме.", "Only useful reminders.\nAt your pace."))
           .ritmFont(11, lineSpacing: 4)
       }
@@ -307,12 +328,7 @@ struct AccountView: View {
         telegramRow
       }
       .padding(.top, 16)
-      if let notice {
-        Label(notice, systemImage: "checkmark.circle")
-          .ritmFont(11, lineSpacing: 3)
-          .foregroundStyle(RitmTheme.accentColor)
-          .padding(.top, 8)
-      }
+      if let notice { SettingsNotice(text: notice) }
     }
   }
 
@@ -337,7 +353,7 @@ struct AccountView: View {
       }
       if status?.source == "saved" {
         Button(store.text("Удалить ключ", "Remove key")) { confirmation = .ai }
-          .buttonStyle(RitmTextButtonStyle())
+          .buttonStyle(SettingsTextButtonStyle())
           .disabled(!store.canWrite)
       }
     }
@@ -383,7 +399,7 @@ struct AccountView: View {
       }
       if configured && (connected || google?.status == .reauthRequired) {
         Button(store.text("Отключить", "Disconnect")) { confirmation = .google }
-          .buttonStyle(RitmTextButtonStyle())
+          .buttonStyle(SettingsTextButtonStyle())
           .disabled(!store.canWrite)
       }
     }
@@ -437,7 +453,7 @@ struct AccountView: View {
       }
       if configured {
         Button(store.text("Отключить", "Disconnect")) { confirmation = .telegram }
-          .buttonStyle(RitmTextButtonStyle())
+          .buttonStyle(SettingsTextButtonStyle())
           .disabled(!store.canWrite)
       }
     }
@@ -449,7 +465,7 @@ struct AccountView: View {
         HStack(spacing: 8) {
           SettingsSmallButton(title: store.text("Открыть бота в Telegram", "Open the bot in Telegram")) { openURL(url) }
           Button(store.text("Проверить подключение", "Check connection")) { Task { await loadIntegrations() } }
-            .buttonStyle(RitmTextButtonStyle())
+            .buttonStyle(SettingsTextButtonStyle())
         }
       }
       .padding(.bottom, 12)
@@ -474,15 +490,14 @@ struct AccountView: View {
           .foregroundStyle(RitmTheme.muted)
         }
         Spacer(minLength: 0)
-        Toggle(store.text("Включить", "On"), isOn: Binding(
-          get: { reminders?.enabled ?? false },
-          set: { value in Task { await saveReminders(enabled: value, lead: reminders?.leadMinutes ?? 10) } }))
-          .labelsHidden()
-          .tint(RitmTheme.accentColor)
+        SettingsSwitch(
+          isOn: Binding(
+            get: { reminders?.enabled ?? false },
+            set: { value in Task { await saveReminders(enabled: value, lead: reminders?.leadMinutes ?? 10) } }),
+          label: store.text("Напоминания в Telegram", "Telegram reminders"))
           .disabled(!linked || !store.canWrite)
-          .accessibilityLabel(store.text("Напоминания в Telegram", "Telegram reminders"))
       }
-      SettingsField(label: store.text("Предупредить", "Remind me")) {
+      SettingsField(label: store.text("Предупредить", "Remind me"), tight: true) {
         SettingsSelect(
           options: [0, 5, 10, 15, 30, 60].map { minutes in
             (minutes, minutes == 0 ? store.text("В момент начала", "At the start") : store.text("За \(minutes) минут", "\(minutes) minutes before"))
@@ -491,7 +506,6 @@ struct AccountView: View {
             get: { reminders?.leadMinutes ?? 10 },
             set: { value in Task { await saveReminders(enabled: reminders?.enabled ?? false, lead: value) } }))
       }
-      .padding(.top, -16)
       .disabled(!linked || !store.canWrite)
       if linked {
         Button(store.text("Отправить тестовое уведомление", "Send a test notification")) {
@@ -501,7 +515,7 @@ struct AccountView: View {
             }
           }
         }
-        .buttonStyle(RitmTextButtonStyle())
+        .buttonStyle(SettingsTextButtonStyle())
         .disabled(!store.canWrite)
       }
     }
@@ -515,15 +529,15 @@ struct AccountView: View {
     VStack(spacing: 10) {
       Group {
         if saving {
-          Label(store.text("Сохраняем…", "Saving…"), systemImage: "arrow.triangle.2.circlepath")
+          Label { Text(store.text("Сохраняем…", "Saving…")) } icon: { RitmSymbol("arrow.triangle.2.circlepath") }
         } else if let saveError {
-          Label(saveError, systemImage: "exclamationmark.circle").foregroundStyle(RitmTheme.danger)
+          Label { Text(saveError) } icon: { RitmSymbol("exclamationmark.circle") }.foregroundStyle(RitmTheme.danger)
         } else if dirty {
           Text(store.text("Есть несохранённые изменения", "You have unsaved changes"))
         } else if saved {
-          Label(store.text("Настройки сохранены", "Settings saved"), systemImage: "checkmark.circle")
+          Label { Text(store.text("Настройки сохранены", "Settings saved")) } icon: { RitmSymbol("checkmark.circle") }
         } else {
-          Label(store.text("Всё сохранено", "Everything is saved"), systemImage: "checkmark")
+          Label { Text(store.text("Всё сохранено", "Everything is saved")) } icon: { RitmSymbol("checkmark") }
         }
       }
       .ritmFont(11, lineSpacing: 3)
@@ -532,7 +546,7 @@ struct AccountView: View {
       Button(saving ? store.text("Сохраняем…", "Saving…") : store.text("Сохранить настройки", "Save settings")) {
         Task { await saveSettings() }
       }
-      .buttonStyle(RitmPrimaryButtonStyle(minHeight: 48))
+      .buttonStyle(SettingsPrimaryButtonStyle())
       .ritmFrameReader(active: pageActive) { revealFrames.save = $0 }
       .disabled(!dirty || saving || !store.canWrite)
       if dirty {
@@ -543,7 +557,7 @@ struct AccountView: View {
           }
           saveError = nil
         }
-        .buttonStyle(RitmTextButtonStyle(size: 12))
+        .buttonStyle(SettingsTextButtonStyle(size: 12))
         .frame(maxWidth: .infinity)
         .disabled(saving)
       }

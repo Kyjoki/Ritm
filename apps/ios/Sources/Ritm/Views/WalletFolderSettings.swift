@@ -10,7 +10,7 @@ struct WalletNote: View {
 
   var body: some View {
     Text(text)
-      .ritmFont(11, lineSpacing: 3)
+      .ritmFont(11, lineSpacing: 3.5)
       .foregroundStyle(RitmTheme.muted)
       .fixedSize(horizontal: false, vertical: true)
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -51,33 +51,39 @@ struct WalletFolderPicker: UIViewControllerRepresentable {
   }
 }
 
-/// The folder part of the «Apple Wallet» card: what Ritm sees right now, and the buttons to pick
-/// the folder and import by hand.
+/// The folder rows of the «Apple Wallet» card (`.s-wl-row`): the picker button with what Ritm sees
+/// right now, the import button, and a way to forget the folder.
 struct WalletFolderPanel: View {
   @Environment(RitmStore.self) private var store
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var choosing = false
   @State private var confirmingForget = false
 
   var body: some View {
     let source = store.walletFolder
-    VStack(alignment: .leading, spacing: 10) {
-      statusBlock(source)
-      HStack(spacing: 8) {
-        SettingsSmallButton(title: pickTitle(source)) { choosing = true }
-        SettingsSmallButton(title: store.text("Импортировать сейчас", "Import now")) {
+    let state = describe(source)
+    VStack(alignment: .leading, spacing: 0) {
+      row(
+        button: SettingsSmallButton(title: pickTitle(source)) { choosing = true },
+        text: state.text, isProblem: state.isProblem,
+        extra: lastImportLine(source)
+      )
+      .accessibilityElement(children: .contain)
+      row(
+        button: SettingsSmallButton(title: store.text("Импортировать сейчас", "Import now")) {
           Task { await store.importWalletFile(userInitiated: true) }
         }
-        .disabled(!source.isChosen || source.isReading)
-        .opacity(!source.isChosen || source.isReading ? 0.5 : 1)
-      }
+        .disabled(!source.isChosen || source.isReading),
+        text: store.text(
+          "Заберёт новые строки из purchases.txt в «Новые покупки». Ritm делает это сам при открытии.",
+          "Takes the new lines from purchases.txt into New purchases. Ritm also does this when it opens."),
+        isProblem: false, extra: nil
+      )
+      .padding(.top, 14)
       if source.isChosen {
-        SettingsSmallButton(title: store.text("Забыть папку", "Forget folder")) {
-          confirmingForget = true
-        }
+        Button(store.text("Забыть папку", "Forget folder")) { confirmingForget = true }
+          .buttonStyle(SettingsTextButtonStyle())
       }
     }
-    .animation(reduceMotion ? nil : RitmMotion.easeOut(0.2), value: source.status)
     .sheet(isPresented: $choosing) {
       WalletFolderPicker(
         onPick: { url in
@@ -103,52 +109,34 @@ struct WalletFolderPanel: View {
     }
   }
 
+  /// `.s-wl-row`: a button on the left, a muted paragraph filling the rest.
+  private func row(button: some View, text: String, isProblem: Bool, extra: String?) -> some View {
+    HStack(spacing: 10) {
+      button
+      VStack(alignment: .leading, spacing: 4) {
+        Text(text)
+          .ritmFont(11, lineSpacing: 3.5)
+          .foregroundStyle(isProblem ? RitmTheme.danger : RitmTheme.muted)
+          .fixedSize(horizontal: false, vertical: true)
+        if let extra { WalletNote(extra) }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .accessibilityElement(children: .combine)
+    }
+  }
+
   private func pickTitle(_ source: WalletFolderSource) -> String {
     switch source.status {
     case .notChosen: store.text("Выбрать папку Ritm", "Choose the Ritm folder")
     case .needsRepick: store.text("Выбрать папку заново", "Choose the folder again")
-    default: store.text("Сменить папку", "Change folder")
+    default: store.text("Другая папка", "Another folder")
     }
   }
 
   // MARK: Status
 
-  private func statusBlock(_ source: WalletFolderSource) -> some View {
-    let state = describe(source)
-    return VStack(alignment: .leading, spacing: 4) {
-      HStack(alignment: .firstTextBaseline, spacing: 8) {
-        Image(systemName: state.symbol)
-          .font(.system(size: 13, weight: .semibold))
-          .foregroundStyle(state.isProblem ? RitmTheme.danger : RitmTheme.accentColor)
-          .accessibilityHidden(true)
-        Text(state.title)
-          .ritmFont(13, weight: .semibold)
-          .foregroundStyle(state.isProblem ? RitmTheme.danger : RitmTheme.text)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-      WalletNote(state.detail)
-      if let last = lastImportLine(source) { WalletNote(last) }
-    }
-    .padding(12)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background(
-      state.isProblem ? RitmTheme.dangerSoft : RitmTheme.glassDense,
-      in: RoundedRectangle(cornerRadius: 11, style: .circular)
-    )
-    .overlay {
-      RoundedRectangle(cornerRadius: 11, style: .circular)
-        .strokeBorder(state.isProblem ? RitmTheme.danger.opacity(0.4) : RitmTheme.line, lineWidth: 1)
-    }
-    .accessibilityElement(children: .combine)
-    .accessibilityLabel(store.text("Состояние папки", "Folder status"))
-    .accessibilityValue(
-      [state.title, state.detail, lastImportLine(source)].compactMap { $0 }.joined(separator: ". "))
-  }
-
   private struct Described {
-    let symbol: String
-    let title: String
-    let detail: String
+    let text: String
     var isProblem = false
   }
 
@@ -158,51 +146,36 @@ struct WalletFolderPanel: View {
     switch source.status {
     case .notChosen:
       return Described(
-        symbol: "folder.badge.questionmark",
-        title: store.text("Папка не выбрана", "No folder chosen"),
-        detail: store.text(
-          "Создайте папку Ritm в приложении «Файлы» (iCloud Drive или «На iPhone») и выберите её здесь.",
-          "Create a Ritm folder in the Files app (iCloud Drive or On My iPhone) and choose it here."
-        ))
+        text: store.text(
+          "Папка не выбрана. Ritm прочитает файл \(fileName), когда вы его откроете.",
+          "No folder chosen. Ritm reads \(fileName) when you open it."))
     case .ready:
       return Described(
-        symbol: "checkmark.circle",
-        title: store.text("Папка выбрана: «\(name)»", "Folder chosen: “\(name)”"),
-        detail: store.text(
-          "Ritm читает файл \(fileName), когда вы его открываете, и никогда не меняет и не удаляет. Очистить файл можно самому в «Файлах».",
-          "Ritm reads \(fileName) when you open it and never changes or deletes it. You can clear the file yourself in Files."
-        ))
+        text: store.text("Папка «\(name)» · \(fileName)", "Folder “\(name)” · \(fileName)"))
     case .fileMissing:
       return Described(
-        symbol: "doc.questionmark",
-        title: store.text("В папке «\(name)» нет файла \(fileName)", "No \(fileName) in “\(name)”"),
-        detail: store.text(
-          "Файл создаст действие «Добавить в файл» после первой оплаты. Имя должно быть точно \(fileName), папка та же. Проверьте действие в «Командах».",
-          "The Append to File action creates it after the first payment. The name must be exactly \(fileName) in this same folder. Check the action in Shortcuts."
-        ), isProblem: true)
+        text: store.text(
+          "В папке «\(name)» нет файла \(fileName). Его создаст действие «Добавить в файл» после первой оплаты.",
+          "No \(fileName) in “\(name)”. The Append to File action creates it after the first payment."),
+        isProblem: true)
     case .downloading:
       return Described(
-        symbol: "icloud.and.arrow.down",
-        title: store.text("Файл ещё загружается из iCloud", "The file is still downloading from iCloud"),
-        detail: store.text(
-          "Ritm запросил его. Подождите немного и нажмите «Импортировать сейчас».",
-          "Ritm asked for it. Wait a moment, then tap Import now."))
+        text: store.text(
+          "Файл ещё загружается из iCloud. Подождите немного и нажмите «Импортировать сейчас».",
+          "The file is still downloading from iCloud. Wait a moment, then tap Import now."))
     case .needsRepick:
       return Described(
-        symbol: "exclamationmark.triangle",
-        title: store.text("Нет доступа к папке", "No access to the folder"),
-        detail: store.text(
-          "Доступ устарел или папку удалили. Выберите папку Ritm заново.",
-          "The access expired or the folder was removed. Choose the Ritm folder again."),
+        text: store.text(
+          "Нет доступа к папке: доступ устарел или папку удалили. Выберите папку Ritm заново.",
+          "No access to the folder: the access expired or it was removed. Choose the Ritm folder again."),
         isProblem: true)
     case .failed(let reason):
       let extra = reason.isEmpty ? "" : " (\(reason))"
       return Described(
-        symbol: "exclamationmark.triangle",
-        title: store.text("Не удалось прочитать файл", "Could not read the file"),
-        detail: store.text(
-          "Попробуйте ещё раз или выберите папку заново\(extra).",
-          "Try again or choose the folder again\(extra)."), isProblem: true)
+        text: store.text(
+          "Не удалось прочитать файл. Попробуйте ещё раз или выберите папку заново\(extra).",
+          "Could not read the file. Try again or choose the folder again\(extra)."),
+        isProblem: true)
     }
   }
 
@@ -225,10 +198,21 @@ struct WalletFolderPanel: View {
   }
 
   private func formatted(_ date: Date) -> String {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: store.language == .ru ? "ru_RU" : "en_US")
-    formatter.timeZone = TimeZone(identifier: store.timeZone)
-    formatter.setLocalizedDateFormatFromTemplate("d MMM HH:mm")
+    let formatter = Self.formatter(ru: store.language == .ru, zone: store.timeZone)
     return formatter.string(from: date)
+  }
+
+  /// One formatter per (language, zone) pair: building one is slow, and this runs per render.
+  @MainActor private static var formatters: [String: DateFormatter] = [:]
+
+  @MainActor private static func formatter(ru: Bool, zone: String) -> DateFormatter {
+    let key = "\(ru)|\(zone)"
+    if let cached = formatters[key] { return cached }
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: ru ? "ru_RU" : "en_US")
+    formatter.timeZone = TimeZone(identifier: zone)
+    formatter.setLocalizedDateFormatFromTemplate("d MMM HH:mm")
+    formatters[key] = formatter
+    return formatter
   }
 }

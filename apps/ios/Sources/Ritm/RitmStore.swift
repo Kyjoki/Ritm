@@ -12,9 +12,38 @@ struct FinanceFocus: Equatable {
 @MainActor @Observable
 final class RitmStore {
   private(set) var isSignedIn = false
+  /// True once the first (silent) sign-in attempt is over, so the app does not ask for a login
+  /// while the saved one is still being tried.
+  private(set) var startupFinished = false
   private(set) var isLoading = false
   private(set) var isMutating = false
-  var errorMessage: String?
+  /// The latest error for the banners. Transient: it clears itself after `errorLifetime`, but only
+  /// while it still holds the same text, so a newer message is never wiped by an older timer.
+  var errorMessage: String? {
+    didSet { armErrorTimer() }
+  }
+  @ObservationIgnored private var errorTimer: Task<Void, Never>?
+
+  /// Seconds an error stays on screen: about 4, 6 for a long text.
+  static func errorLifetime(for message: String) -> Double { message.count > 90 ? 6 : 4 }
+
+  private func armErrorTimer() {
+    errorTimer?.cancel()
+    errorTimer = nil
+    guard let message = errorMessage, !message.isEmpty else { return }
+    let lifetime = Self.errorLifetime(for: message)
+    errorTimer = Task { @MainActor [weak self] in
+      // A little longer than the banner's own fade-out, which clears it first when it is on screen.
+      try? await Task.sleep(for: .seconds(lifetime + 0.5))
+      guard !Task.isCancelled, let self, self.errorMessage == message else { return }
+      self.errorMessage = nil
+    }
+  }
+
+  /// Dismisses an error the owner has seen; a newer message stays.
+  func dismissError(ifMatching message: String) {
+    if errorMessage == message { errorMessage = nil }
+  }
   private(set) var bootstrap: Bootstrap?
   private(set) var habits: [Habit] = []
   private(set) var todayEvents: [GoogleCalendarEvent] = []
@@ -66,6 +95,11 @@ final class RitmStore {
   @ObservationIgnored private var pollTask: Task<Void, Never>?
   @ObservationIgnored private var nextAllowedRead = Date.distantPast
   @ObservationIgnored private var connectionErrorShown = false
+  /// Habit ticks in flight: unsent taps per habit and day, the last server-confirmed copy, and the
+  /// habits whose queue is being sent (see `tickHabit`).
+  @ObservationIgnored private var habitQueue: [String: [String: Int]] = [:]
+  @ObservationIgnored private var habitConfirmed: [String: Habit] = [:]
+  @ObservationIgnored private var habitSending: Set<String> = []
 
   init() {
     let address = ServerAddressStore.load()
@@ -238,11 +272,16 @@ final class RitmStore {
   }
 
   func start() async {
-    guard !started, let client else { return }
+    guard !started else { return }
+    guard let client else {
+      startupFinished = true
+      return
+    }
     started = true
     isLoading = true
     defer {
       isLoading = false
+      startupFinished = true
       schedulePolling()
     }
     do {
@@ -370,7 +409,8 @@ final class RitmStore {
       let freshHabits = try await client.habits()
       guard ticket == generation, isSignedIn, !Task.isCancelled else { return }
       bootstrap = freshAccount
-      habits = freshHabits
+      // A habit tick in flight shows its own, newer state; the next snapshot brings the server's.
+      if habitSending.isEmpty { habits = freshHabits }
       now = Date()
       isOffline = false
       if connectionErrorShown {
@@ -395,12 +435,117 @@ final class RitmStore {
     guard let current = habits.first(where: { $0.id == habit.id }),
       current.archived != true, isScheduledToday(current)
     else { return }
-    let date = today
-    let completed = !isCompletedToday(current)
-    _ = await mutate { client in
-      _ = try await client.setHabitDay(
-        id: current.id, date: date, completed: completed, expectedUpdatedAt: current.updatedAt)
+    let count = isCompletedToday(current) ? 0 : HabitSchedule.target(current)
+    _ = await tickHabit(id: current.id, date: today, count: count)
+  }
+
+  // MARK: Habit ticks
+
+  /// What one finished tick changed: the habit before the first unsent tap and the server's copy.
+  struct HabitTick: Sendable {
+    let before: Habit
+    let after: Habit
+  }
+
+  /// Records a habit's progress for a day. The change shows in `habits` at once; the request goes
+  /// out in the background and only this habit takes the server's answer (no snapshot reload, no
+  /// global `isMutating`). Taps while a request is in flight are queued per habit and sent in
+  /// order with the fresh `updatedAt`. A failed request puts the habit back, shows a toast and
+  /// re-reads that habit. Returns the result only from the call that drained the queue.
+  func tickHabit(id: String, date: String, count: Int) async -> HabitTick? {
+    guard isSignedIn, !isOffline, !uncertainWrite, !isMutating, Date() >= nextAllowedRead,
+      let index = habits.firstIndex(where: { $0.id == id })
+    else { return nil }
+    let current = habits[index]
+    guard HabitSchedule.canMark(current, on: date, today: today) else { return nil }
+    let next = max(0, min(HabitSchedule.target(current), count))
+    if habitConfirmed[id] == nil { habitConfirmed[id] = current }
+    habits[index] = Self.habit(current, setting: next, on: date)
+    habitQueue[id, default: [:]][date] = next
+    // A snapshot read started before this tap must not overwrite it.
+    generation += 1
+    guard !habitSending.contains(id) else { return nil }
+    habitSending.insert(id)
+    var result = await sendHabitQueue(id: id)
+    // A tap that arrived while the failure was being reported is still queued: send it too.
+    while !(habitQueue[id]?.isEmpty ?? true), isSignedIn {
+      result = await sendHabitQueue(id: id) ?? result
     }
+    habitSending.remove(id)
+    return result
+  }
+
+  private func sendHabitQueue(id: String) async -> HabitTick? {
+    guard let client, let first = habitConfirmed[id] else { return nil }
+    var latest: Habit?
+    while let (date, count) = habitQueue[id]?.first {
+      habitQueue[id]?.removeValue(forKey: date)
+      guard let base = habitConfirmed[id] else { break }
+      do {
+        let saved: Habit
+        if base.target == nil {
+          saved = try await client.setHabitDay(
+            id: id, date: date, completed: count > 0, expectedUpdatedAt: base.updatedAt)
+        } else {
+          saved = try await client.setHabitProgress(
+            id: id, date: date, count: count, expectedUpdatedAt: base.updatedAt)
+        }
+        guard isSignedIn else {
+          habitQueue[id] = nil
+          habitConfirmed[id] = nil
+          return nil
+        }
+        habitConfirmed[id] = saved
+        latest = saved
+        // Newer taps are still queued: keep showing them, the last answer replaces the habit.
+        if habitQueue[id]?.isEmpty ?? true, let i = habits.firstIndex(where: { $0.id == id }) {
+          habits[i] = saved
+        }
+      } catch {
+        await failHabitTick(id: id, error: error)
+        return nil
+      }
+    }
+    habitQueue[id] = nil
+    habitConfirmed[id] = nil
+    return latest.map { HabitTick(before: first, after: $0) }
+  }
+
+  /// Rolls the habit back to the last copy the server confirmed, tells the owner, and re-reads it.
+  private func failHabitTick(id: String, error: Error) async {
+    let restore = habitConfirmed[id]
+    habitQueue[id] = nil
+    habitConfirmed[id] = nil
+    if let restore, let i = habits.firstIndex(where: { $0.id == id }) { habits[i] = restore }
+    await present(error)
+    guard isSignedIn else { return }
+    let detail = errorMessage
+    errorMessage = nil
+    toasts.show(
+      detail
+        ?? text(
+          "Не удалось сохранить отметку. Изменение отменено.",
+          "Could not save the mark. The change was undone."))
+    // Only this habit takes the server's copy; the others are left as they are.
+    guard let client, let fresh = try? await client.habits().first(where: { $0.id == id }),
+      habitConfirmed[id] == nil, let i = habits.firstIndex(where: { $0.id == id })
+    else { return }
+    habits[i] = fresh
+  }
+
+  /// The habit with `count` recorded on `date`, as the server will store it.
+  private static func habit(_ habit: Habit, setting count: Int, on date: String) -> Habit {
+    var next = habit
+    let complete = count >= HabitSchedule.target(habit)
+    if habit.target != nil || habit.progressByDate?[date] != nil {
+      var progress = next.progressByDate ?? [:]
+      progress[date] = habit.target != nil ? count : (complete ? 1 : 0)
+      next.progressByDate = progress
+    }
+    var dates = next.completedDates.filter { $0 != date }
+    if complete { dates.append(date) }
+    next.completedDates = dates.sorted()
+    return next
   }
 
   private func mutate(_ operation: @MainActor (APIClient) async throws -> Void) async -> Bool {

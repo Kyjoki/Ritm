@@ -41,18 +41,19 @@ struct DayView: View {
       RitmBackground()
       ScrollView {
         VStack(alignment: .leading, spacing: 0) {
-          RitmShellHeader()
+          RitmShellHeader().padding(.horizontal, 16)
           heading
-          notices
-          if store.bootstrap == nil {
-            loadingCard
-          } else {
-            content
+          VStack(alignment: .leading, spacing: 0) {
+            notices
+            if store.bootstrap == nil {
+              loadingCard
+            } else {
+              content
+            }
           }
-          RitmPageFooter()
+          .padding(.horizontal, 16)
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 28)
+        .padding(.bottom, 16)
         .frame(maxWidth: 700)
         .frame(maxWidth: .infinity)
       }
@@ -83,11 +84,9 @@ struct DayView: View {
     let name =
       store.bootstrap?.settings.displayName.split(separator: " ").first.map(String.init) ?? ""
     let greeting = DayPlan.greeting(hour: hour, language: store.language)
-    return RitmPageHeading(title: name.isEmpty ? greeting : greeting + ", " + name) {
-      RitmIconCTA(symbol: "plus.circle", label: store.text("Добавить запись", "Add entry")) {
-        addEntry()
-      }
-    }
+    return DayHeading(
+      title: name.isEmpty ? greeting : greeting + ", " + name,
+      actionLabel: store.text("Добавить запись", "Add entry"), action: addEntry)
   }
 
   @ViewBuilder private var notices: some View {
@@ -256,7 +255,7 @@ struct DayView: View {
               "Следуйте своему темпу — всё важное перед вами.",
               "Go at your own pace — everything important is here."))
       } icon: {
-        Image(systemName: "checklist").font(.system(size: 12))
+        RitmSymbol("checklist").font(.system(size: 12))
       }
       .ritmFont(10, lineSpacing: 5)
       .foregroundStyle(RitmTheme.muted)
@@ -266,7 +265,7 @@ struct DayView: View {
             "Найди свободное время в моём расписании на сегодня.",
             "Find free time in my schedule today."))
       } label: {
-        Label(store.text("Найти свободное время", "Find free time"), systemImage: "clock")
+        Label { Text(store.text("Найти свободное время", "Find free time")) } icon: { RitmSymbol("clock") }
       }
       .buttonStyle(RitmTextButtonStyle())
     }

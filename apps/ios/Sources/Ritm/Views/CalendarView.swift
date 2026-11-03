@@ -8,6 +8,8 @@ private struct CalendarSheet: Identifiable {
   var event: GoogleCalendarEvent?
   var task: RitmTask?
   var draft: CalendarDraft?
+  /// The «Без даты» list, opened from the row under the week grid.
+  var backlog = false
 }
 
 private struct CalendarDraft {
@@ -40,7 +42,6 @@ struct CalendarView: View {
   @State private var pick: CalendarPick?
   @State private var backlogOpen = false
   @State private var nowJump = 0
-  @State private var dragging = false
 
   private var selected: String { date.isEmpty ? store.today : date }
   private var weekDays: [String] { HabitSchedule.week(containing: selected) }
@@ -77,26 +78,7 @@ struct CalendarView: View {
       RitmBackground()
       VStack(spacing: 0) {
         toolbar.padding(.horizontal, 12).ritmPageReveal(index: 0)
-        GeometryReader { proxy in
-          ScrollView {
-            VStack(alignment: .leading, spacing: 4) {
-              if let message = store.errorMessage {
-                RitmErrorBanner(message: message).padding(.bottom, 8)
-              }
-              MutationRecoveryView()
-              panel.frame(height: max(320, proxy.size.height - 8)).ritmPageReveal(index: 1)
-              secondary.ritmPageReveal(index: 2)
-            }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 16)
-          }
-          .scrollIndicators(.hidden)
-          .scrollDisabled(dragging)
-          .refreshable {
-            await store.refresh()
-            await reload()
-          }
-        }
+        if mode == .week { weekPage } else { listPage }
       }
     }
     .toolbar(.hidden, for: .navigationBar)
@@ -116,6 +98,8 @@ struct CalendarView: View {
         CalendarEventEditor(
           initialDate: draft.date, initialTime: draft.time, initialDuration: draft.duration
         ) { await reload() }
+      } else {
+        backlogSheet.presentationDetents([.medium, .large])
       }
     }
     .sheet(item: $pick) { value in
@@ -128,22 +112,28 @@ struct CalendarView: View {
 
   // MARK: Toolbar
 
+
+  /// `.cal-top`, `.cal-nav` and `.cal-row`: paddings 10/6, 6/6 and 6/10 around three 44 pt rows.
   private var toolbar: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      HStack(alignment: .center, spacing: 12) {
+    RitmGlassGroup(spacing: 8) { toolbarRows }
+  }
+
+  private var toolbarRows: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(alignment: .center, spacing: 8) {
         Text(store.text("Календарь", "Calendar"))
           .ritmFont(21, weight: .bold, tracking: -0.045)
           .foregroundStyle(RitmTheme.text)
           .lineLimit(1)
           .minimumScaleFactor(0.8)
+          .frame(maxWidth: .infinity, alignment: .leading)
           .accessibilityAddTraits(.isHeader)
-        Spacer(minLength: 0)
-        RitmIconCTA(symbol: "plus", label: store.text("Добавить запись", "Add entry")) {
-          addEntry(selected)
-        }
+        addButton
       }
+      .padding(.top, 10)
+      .padding(.bottom, 6)
       HStack(spacing: 5) {
-        iconButton("chevron.left", store.text("Предыдущий период", "Previous period")) { shift(-1) }
+        iconButton(.leftIcon, store.text("Предыдущий период", "Previous period")) { shift(-1) }
         Text(periodLabel)
           .ritmFont(13, weight: .semibold, tracking: -0.025)
           .foregroundStyle(RitmTheme.text)
@@ -151,7 +141,7 @@ struct CalendarView: View {
           .truncationMode(.tail)
           .frame(maxWidth: .infinity)
           .accessibilityAddTraits(.updatesFrequently)
-        iconButton("chevron.right", store.text("Следующий период", "Next period")) { shift(1) }
+        iconButton(.rightIcon, store.text("Следующий период", "Next period")) { shift(1) }
         Button(store.text("Сегодня", "Today")) { date = store.today }
           .buttonStyle(CalendarSecondaryStyle())
         if mode == .week {
@@ -159,28 +149,48 @@ struct CalendarView: View {
             date = store.today
             nowJump += 1
           } label: {
-            Image(systemName: "clock").font(.system(size: 17))
+            RitmSymbol("clock").font(.system(size: 18))
           }
           .buttonStyle(CalendarSecondaryStyle(square: true))
           .accessibilityLabel(store.text("Показать текущее время", "Show the current time"))
         }
       }
+      .padding(.vertical, 6)
       HStack(spacing: 8) {
         segment
         if !warning && (status != nil || loading) { compactStatus }
       }
-      if warning { warningStatus }
+      .padding(.top, 6)
+      .padding(.bottom, 10)
+      if warning { warningStatus.padding(.bottom, 10) }
     }
-    .padding(.top, 10)
-    .padding(.bottom, 10)
   }
 
-  private func iconButton(_ symbol: String, _ label: String, action: @escaping () -> Void)
+  /// `.cal-cta`: the prominent glass capsule with a plus and the label.
+  private var addButton: some View {
+    Button {
+      addEntry(selected)
+    } label: {
+      HStack(spacing: 8) {
+        RitmSymbol("plus").font(.system(size: 18, weight: .semibold))
+        Text(store.text("Добавить запись", "Add entry")).ritmFont(14, weight: .semibold).lineLimit(1)
+      }
+      .foregroundStyle(RitmTheme.ctaInk)
+      .padding(.horizontal, 14)
+      .frame(minHeight: 44)
+      .ritmGlass(in: Capsule(), prominent: true, interactive: true)
+      .contentShape(Capsule())
+    }
+    .buttonStyle(RitmGlassButtonStyle())
+    .accessibilityLabel(store.text("Добавить запись", "Add entry"))
+  }
+
+  private func iconButton(_ symbol: RitmIconName, _ label: String, action: @escaping () -> Void)
     -> some View
   {
     Button(action: action) {
-      Image(systemName: symbol)
-        .font(.system(size: 17, weight: .medium))
+      RitmIcon(symbol)
+        .font(.system(size: 18, weight: .medium))
         .foregroundStyle(RitmTheme.muted)
         .frame(width: 44, height: 44)
         .ritmGlass(in: Circle(), interactive: true)
@@ -203,16 +213,16 @@ struct CalendarView: View {
         if loading {
           ProgressView().controlSize(.small).tint(RitmTheme.accentColor)
         } else {
-          Image(systemName: "calendar").font(.system(size: 15)).foregroundStyle(RitmTheme.accentColor)
+          RitmIcon(.calCalendar).font(.system(size: 20)).foregroundStyle(RitmTheme.accentColor)
         }
       }
-      .frame(width: 18)
+      .frame(width: 22)
       .accessibilityLabel(statusTitle)
       if connected {
         Button {
           Task { await refreshGoogle() }
         } label: {
-          Image(systemName: "arrow.clockwise").font(.system(size: 16))
+          RitmIcon(.refreshCalendar).font(.system(size: 18))
         }
         .buttonStyle(CalendarSecondaryStyle(square: true))
         .disabled(loading)
@@ -225,7 +235,7 @@ struct CalendarView: View {
 
   private var warningStatus: some View {
     HStack(alignment: .top, spacing: 5) {
-      Image(systemName: "exclamationmark.circle")
+      RitmSymbol("exclamationmark.circle")
         .font(.system(size: 15))
         .foregroundStyle(RitmTheme.accentColor)
         .padding(.top, 2)
@@ -244,7 +254,7 @@ struct CalendarView: View {
         Button {
           Task { await refreshGoogle() }
         } label: {
-          Label(store.text("Обновить", "Refresh"), systemImage: "arrow.clockwise")
+          Label { Text(store.text("Обновить", "Refresh")) } icon: { RitmIcon(.refreshCalendar) }
         }
         .buttonStyle(CalendarSecondaryStyle())
         .disabled(loading)
@@ -272,7 +282,7 @@ struct CalendarView: View {
     } label: {
       HStack(spacing: 4) {
         Text(store.text("Настройки", "Settings"))
-        Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
+        RitmIcon(.rightIcon).font(.system(size: 12, weight: .semibold))
       }
     }
     .buttonStyle(RitmTextButtonStyle())
@@ -338,35 +348,86 @@ struct CalendarView: View {
 
   // MARK: Panel
 
-  @ViewBuilder private var panel: some View {
-    switch mode {
-    case .week:
-      CalendarWeekGrid(
-        days: weekDays,
-        entries: Dictionary(uniqueKeysWithValues: weekDays.map { ($0, entries($0)) }),
-        today: store.today, timeZoneLabel: timeZoneLabel, jumpToNow: nowJump,
-        dragBlock: dragBlock, onOpen: open,
-        onPick: { day, group in pick = CalendarPick(date: day, keys: group.map(\.key)) },
-        onAdd: { day, minute in addEntry(day, time: TaskSchedule.minuteTime(minute)) },
-        onSelectDay: { day in
-          date = day
-          mode = .day
-        },
-        onMove: { entry, day, minute in await move(entry, to: day, minute: minute) },
-        onDragActive: { dragging = $0 },
-        onSwipe: shift
-      )
-      .padding(.top, 7)
-      .padding(.horizontal, 3)
-      .background { RitmPanelBackground(radius: 20) }
-      .padding(.horizontal, -4)
-    case .day:
+  /// «Неделя»: the toolbar stays put and the panel takes exactly the room left above the bottom
+  /// bar, so the hour grid is the only vertical scroll and its last hour ends above the bar.
+  private var weekPage: some View {
+    VStack(spacing: 0) {
+      if let message = store.errorMessage {
+        RitmErrorBanner(message: message).padding(.horizontal, 12).padding(.bottom, 8)
+      }
+      MutationRecoveryView().padding(.horizontal, 12)
+      weekPanel
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ritmPageReveal(index: 1)
+      backlogRow(chevronOpen: false) { sheet = CalendarSheet(backlog: true) }
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+        .padding(.bottom, 12)
+        .ritmPageReveal(index: 2)
+    }
+  }
+
+  /// «День» and «Месяц»: one page that scrolls, the panel at its natural height.
+  private var listPage: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 0) {
+        if let message = store.errorMessage {
+          RitmErrorBanner(message: message).padding(.bottom, 8)
+        }
+        MutationRecoveryView()
+        listPanel.ritmPageReveal(index: 1)
+        VStack(alignment: .leading, spacing: 13) {
+          backlogRow(chevronOpen: backlogOpen) {
+            withAnimation(reduceMotion ? nil : RitmMotion.ease(0.2)) { backlogOpen.toggle() }
+          }
+          if backlogOpen {
+            paceCard
+            backlogCard
+          }
+        }
+        .padding(.top, 6)
+        .ritmPageReveal(index: 2)
+      }
+      .padding(.horizontal, 12)
+      .padding(.bottom, 24)
+    }
+    .scrollIndicators(.hidden)
+    .refreshable {
+      await store.refresh()
+      await reload()
+    }
+  }
+
+  private var weekPanel: some View {
+    CalendarWeekGrid(
+      days: weekDays,
+      entries: Dictionary(uniqueKeysWithValues: weekDays.map { ($0, entries($0)) }),
+      today: store.today, timeZoneLabel: timeZoneLabel, jumpToNow: nowJump,
+      dragBlock: dragBlock, onOpen: open,
+      onPick: { day, group in pick = CalendarPick(date: day, keys: group.map(\.key)) },
+      onAdd: { day, minute in addEntry(day, time: TaskSchedule.minuteTime(minute)) },
+      onSelectDay: { day in
+        date = day
+        mode = .day
+      },
+      onMove: { entry, day, minute in await move(entry, to: day, minute: minute) },
+      onSwipe: shift
+    )
+    .padding(.top, 7)
+    .padding(.horizontal, 3)
+    .clipShape(RoundedRectangle(cornerRadius: 20, style: .circular))
+    .background { RitmPanelBackground(radius: 20) }
+    .padding(.horizontal, 8)
+  }
+
+  @ViewBuilder private var listPanel: some View {
+    if mode == .day {
       CalendarAgenda(
         date: selected, entries: entries(selected), uncertain: uncertain, googleConnected: connected,
         onOpen: open, onAdd: { day, time, duration in addEntry(day, time: time, duration: duration) }
       )
       .background { RitmPanelBackground() }
-    case .month:
+    } else {
       CalendarMonthGrid(selected: selected, today: store.today, entries: entries) { day in
         date = day
         mode = .day
@@ -375,38 +436,39 @@ struct CalendarView: View {
     }
   }
 
-  /// `.cal-secondary`: «Твой темп · Без даты (N)», collapsed under the calendar.
-  private var secondary: some View {
-    VStack(alignment: .leading, spacing: 13) {
-      Button {
-        withAnimation(reduceMotion ? nil : RitmMotion.ease(0.2)) { backlogOpen.toggle() }
-      } label: {
-        HStack {
-          Text(
-            store.text("Твой темп", "Your pace") + " · " + store.text("Без даты", "No date")
-              + " (\(undatedTasks.count))")
-          Spacer()
-          Image(systemName: "chevron.down")
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(RitmTheme.accentColor)
-            .rotationEffect(.degrees(backlogOpen ? 180 : 0))
-        }
-        .ritmFont(12)
-        .foregroundStyle(RitmTheme.muted)
-        .padding(.horizontal, 10)
-        .frame(minHeight: 26)
-        .background(RitmTheme.panel, in: RoundedRectangle(cornerRadius: 10, style: .circular))
-        .overlay {
-          RoundedRectangle(cornerRadius: 10, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1)
-        }
-        .padding(.vertical, 9)
-        .contentShape(Rectangle())
+  /// `.cal-sech`: «Твой темп · Без даты (N)», a 44 pt row under the calendar.
+  private func backlogRow(chevronOpen: Bool, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      HStack {
+        Text(
+          store.text("Твой темп", "Your pace") + " · " + store.text("Без даты", "No date")
+            + " (\(undatedTasks.count))")
+        Spacer()
+        RitmSymbol("chevron.down")
+          .font(.system(size: 14, weight: .semibold))
+          .foregroundStyle(RitmTheme.accentColor)
+          .rotationEffect(.degrees(chevronOpen ? 180 : 0))
       }
-      .buttonStyle(.plain)
-      .accessibilityAddTraits(backlogOpen ? .isSelected : [])
-      if backlogOpen {
-        if mode != .week { paceCard }
-        backlogCard
+      .ritmFont(12)
+      .foregroundStyle(RitmTheme.muted)
+      .padding(.horizontal, 10)
+      .frame(minHeight: 44)
+      .background(RitmTheme.panel, in: RoundedRectangle(cornerRadius: 10, style: .circular))
+      .overlay {
+        RoundedRectangle(cornerRadius: 10, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1)
+      }
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(RitmPressStyle(scale: 0.97))
+    .accessibilityAddTraits(chevronOpen ? .isSelected : [])
+  }
+
+  /// The week's «Без даты» list, a sheet because the week page has no room for it inline.
+  private var backlogSheet: some View {
+    ZStack {
+      RitmBackground()
+      ScrollView {
+        backlogCard.padding(.horizontal, 16).padding(.vertical, 24)
       }
     }
   }
@@ -417,7 +479,7 @@ struct CalendarView: View {
     return RitmCard(padding: 20) {
       VStack(alignment: .leading, spacing: 13) {
         HStack {
-          Label(store.text("Твой темп", "Your pace"), systemImage: "sparkles")
+          Label { Text(store.text("Твой темп", "Your pace")) } icon: { RitmSymbol("sparkles") }
             .ritmFont(14, weight: .semibold, tracking: -0.02)
             .foregroundStyle(RitmTheme.text)
           Spacer()
@@ -477,7 +539,7 @@ struct CalendarView: View {
             HStack(spacing: 10) {
               Text(task.title).ritmFont(12).multilineTextAlignment(.leading)
               Spacer(minLength: 0)
-              Image(systemName: "chevron.right").font(.system(size: 13)).foregroundStyle(RitmTheme.muted)
+              RitmIcon(.rightIcon).font(.system(size: 13)).foregroundStyle(RitmTheme.muted)
                 .accessibilityHidden(true)
             }
             .foregroundStyle(RitmTheme.text)

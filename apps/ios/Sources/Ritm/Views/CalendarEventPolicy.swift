@@ -45,9 +45,19 @@ struct CalendarColorPicker: View {
   @Binding var colorID: String
   var extended = true
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Button(store.text("Цвет по умолчанию", "Default color")) { colorID = "" }.frame(minHeight: 44)
-      LazyVGrid(columns: [GridItem(.adaptive(minimum: 44, maximum: 56), spacing: 8)], spacing: 8) {
+    VStack(alignment: .leading, spacing: 0) {
+      Button {
+        colorID = ""
+      } label: {
+        Text(store.text("Цвет по умолчанию", "Default color"))
+          .ritmFont(14, weight: .medium)
+          .foregroundStyle(RitmTheme.accentColor)
+          .frame(minHeight: 44, alignment: .leading)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(RitmPressStyle(scale: 0.98))
+      .accessibilityAddTraits(colorID.isEmpty ? .isSelected : [])
+      LazyVGrid(columns: [GridItem(.adaptive(minimum: 44, maximum: 44), spacing: 0)], spacing: 0) {
         ForEach(CalendarPalette.values.filter { extended || !$0.0.hasPrefix("#") }, id: \.0) {
           item in
           Button {
@@ -56,7 +66,7 @@ struct CalendarColorPicker: View {
             Circle().fill(CalendarPalette.color(item.0)).frame(width: 30, height: 30)
               .overlay {
                 if colorID == item.0 {
-                  Image(systemName: "checkmark").foregroundStyle(.white).shadow(radius: 1)
+                  RitmSymbol("checkmark").foregroundStyle(.white).shadow(radius: 1)
                 }
               }
               .frame(minWidth: 44, minHeight: 44)
@@ -66,11 +76,12 @@ struct CalendarColorPicker: View {
         }
       }
       if !extended {
-        Text(
-          store.text(
+        CalendarSheetNote(
+          text: store.text(
             "Дополнительные оттенки включаются в настройках Google.",
-            "Enable extra colors in Google settings.")
-        ).font(.caption).foregroundStyle(.secondary)
+            "Enable extra colors in Google settings."), size: 12
+        )
+        .padding(.top, 4)
       }
     }
   }

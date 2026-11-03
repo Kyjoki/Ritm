@@ -92,7 +92,7 @@ struct FinanceCardSettingsSheet: View {
     let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
     let ink = Color(rgb: 0xF8F3FF)
     return HStack(spacing: 12) {
-      Image(systemName: style.symbol)
+      RitmSymbol(style.symbol)
         .font(.system(size: 16, weight: .regular))
         .frame(width: 36, height: 36)
         .background(Circle().fill(Color.white.opacity(0.14)))
@@ -141,7 +141,7 @@ struct FinanceCardSettingsSheet: View {
         .fill(style.gradient)
         .frame(width: 30, height: 30)
         .overlay {
-          Image(systemName: "checkmark")
+          RitmSymbol("checkmark")
             .font(.system(size: 12, weight: .bold))
             .foregroundStyle(Color.white)
             .opacity(isSelected ? 1 : 0)

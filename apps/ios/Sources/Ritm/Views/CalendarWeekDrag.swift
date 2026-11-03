@@ -72,12 +72,12 @@ final class WeekDragModel {
 
   // Never observed.
   @ObservationIgnored var offset: CGFloat = 0
+  @ObservationIgnored private var lastSlot = -1
   @ObservationIgnored private var env: WeekDragEnv?
   @ObservationIgnored private var pressing = false
   @ObservationIgnored private var origin = CGPoint.zero
   @ObservationIgnored private var holdTask: Task<Void, Never>?
   @ObservationIgnored private var scrollPosition = 0.0
-  @ObservationIgnored private var lastSlot = -1
   @ObservationIgnored private var edgeSince: Date?
   @ObservationIgnored private var suppressTapUntil = Date.distantPast
 
@@ -86,11 +86,19 @@ final class WeekDragModel {
   /// Eight scroll anchors per hour (`slot-N` ids in the hour column).
   static let slotsPerHour = 8
   static var slotCount: Int { 24 * slotsPerHour }
-
   /// A tap right after a lift or release must not open the entry.
   var tapsAllowed: Bool { Date() >= suppressTapUntil }
 
   // MARK: Finger events
+
+  /// The long-press recogniser of CalendarGridTouches fired: lift the entry under the finger now.
+  func pressBegan(at point: CGPoint, env: WeekDragEnv) {
+    self.env = env
+    holdTask?.cancel()
+    pressing = true
+    origin = point
+    lift()
+  }
 
   func pressMoved(to point: CGPoint, env: WeekDragEnv) {
     self.env = env

@@ -5,7 +5,7 @@ import Foundation
 /// the remaining time is always `endDate - now`, whatever happened to the app in between.
 public struct RestTimer: Codable, Equatable, Sendable {
   public static let presets: [TimeInterval] = [60, 90, 120, 180]
-  public static let defaultPreset: TimeInterval = 90
+  public static let defaultPreset: TimeInterval = 180
   /// What «+15 с» adds.
   public static let extensionStep: TimeInterval = 15
 

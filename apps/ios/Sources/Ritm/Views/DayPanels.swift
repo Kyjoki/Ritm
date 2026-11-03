@@ -12,7 +12,7 @@ private struct DayPanelSurface: ViewModifier {
       .padding(.vertical, 19)
       .padding(.horizontal, 17)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .background { RitmPanelBackground(raised: true) }
+      .background { RitmPanelBackground() }
       .ritmPageReveal(index: reveal)
   }
 }
@@ -21,7 +21,7 @@ private struct DayDivider: View {
   var body: some View { Rectangle().fill(RitmTheme.line).frame(height: 1) }
 }
 
-/// `.task-checkbox`: a 19 pt rounded square that fills with the accent when done.
+/// `.sd-chk i`: a 20 pt rounded square that fills with the accent when done.
 private struct DayCheckbox: View {
   let done: Bool
 
@@ -34,12 +34,37 @@ private struct DayCheckbox: View {
       }
       .overlay {
         if done {
-          Image(systemName: "checkmark")
-            .font(.system(size: 9, weight: .heavy))
+          RitmSymbol("checkmark")
+            .font(.system(size: 11, weight: .heavy))
             .foregroundStyle(RitmTheme.accentInk)
         }
       }
-      .frame(width: 19, height: 19)
+      .frame(width: 20, height: 20)
+  }
+}
+
+/// `.sd-add button` / `.sd-wb i`: a bordered rounded square on the raised glass fill, no live glass.
+struct DaySquareButtonLabel: View {
+  let symbol: String
+  var size: CGFloat = 44
+  var radius: CGFloat = 13
+  var iconSize: CGFloat = 20
+  var weight: Font.Weight = .light
+  var tint: Color = RitmTheme.accentColor
+
+  var body: some View {
+    RitmSymbol(symbol)
+      .font(.system(size: iconSize, weight: weight))
+      .foregroundStyle(tint)
+      .frame(width: size, height: size)
+      .background {
+        RoundedRectangle(cornerRadius: radius, style: .circular)
+          .fill(RitmTheme.glassRaised)
+          .overlay {
+            RoundedRectangle(cornerRadius: radius, style: .circular)
+              .strokeBorder(RitmTheme.panelBorder, lineWidth: 1)
+          }
+      }
   }
 }
 
@@ -117,7 +142,7 @@ struct DayTasksPanel: View {
     RitmSegmentedControl(
       label: store.text("День для списка задач", "Task list day"), values: [false, true],
       title: { $0 ? store.text("Завтра", "Tomorrow") : store.text("Сегодня", "Today") },
-      selection: $tomorrow, fontSize: 13, fillsWidth: false)
+      selection: $tomorrow, fontSize: 13)
   }
 
   private var quickAdd: some View {
@@ -155,19 +180,14 @@ struct DayTasksPanel: View {
       Button {
         Task { await addQuickTask() }
       } label: {
-        Group {
-          if quickBusy {
-            ProgressView().tint(RitmTheme.accentColor)
-          } else {
-            Image(systemName: "plus.circle").font(.system(size: 18))
-          }
+        if quickBusy {
+          ProgressView().tint(RitmTheme.accentColor).frame(width: 44, height: 44)
+        } else {
+          DaySquareButtonLabel(symbol: "plus.circle")
         }
-        .foregroundStyle(RitmTheme.accentColor)
-        .frame(width: 44, height: 44)
-        .ritmGlass(in: Circle(), interactive: true)
-        .contentShape(Circle())
       }
-      .buttonStyle(RitmGlassButtonStyle())
+      .buttonStyle(RitmPressStyle())
+      .opacity(quickBusy || trimmedTitle.isEmpty || !store.canWrite ? 0.5 : 1)
       .disabled(quickBusy || trimmedTitle.isEmpty || !store.canWrite)
       .accessibilityLabel(
         tomorrow
@@ -201,7 +221,7 @@ struct DayTasksPanel: View {
         showCalendar: !pending)
     } else {
       emptyState(
-        icon: "checkmark.circle",
+        icon: "plus.circle",
         title: tomorrow
           ? store.text("Пока нет задач на завтра", "No tasks for tomorrow yet")
           : store.text("Пока нет задач на сегодня", "No tasks for today yet"),
@@ -217,11 +237,12 @@ struct DayTasksPanel: View {
   {
     VStack(spacing: 12) {
       if let icon {
-        Image(systemName: icon).font(.system(size: 30)).foregroundStyle(RitmTheme.accentColor)
+        RitmSymbol(icon).font(.system(size: 30, weight: .light))
+          .foregroundStyle(RitmTheme.accentColor)
       } else if pending {
         ProgressView().controlSize(.large).tint(RitmTheme.accentColor)
       } else {
-        Image(systemName: "exclamationmark.circle")
+        RitmSymbol("exclamationmark.circle")
           .font(.system(size: 26))
           .foregroundStyle(RitmTheme.accentColor)
       }
@@ -234,7 +255,7 @@ struct DayTasksPanel: View {
     }
     .multilineTextAlignment(.center)
     .padding(24)
-    .frame(maxWidth: .infinity, minHeight: 300)
+    .frame(maxWidth: .infinity, minHeight: 220)
     .accessibilityElement(children: .contain)
   }
 
@@ -302,7 +323,7 @@ struct DayTasksPanel: View {
           } else if checkable {
             DayCheckbox(done: complete)
           } else {
-            Image(systemName: "checklist").font(.system(size: 17)).foregroundStyle(RitmTheme.muted)
+            RitmSymbol("checklist").font(.system(size: 17)).foregroundStyle(RitmTheme.muted)
           }
         }
         .frame(width: 44, height: 44)
@@ -365,7 +386,7 @@ struct DayTasksPanel: View {
         // Web OAuth starts here; on iPhone the Google connection lives in Settings.
         if store.googleStatus?.tasksEnabled != true {
           Button(action: onSettings) {
-            Label(store.text("Подключить Google Tasks", "Connect Google Tasks"), systemImage: "checkmark.circle")
+            Label { Text(store.text("Подключить Google Tasks", "Connect Google Tasks")) } icon: { RitmSymbol("checkmark.circle") }
           }
           .buttonStyle(RitmTextButtonStyle())
         }
@@ -447,12 +468,12 @@ struct DaySchedulePanel: View {
         Button(action: onCalendar) {
           HStack(spacing: 6) {
             Text(store.text("Сегодня", "Today"))
-            Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .medium)).accessibilityHidden(true)
+            RitmSymbol("arrow.up.right").font(.system(size: 11, weight: .medium)).accessibilityHidden(true)
           }
         }
         .buttonStyle(RitmTextButtonStyle())
       }
-      .padding(.bottom, 14)
+      .padding(.bottom, 6)
       if timed.isEmpty {
         emptySchedule
       } else {
@@ -490,7 +511,7 @@ struct DaySchedulePanel: View {
 
   private var emptySchedule: some View {
     VStack(spacing: 12) {
-      Image(systemName: "calendar").font(.system(size: 24))
+      RitmSymbol("calendar").font(.system(size: 24))
       Text(
         store.googleUncertain
           ? store.text("Уточняем расписание", "Checking your schedule")
@@ -503,7 +524,7 @@ struct DaySchedulePanel: View {
             "Найди свободное время в моём расписании на сегодня.",
             "Find free time in my schedule today."))
       } label: {
-        Label(store.text("Найти удобное время", "Find a good time"), systemImage: "clock")
+        Label { Text(store.text("Найти удобное время", "Find a good time")) } icon: { RitmSymbol("clock") }
       }
       .buttonStyle(RitmTextButtonStyle())
     }
@@ -516,7 +537,7 @@ struct DaySchedulePanel: View {
       Text(entry.start.map { DayPlan.clock($0) } ?? "")
         .ritmFont(10)
         .foregroundStyle(RitmTheme.muted)
-        .frame(width: 38, alignment: .leading)
+        .frame(width: 46, alignment: .leading)
         .padding(.top, 13)
       Button {
         onOpen(entry)

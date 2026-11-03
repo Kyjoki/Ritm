@@ -1,27 +1,21 @@
 import SwiftUI
 
-// «Liquid Glass» for the floating controls (bottom bar, header buttons, popovers, toasts,
-// segmented controls, capsule buttons, chips). Content cards stay calm (RitmCard).
+// «Liquid Glass» as in the prototype (glass.css). Two layers:
 //
-// On iOS 26 and later `ritmGlass` is the system `glassEffect`, grouped by `GlassEffectContainer`
-// (`RitmGlassGroup`). On iOS 17 to 25 it is an emulation of the owner's «Стекло Edge» recipe:
-// a thin material, a light tint, soft inner highlights top and bottom, a 1.25 pt specular rim
-// (140°, bright at the top-left and bottom-right corners, fading along the sides), a soft outer
-// shadow, and a press response (scale .96 on a spring plus a sheen). Metal shaders are not used,
-// so the emulation has no refraction. Reduce Transparency draws a solid raised panel with the
-// same rim; Reduce Motion drops the press movement; Increase Contrast draws a plain contour.
+// - Controls that FLOAT over scrolling content (bottom bar, header buttons, popovers, banner,
+//   toast) are real system glass: `ritmFloatingGlass`, grouped by `GlassEffectContainer`
+//   (`RitmGlassGroup`). One layer per control, no extra blur under it.
+// - Everything that sits on a calm card (capsule buttons, chips, circular icon buttons, the lit
+//   call to action) is `ritmGlass`: a plain fill with a 1.25 pt specular rim (140°, bright at the
+//   top-left and bottom-right corners, fading along the sides) and a soft shadow. No blur, so a
+//   screen full of buttons stays cheap.
+//
+// Both press with scale .96 on a spring. Reduce Motion drops the movement, Reduce Transparency
+// makes the fills opaque, Increase Contrast draws a plain contour.
 
 // MARK: - Tokens
 
 enum RitmGlassTokens {
-  /// Light translucent fill: .32 dark, .55 light (higher so text on it stays readable).
-  static var fill: Color {
-    Color(light: 0xFFFFFF, dark: 0x1D172A, lightOpacity: 0.55, darkOpacity: 0.32)
-  }
-  /// The sliding thumb inside a glass control.
-  static var thumb: Color {
-    Color(light: 0xFFFFFF, dark: 0xFFFFFF, lightOpacity: 0.85, darkOpacity: 0.13)
-  }
   static var rimHigh: Color {
     Color(light: 0xFFFFFF, dark: 0xFFFFFF, lightOpacity: 1, darkOpacity: 0.62)
   }
@@ -38,9 +32,49 @@ enum RitmGlassTokens {
   static var shadow: Color {
     Color(light: 0x2C1848, dark: 0x000000, lightOpacity: 0.22, darkOpacity: 0.5)
   }
-  /// The calm card rim, `--calm-edge`.
-  static var calmEdge: Color {
-    Color(light: 0xFFFFFF, dark: 0xFFFFFF, lightOpacity: 1, darkOpacity: 0.16)
+  /// `--calm-hi` / `--calm-lo`: the inset lit top and shaded bottom line of a calm card.
+  static var calmHigh: Color {
+    Color(light: 0xFFFFFF, dark: 0xFFFFFF, lightOpacity: 0.95, darkOpacity: 0.07)
+  }
+  static var calmLow: Color {
+    Color(light: 0x3E236B, dark: 0x000000, lightOpacity: 0.05, darkOpacity: 0.2)
+  }
+  /// `--lg-btn`: a translucent capsule on a calm card, lit from above.
+  static var buttonFill: LinearGradient {
+    LinearGradient(
+      colors: [
+        Color(light: 0xFFFFFF, dark: 0xFFFFFF, lightOpacity: 0.92, darkOpacity: 0.12),
+        Color(light: 0xF3EDFC, dark: 0xFFFFFF, lightOpacity: 0.66, darkOpacity: 0.05),
+      ], startPoint: .top, endPoint: .bottom)
+  }
+  /// `--lg-btn-shadow`, the outer part: `0 6px 14px -8px`.
+  static var buttonShadow: Color {
+    Color(light: 0x3E236B, dark: 0x000000, lightOpacity: 0.3, darkOpacity: 0.5)
+  }
+  /// `--lg-cta-shadow`, the outer part: `0 10px 22px -10px`.
+  static var ctaGlow: Color {
+    Color(light: 0x673FA8, dark: 0x000000, lightOpacity: 0.55, darkOpacity: 0.6)
+  }
+  /// The corners of a call to action's rim are a little quieter than a plain button's.
+  static var ctaRim: LinearGradient {
+    let corner = Color(light: 0xFFFFFF, dark: 0xFFFFFF, lightOpacity: 0.85, darkOpacity: 0.7)
+    return RitmTheme.linear(
+      [
+        .init(color: corner, location: 0),
+        .init(color: Color.white.opacity(0.14), location: 0.3),
+        .init(color: .clear, location: 0.5),
+        .init(color: .clear, location: 0.62),
+        .init(color: Color.white.opacity(0.14), location: 0.78),
+        .init(color: corner, location: 1),
+      ], cssAngle: 140)
+  }
+  /// The glossy veil over a call to action.
+  static var ctaVeil: LinearGradient {
+    LinearGradient(
+      stops: [
+        .init(color: Color.white.opacity(0.22), location: 0),
+        .init(color: .clear, location: 0.55),
+      ], startPoint: .top, endPoint: .bottom)
   }
 
   static let rimWidth: CGFloat = 1.25
@@ -96,21 +130,34 @@ struct RitmGlassButtonStyle: ButtonStyle {
 // MARK: - Public API
 
 extension View {
-  /// Liquid Glass on a floating control. `prominent` is the accent call to action,
-  /// `interactive` adds the press response (use it with `RitmGlassButtonStyle`).
+  /// A translucent capsule, chip or icon button on a calm card (prototype `.btn`, `.ghost`), or
+  /// with `prominent` the lit accent call to action. A plain fill with a specular rim and a soft
+  /// shadow: no blur. `interactive` adds the press response (use it with `RitmGlassButtonStyle`).
   func ritmGlass<S: Shape>(
     in shape: S, prominent: Bool = false, interactive: Bool = false, tint: Color? = nil
   ) -> some View {
-    modifier(RitmGlassModifier(shape: shape, prominent: prominent, interactive: interactive, tint: tint))
+    modifier(
+      RitmGlassModifier(
+        shape: shape, prominent: prominent, interactive: interactive, tint: tint, floating: false))
   }
 
-  /// The glass drop that slides under the labels of a segmented control or a tab bar. It has no
-  /// blur of its own: it sits on a glass control, and blurs are not stacked.
+  /// Real system Liquid Glass for a control that floats over scrolling content: the bottom bar,
+  /// the header buttons, popovers, the banner and the toast. One layer per control.
+  func ritmFloatingGlass<S: Shape>(
+    in shape: S, interactive: Bool = false, tint: Color? = nil
+  ) -> some View {
+    modifier(
+      RitmGlassModifier(
+        shape: shape, prominent: false, interactive: interactive, tint: tint, floating: true))
+  }
+
+  /// A small raised drop (the chip behind a ghost or close button inside a floating panel). It
+  /// has no blur of its own: blurs are not stacked.
   func ritmGlassThumb<S: Shape>(in shape: S, tint: Color? = nil) -> some View {
     modifier(RitmGlassThumbModifier(shape: shape, tint: tint))
   }
 
-  /// The sheet grabber: the system indicator on iOS 26, a small glass capsule before it.
+  /// The sheet grabber: the system drag indicator.
   func ritmSheetGrabber() -> some View {
     modifier(RitmSheetGrabberModifier())
   }
@@ -121,18 +168,13 @@ extension View {
   }
 }
 
-/// Groups neighbouring glass controls so the system can merge and morph them on iOS 26+;
-/// a plain container on older systems.
+/// Groups neighbouring glass controls so the system can merge and morph them.
 struct RitmGlassGroup<Content: View>: View {
   var spacing: CGFloat = 12
   @ViewBuilder var content: Content
 
   var body: some View {
-    if #available(iOS 26.0, *) {
-      GlassEffectContainer(spacing: spacing) { content }
-    } else {
-      content
-    }
+    GlassEffectContainer(spacing: spacing) { content }
   }
 }
 
@@ -143,40 +185,29 @@ private struct RitmGlassModifier<S: Shape>: ViewModifier {
   let prominent: Bool
   let interactive: Bool
   let tint: Color?
+  let floating: Bool
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.ritmGlassPressed) private var pressed
 
   func body(content: Content) -> some View {
-    if #available(iOS 26.0, *) {
-      if reduceTransparency {
-        emulated(content)
-      } else {
-        native(content)
-      }
+    if floating && !reduceTransparency {
+      native(content)
     } else {
-      emulated(content)
+      plain(content)
     }
   }
 
-  @available(iOS 26.0, *)
   private func native(_ content: Content) -> some View {
     var glass = Glass.regular
-    if prominent {
-      glass = glass.tint(RitmTheme.accentColor.opacity(0.5))
-    } else if let tint {
-      glass = glass.tint(tint)
-    }
+    if let tint { glass = glass.tint(tint) }
     if interactive { glass = glass.interactive() }
-    // The accent gradient keeps the label of a prominent button at full contrast.
-    return content
-      .background {
-        if prominent { shape.fill(RitmTheme.ctaGradient.opacity(0.94)) }
-      }
-      .glassEffect(glass, in: shape)
+    return content.glassEffect(glass, in: shape)
   }
 
-  private func emulated(_ content: Content) -> some View {
+  /// A plain fill: the prototype's capsule, call to action, or (Reduce Transparency) an opaque
+  /// panel.
+  private func plain(_ content: Content) -> some View {
     let active = interactive && pressed
     return content
       .background {
@@ -190,100 +221,76 @@ private struct RitmGlassModifier<S: Shape>: ViewModifier {
 private struct RitmGlassThumbModifier<S: Shape>: ViewModifier {
   let shape: S
   let tint: Color?
-  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-  @Environment(\.colorSchemeContrast) private var contrast
 
   func body(content: Content) -> some View {
     content.background {
-      if #available(iOS 26.0, *), !reduceTransparency {
-        Color.clear.glassEffect(
-          tint.map { Glass.regular.tint($0) } ?? Glass.regular, in: shape)
-      } else {
-        thumb
-      }
+      RitmGlassSurface(shape: shape, prominent: false, tint: tint, sheen: false)
     }
-  }
-
-  private var thumb: some View {
-    ZStack {
-      shape.fill(reduceTransparency ? RitmTheme.glassDense : RitmGlassTokens.thumb)
-      if let tint { shape.fill(tint) }
-      shape.fill(RitmGlassTokens.highlight)
-      rim(shape, contrast: contrast)
-    }
-    .shadow(color: RitmGlassTokens.shadow.opacity(0.5), radius: 5, y: 3)
   }
 }
 
 /// The 1.25 pt rim drawn inside the shape: a 2.5 pt centred stroke clipped to the shape.
 @ViewBuilder
-private func rim<S: Shape>(_ shape: S, contrast: ColorSchemeContrast) -> some View {
+private func rim<S: Shape>(_ shape: S, contrast: ColorSchemeContrast, quiet: Bool = false)
+  -> some View
+{
   if contrast == .increased {
     shape.stroke(RitmTheme.text, lineWidth: 2).clipShape(shape)
   } else {
-    shape.stroke(RitmGlassTokens.rim, lineWidth: RitmGlassTokens.rimWidth * 2).clipShape(shape)
+    shape
+      .stroke(
+        quiet ? RitmGlassTokens.ctaRim : RitmGlassTokens.rim,
+        lineWidth: RitmGlassTokens.rimWidth * 2
+      )
+      .clipShape(shape)
   }
 }
 
 private struct RitmSheetGrabberModifier: ViewModifier {
   func body(content: Content) -> some View {
-    if #available(iOS 26.0, *) {
-      content.presentationDragIndicator(.visible)
-    } else {
-      content
-        .presentationDragIndicator(.hidden)
-        .overlay(alignment: .top) {
-          Color.clear
-            .frame(width: 36, height: 5)
-            .background(RitmTheme.muted.opacity(0.4), in: Capsule())
-            .ritmGlass(in: Capsule())
-            .padding(.top, 6)
-            .accessibilityHidden(true)
-            .allowsHitTesting(false)
-        }
-    }
+    content.presentationDragIndicator(.visible)
   }
 }
 
-// MARK: - Emulated surface
+// MARK: - Plain surface
 
 private struct RitmGlassSurface<S: Shape>: View {
   let shape: S
   let prominent: Bool
   let tint: Color?
   let sheen: Bool
-  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   @Environment(\.colorSchemeContrast) private var contrast
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
   var body: some View {
     ZStack {
       if prominent {
         shape.fill(RitmTheme.ctaGradient)
+          .shadow(color: RitmGlassTokens.ctaGlow, radius: 9, y: 8)
+        if !reduceTransparency { shape.fill(RitmGlassTokens.ctaVeil) }
       } else if reduceTransparency {
         shape.fill(RitmTheme.glassDense)
+          .shadow(color: RitmGlassTokens.buttonShadow, radius: 6, y: 5)
       } else {
-        shape.fill(.ultraThinMaterial)
-        shape.fill(RitmGlassTokens.fill)
+        shape.fill(RitmGlassTokens.buttonFill)
+          .shadow(color: RitmGlassTokens.buttonShadow, radius: 6, y: 5)
       }
       if let tint { shape.fill(tint) }
-      if !reduceTransparency || prominent {
-        shape.fill(RitmGlassTokens.highlight).opacity(prominent ? 0.7 : 1)
-      }
       if sheen {
         shape.fill(
           RadialGradient(
             colors: [RitmGlassTokens.shine, .clear], center: UnitPoint(x: 0.5, y: 0.1),
             startRadius: 0, endRadius: 90))
       }
-      rim(shape, contrast: contrast)
+      rim(shape, contrast: contrast, quiet: prominent)
     }
-    .shadow(
-      color: prominent ? RitmTheme.ctaShadow : RitmGlassTokens.shadow, radius: 14, y: 9)
   }
 }
 
 // MARK: - Calm card rim
 
+/// `inset 0 1px 0 var(--calm-hi), inset 0 -1px 0 var(--calm-lo)`: a lit line under the top edge
+/// and a shaded one above the bottom edge, as one gradient stroke clipped to the card.
 struct RitmCalmRim<S: Shape>: View {
   let shape: S
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -292,17 +299,16 @@ struct RitmCalmRim<S: Shape>: View {
     if !reduceTransparency {
       shape
         .stroke(
-          RitmTheme.linear(
-            [
-              .init(color: RitmGlassTokens.calmEdge, location: 0),
-              .init(color: .clear, location: 0.3),
-              .init(color: .clear, location: 0.8),
-              .init(color: RitmGlassTokens.calmEdge, location: 1),
-            ], cssAngle: 160),
+          LinearGradient(
+            stops: [
+              .init(color: RitmGlassTokens.calmHigh, location: 0),
+              .init(color: .clear, location: 0.1),
+              .init(color: .clear, location: 0.9),
+              .init(color: RitmGlassTokens.calmLow, location: 1),
+            ], startPoint: .top, endPoint: .bottom),
           lineWidth: 2
         )
         .clipShape(shape)
-        .opacity(0.55)
         .allowsHitTesting(false)
     }
   }
@@ -310,41 +316,58 @@ struct RitmCalmRim<S: Shape>: View {
 
 // MARK: - Scroll edge
 
-/// Content softens as it slides under a floating bar: a gradient of the page background over a
-/// thin material, faded out beyond the bar (MOTION.md §7). `top` reaches under the status bar,
-/// `bottom` under the home indicator.
+/// Content softens as it slides under a floating bar (MOTION.md §7, glass.css §7): a gradient of
+/// the page background. `top` is `--bar-solid` solid down to 60 % of its height and then
+/// fading out, `bottom` is `.edge-bot`, a 132 pt veil that fades in towards the home indicator.
+/// A plain gradient: no live blur, so scrolling stays cheap.
 struct RitmScrollEdge: View {
   enum Side { case top, bottom }
   var side: Side = .top
   var fade: CGFloat = 18
+  /// `bottom`: how far below the view the screen edge lies (the home indicator's safe area).
+  var bottomInset: CGFloat = 0
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
+  private var solid: Color {
+    reduceTransparency
+      ? RitmTheme.background
+      : Color(light: 0xF7F5FB, dark: 0x12101B, lightOpacity: 0.86, darkOpacity: 0.82)
+  }
+
+  private var veil: Color {
+    reduceTransparency
+      ? RitmTheme.background
+      : Color(light: 0xF7F5FB, dark: 0x12101B, lightOpacity: 0.8, darkOpacity: 0.78)
+  }
+
   var body: some View {
-    let towardsBar: (UnitPoint, UnitPoint) =
-      side == .top ? (.top, .bottom) : (.bottom, .top)
-    ZStack {
-      if !reduceTransparency { Rectangle().fill(.ultraThinMaterial) }
-      LinearGradient(
-        colors: [
-          RitmTheme.background.opacity(reduceTransparency ? 1 : 0.94),
-          RitmTheme.background.opacity(reduceTransparency ? 1 : 0.8),
-        ], startPoint: towardsBar.0, endPoint: towardsBar.1)
-    }
-    .mask {
-      VStack(spacing: 0) {
-        if side == .bottom {
-          LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
-            .frame(height: fade)
-        }
-        Rectangle()
-        if side == .top {
-          LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
-            .frame(height: fade)
-        }
+    Group {
+      if side == .top {
+        LinearGradient(
+          stops: [
+            .init(color: solid, location: 0),
+            .init(color: solid, location: 0.6),
+            .init(color: solid.opacity(0), location: 1),
+          ], startPoint: .top, endPoint: .bottom
+        )
+        .padding(.bottom, -fade)
+        .ignoresSafeArea(edges: .top)
+      } else {
+        // `linear-gradient(transparent, edge-fade 58%)` under a mask that is clear at the top
+        // and opaque from 42 %, multiplied out into one gradient.
+        LinearGradient(
+          stops: [
+            .init(color: veil.opacity(0), location: 0),
+            .init(color: veil.opacity(0.16), location: 0.2),
+            .init(color: veil.opacity(0.72), location: 0.42),
+            .init(color: veil, location: 0.58),
+            .init(color: veil, location: 1),
+          ], startPoint: .top, endPoint: .bottom
+        )
+        .frame(height: 132)
+        .offset(y: bottomInset)
       }
     }
-    .padding(side == .top ? .bottom : .top, -fade)
-    .ignoresSafeArea(edges: side == .top ? .top : .bottom)
     .allowsHitTesting(false)
     .accessibilityHidden(true)
   }

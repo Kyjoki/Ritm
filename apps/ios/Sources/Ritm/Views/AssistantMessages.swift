@@ -31,13 +31,14 @@ enum IdeaText {
   }
 }
 
-/// `.assistant-message`: the user's bubble on the right, Ritm's reply across the full width.
+/// `.a-urow` / `.a-arow`: the user's bubble on the right, Ritm's reply across the full width.
 struct AssistantMessageView: View {
   let message: ChatMessage
   let conversationID: String
   let discussionSelected: Bool
   let discussionDisabled: Bool
   let superseded: Bool
+  @Binding var openKeys: Set<String>
   let onConversation: (Conversation) -> Void
   let onDiscuss: (Bool) -> Void
   @Environment(RitmStore.self) private var store
@@ -48,7 +49,7 @@ struct AssistantMessageView: View {
       UserMessageRow {
         VStack(alignment: .leading, spacing: 7) {
           author
-          Text(message.text).ritmFont(13, lineSpacing: 9).foregroundStyle(RitmTheme.text).textSelection(.enabled)
+          Text(message.text).ritmFont(13, lineSpacing: 6.5).foregroundStyle(RitmTheme.text).textSelection(.enabled)
         }
       }
     } else {
@@ -56,31 +57,18 @@ struct AssistantMessageView: View {
         author.padding(.bottom, 7)
         if let report = message.ideaReview {
           IdeaReviewView(
-            report: report, selected: discussionSelected, disabled: discussionDisabled,
-            superseded: superseded, onDiscuss: onDiscuss)
+            messageID: message.id, report: report, selected: discussionSelected,
+            disabled: discussionDisabled, superseded: superseded, openKeys: $openKeys,
+            onDiscuss: onDiscuss)
         } else {
-          Text(message.text).ritmFont(13, lineSpacing: 9).foregroundStyle(RitmTheme.text).textSelection(.enabled)
+          Text(message.text).ritmFont(13, lineSpacing: 6.5).foregroundStyle(RitmTheme.text).textSelection(.enabled)
         }
-        if !message.steps.isEmpty { steps.padding(.top, 17) }
+        if !message.steps.isEmpty { steps.padding(.top, 10) }
         if message.ideaReview == nil && !message.proposals.isEmpty && !conversationID.isEmpty {
           ProposalCard(message: message, conversationID: conversationID, onConversation: onConversation)
-            .padding(.top, 17)
+            .padding(.top, 10)
         }
-        Button {
-          UIPasteboard.general.string = copyText
-          copied = true
-        } label: {
-          Label(
-            copied ? store.text("Скопировано", "Copied") : store.text("Копировать ответ", "Copy reply"),
-            systemImage: copied ? "checkmark" : "doc.on.doc")
-            .ritmFont(12)
-            .foregroundStyle(RitmTheme.muted)
-            .padding(.horizontal, 8)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(RitmPressStyle())
-        .padding(.top, 9)
+        copyButton
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -92,6 +80,31 @@ struct AssistantMessageView: View {
       .foregroundStyle(RitmTheme.accentColor)
   }
 
+  /// `.a-copy`: 44 pt tall, 12 pt muted; the check stays for 1.8 s.
+  private var copyButton: some View {
+    Button {
+      UIPasteboard.general.string = copyText
+      copied = true
+    } label: {
+      HStack(spacing: 6) {
+        RitmSymbol(copied ? "checkmark" : "doc.on.doc").font(.system(size: 14))
+        Text(copied ? store.text("Скопировано", "Copied") : store.text("Копировать ответ", "Copy reply"))
+      }
+      .ritmFont(12)
+      .foregroundStyle(RitmTheme.muted)
+      .padding(.horizontal, 8)
+      .frame(minHeight: 44)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(RitmPressStyle())
+    .padding(.top, 9)
+    .task(id: copied) {
+      guard copied else { return }
+      try? await Task.sleep(for: .seconds(1.8))
+      if !Task.isCancelled { copied = false }
+    }
+  }
+
   private var steps: some View {
     VStack(alignment: .leading, spacing: 7) {
       Text(store.text("Понятные шаги", "Clear steps")).ritmFont(12, weight: .semibold).foregroundStyle(RitmTheme.accentColor)
@@ -99,15 +112,14 @@ struct AssistantMessageView: View {
       ForEach(Array(message.steps.enumerated()), id: \.offset) { index, step in
         HStack(alignment: .firstTextBaseline, spacing: 8) {
           Text("\(index + 1).").ritmFont(12, weight: .semibold).foregroundStyle(RitmTheme.accentColor)
-          Text(step).ritmFont(12, lineSpacing: 8).foregroundStyle(RitmTheme.text).textSelection(.enabled)
+          Text(step).ritmFont(12, lineSpacing: 4.5).foregroundStyle(RitmTheme.text)
         }
       }
     }
     .padding(.vertical, 16)
     .padding(.horizontal, 17)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(RitmTheme.field, in: RoundedRectangle(cornerRadius: 12, style: .circular))
-    .overlay { RoundedRectangle(cornerRadius: 12, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1) }
+    .assistantBox(RitmTheme.field, radius: 12)
   }
 
   private var copyText: String {
@@ -129,7 +141,7 @@ struct AssistantMessageView: View {
   }
 }
 
-/// `.assistant-proposals`: select changes, confirm, apply, reject or undo; nothing is automatic.
+/// `.a-props`: select changes, confirm, apply, reject or undo; nothing is automatic.
 private struct ProposalCard: View {
   let message: ChatMessage
   let conversationID: String
@@ -147,69 +159,74 @@ private struct ProposalCard: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       HStack(spacing: 7) {
-        Image(systemName: "sparkles").font(.system(size: 14))
+        RitmIcon(.sparklesAssistant).font(.system(size: 14))
         Text(store.text("Предлагаемые изменения", "Proposed changes")).ritmFont(12, weight: .bold)
         Spacer()
         Text("\(message.proposals.count)")
           .ritmFont(10)
           .padding(.vertical, 3)
-          .padding(.horizontal, 6)
-          .background(RitmTheme.panel, in: RoundedRectangle(cornerRadius: 7, style: .circular))
-          .overlay { RoundedRectangle(cornerRadius: 7, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1) }
+          .padding(.horizontal, 7)
+          .assistantBox(RitmTheme.panel, radius: 7)
       }
       .foregroundStyle(RitmTheme.accentColor)
-      Text(hint).ritmFont(11, lineSpacing: 6).foregroundStyle(RitmTheme.muted).padding(.top, 8).padding(.bottom, 15)
+      Text(hint).ritmFont(11, lineSpacing: 3.5).foregroundStyle(RitmTheme.muted).padding(.top, 8).padding(.bottom, 15)
       VStack(spacing: 12) {
         ForEach(message.proposals) { proposal in row(proposal) }
       }
+      // Every row keeps a 12 pt bottom margin, the last one too.
+      .padding(.bottom, 12)
       if let confirmation {
-        VStack(alignment: .leading, spacing: 11) {
+        VStack(alignment: .leading, spacing: 10) {
           Text(
             confirmation == .apply
               ? store.text("Применить выбранные изменения (\(selectedPending.count)) к вашему расписанию?", "Apply the selected changes (\(selectedPending.count)) to your schedule?")
               : store.text("Вернуть прежнее расписание для выбранных задач (\(selectedApplied.count))?", "Restore the previous schedule for the selected tasks (\(selectedApplied.count))?")
           )
-          .ritmFont(12, lineSpacing: 4)
+          .ritmFont(12, lineSpacing: 3.5)
           .foregroundStyle(RitmTheme.text)
-          HStack(spacing: 8) {
+          buttonRow {
             Button {
               Task { await run(confirmation == .apply ? .apply : .undo) }
             } label: {
-              Label(confirmation == .apply ? store.text("Подтвердить изменения", "Confirm changes") : store.text("Подтвердить отмену", "Confirm undo"), systemImage: "checkmark")
+              AssistantButtonLabel(
+                title: confirmation == .apply ? store.text("Подтвердить изменения", "Confirm changes") : store.text("Подтвердить отмену", "Confirm undo"),
+                symbol: "checkmark")
             }
-            .buttonStyle(RitmPrimaryButtonStyle())
+            .buttonStyle(AssistantButtonStyle(kind: .primary))
             .disabled(busy || !store.canWrite)
             Button(store.text("Назад", "Back")) { self.confirmation = nil }
-              .buttonStyle(RitmSecondaryButtonStyle())
+              .buttonStyle(AssistantButtonStyle())
               .disabled(busy)
           }
         }
         .padding(.top, 15)
       } else if !pending.isEmpty || !applied.isEmpty {
-        HStack(spacing: 8) {
+        buttonRow {
           if !pending.isEmpty {
             Button {
               confirmation = .apply
             } label: {
-              Label(store.text("Применить выбранные", "Apply selected") + (selectedPending.isEmpty ? "" : " (\(selectedPending.count))"), systemImage: "checkmark")
+              AssistantButtonLabel(
+                title: store.text("Применить выбранные", "Apply selected") + (selectedPending.isEmpty ? "" : " (\(selectedPending.count))"),
+                symbol: "checkmark")
             }
-            .buttonStyle(RitmPrimaryButtonStyle())
+            .buttonStyle(AssistantButtonStyle(kind: .primary))
             .disabled(busy || selectedPending.isEmpty)
             Button {
               Task { await run(nil) }
             } label: {
-              Label(store.text("Отклонить", "Reject"), systemImage: "xmark").frame(maxWidth: .infinity)
+              AssistantButtonLabel(title: store.text("Отклонить", "Reject"), symbol: "xmark")
             }
-            .buttonStyle(RitmSecondaryButtonStyle())
+            .buttonStyle(AssistantButtonStyle())
             .disabled(busy || selectedPending.isEmpty || !store.canWrite)
           }
           if !applied.isEmpty {
             Button {
               confirmation = .undo
             } label: {
-              Label(store.text("Отменить изменения", "Undo changes"), systemImage: "arrow.uturn.backward").frame(maxWidth: .infinity)
+              AssistantButtonLabel(title: store.text("Отменить изменения", "Undo changes"), symbol: "arrow.uturn.backward")
             }
-            .buttonStyle(RitmSecondaryButtonStyle())
+            .buttonStyle(AssistantButtonStyle())
             .disabled(busy || selectedApplied.isEmpty)
           }
         }
@@ -226,6 +243,15 @@ private struct ProposalCard: View {
     .accessibilityLabel(store.text("Предлагаемые изменения расписания", "Proposed schedule changes"))
   }
 
+  /// `.a-row`: buttons side by side, wrapping into full-width lines when they do not fit.
+  private func buttonRow<Buttons: View>(@ViewBuilder _ buttons: () -> Buttons) -> some View {
+    let content = buttons()
+    return ViewThatFits(in: .horizontal) {
+      HStack(spacing: 8) { content }
+      VStack(spacing: 8) { content }
+    }
+  }
+
   private var hint: String {
     if !pending.isEmpty {
       return store.text("Выберите подходящие изменения. Ritm применит их после вашего подтверждения.", "Choose the changes that fit. Ritm applies them after you confirm.")
@@ -240,33 +266,31 @@ private struct ProposalCard: View {
     let selectable = proposal.status == .pending || proposal.status == .applied
     let isSelected = selected.contains(proposal.id)
     return VStack(alignment: .leading, spacing: 0) {
-      HStack(alignment: .center, spacing: 9) {
-        if selectable {
-          Button {
-            if isSelected { selected.remove(proposal.id) } else { selected.insert(proposal.id) }
-            confirmation = nil
-          } label: {
-            HStack(spacing: 9) {
-              Image(systemName: isSelected ? "checkmark.square.fill" : "square")
-                .font(.system(size: 20))
-                .foregroundStyle(RitmTheme.accentColor)
-              Text(proposal.title).ritmFont(12, weight: .semibold).foregroundStyle(RitmTheme.text)
-                .multilineTextAlignment(.leading)
-            }
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
+      if selectable {
+        Button {
+          if isSelected { selected.remove(proposal.id) } else { selected.insert(proposal.id) }
+          confirmation = nil
+        } label: {
+          HStack(spacing: 9) {
+            RitmSymbol(isSelected ? "checkmark.square.fill" : "square")
+              .font(.system(size: 20))
+              .foregroundStyle(RitmTheme.accentColor)
+            Text(proposal.title).ritmFont(12, weight: .semibold).foregroundStyle(RitmTheme.text)
+              .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
           }
-          .buttonStyle(.plain)
-          .disabled(busy)
-          .accessibilityLabel(store.text("Выбрать изменение: ", "Select change: ") + proposal.title)
-          .accessibilityAddTraits(isSelected ? .isSelected : [])
-        } else {
-          Text(proposal.title).ritmFont(12, weight: .semibold).foregroundStyle(RitmTheme.text)
+          .frame(minHeight: 44)
+          .contentShape(Rectangle())
         }
-        Spacer(minLength: 0)
+        .buttonStyle(.plain)
+        .disabled(busy)
+        .accessibilityLabel(store.text("Выбрать изменение: ", "Select change: ") + proposal.title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+      } else {
+        Text(proposal.title).ritmFont(12, weight: .semibold).foregroundStyle(RitmTheme.text)
       }
       HStack(spacing: 3) {
-        if proposal.status == .applied { Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)) }
+        if proposal.status == .applied { RitmSymbol("checkmark").font(.system(size: 9, weight: .bold)) }
         Text(status(proposal.status))
       }
       .ritmFont(9)
@@ -278,23 +302,18 @@ private struct ProposalCard: View {
       .padding(.leading, selectable ? 29 : 0)
       HStack(spacing: 10) {
         schedule(store.text("Было", "Before"), proposal.before)
-        Image(systemName: "arrow.right").font(.system(size: 15)).foregroundStyle(RitmTheme.muted)
+        RitmSymbol("arrow.right").font(.system(size: 15)).foregroundStyle(RitmTheme.muted)
           .accessibilityHidden(true)
         schedule(store.text("Станет", "After"), proposal.after, highlighted: true)
       }
       .padding(.top, 12)
       if !proposal.reason.isEmpty {
-        Text(proposal.reason).ritmFont(11, lineSpacing: 7).foregroundStyle(RitmTheme.muted).padding(.top, 10)
-          .textSelection(.enabled)
+        Text(proposal.reason).ritmFont(11, lineSpacing: 4.5).foregroundStyle(RitmTheme.muted).padding(.top, 10)
       }
     }
     .padding(12)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(
-      proposal.status == .rejected || proposal.status == .undone ? RitmTheme.field : RitmTheme.panel,
-      in: RoundedRectangle(cornerRadius: 11, style: .circular)
-    )
-    .overlay { RoundedRectangle(cornerRadius: 11, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1) }
+    .assistantBox(proposal.status == .rejected || proposal.status == .undone ? RitmTheme.field : RitmTheme.panel, radius: 11)
   }
 
   private func schedule(_ label: String, _ value: ScheduleTime, highlighted: Bool = false) -> some View {
@@ -305,9 +324,10 @@ private struct ProposalCard: View {
         .foregroundStyle(highlighted ? RitmTheme.accentColor : RitmTheme.text)
       Text(
         (value.date.map { FeatureDate.label($0, zone: store.timeZone, language: store.language) } ?? store.text("Без даты", "No date"))
-          + " · \(value.duration) " + store.text("мин", "min"))
-        .ritmFont(10)
-        .foregroundStyle(RitmTheme.muted)
+          + " · \(value.duration) " + store.text("мин", "min")
+      )
+      .ritmFont(10)
+      .foregroundStyle(RitmTheme.muted)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
@@ -341,143 +361,6 @@ private struct ProposalCard: View {
     if let updated {
       selected.subtract(ids)
       onConversation(updated)
-    }
-  }
-}
-
-/// `.idea-review`: the joint view first, then each expert behind a disclosure.
-private struct IdeaReviewView: View {
-  let report: IdeaReviewReport
-  let selected: Bool
-  let disabled: Bool
-  let superseded: Bool
-  let onDiscuss: (Bool) -> Void
-  @Environment(RitmStore.self) private var store
-
-  var body: some View {
-    let synthesis = report.synthesis
-    return VStack(alignment: .leading, spacing: 12) {
-      VStack(alignment: .leading, spacing: 10) {
-        HStack(spacing: 8) {
-          Image(systemName: "lightbulb").font(.system(size: 16)).foregroundStyle(RitmTheme.accentColor)
-          Text(store.text("Общее мнение", "Overall view")).ritmFont(14, weight: .bold).foregroundStyle(RitmTheme.text)
-          Spacer(minLength: 0)
-          if let discussion = report.discussion {
-            Text(store.text("Оценка №\(discussion.round)", "Review #\(discussion.round)"))
-              .ritmFont(10, weight: .semibold)
-              .foregroundStyle(RitmTheme.accentColor)
-              .padding(.vertical, 3)
-              .padding(.horizontal, 7)
-              .background(RitmTheme.soft, in: Capsule())
-          }
-        }
-        verdictChip(synthesis.verdict)
-        Text(synthesis.summary).ritmFont(13, lineSpacing: 7).foregroundStyle(RitmTheme.text).textSelection(.enabled)
-        if let discussion = report.discussion {
-          list(store.text("Что изменилось после ваших ответов", "What changed after your answers"), discussion.changes)
-          if discussion.verdictChanges.isEmpty {
-            Text(store.text("Итоговые оценки экспертов остались прежними; аргументы обновлены выше.", "The experts' verdicts stayed the same; the arguments above were updated."))
-              .ritmFont(10, lineSpacing: 3)
-              .foregroundStyle(RitmTheme.muted)
-          } else {
-            VStack(alignment: .leading, spacing: 4) {
-              Text(store.text("Пересмотренные оценки", "Revised verdicts")).ritmFont(11, weight: .semibold).foregroundStyle(RitmTheme.text)
-              ForEach(discussion.verdictChanges) { change in
-                Text(IdeaText.role(change.id, store: store) + ": " + IdeaText.verdict(change.before, store: store) + " → " + IdeaText.verdict(change.after, store: store))
-                  .ritmFont(11)
-                  .foregroundStyle(RitmTheme.muted)
-              }
-            }
-          }
-        }
-        list(store.text("В чём согласны", "Where they agree"), synthesis.agreements)
-        list(store.text("Где мнения расходятся", "Where they disagree"), synthesis.disagreements)
-        list(store.text("Что нужно уточнить", "What to clarify"), synthesis.questions, numbered: true)
-        if !synthesis.questions.isEmpty && !superseded {
-          Button(store.text("Ответить на вопросы", "Answer the questions")) { onDiscuss(true) }
-            .buttonStyle(RitmTextButtonStyle(size: 12))
-            .disabled(disabled)
-        }
-        list(store.text("Следующие шаги", "Next steps"), synthesis.nextSteps)
-      }
-      .padding(14)
-      .background(RitmTheme.panel, in: RoundedRectangle(cornerRadius: 14, style: .circular))
-      .overlay { RoundedRectangle(cornerRadius: 14, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1) }
-      ForEach(report.experts) { expert in
-        DisclosureGroup {
-          VStack(alignment: .leading, spacing: 10) {
-            Text(expert.summary).ritmFont(12, lineSpacing: 6).foregroundStyle(RitmTheme.text).textSelection(.enabled)
-            list(store.text("Сильные стороны", "Strengths"), expert.strengths)
-            list(store.text("Сомнения", "Concerns"), expert.concerns)
-            list(store.text("Предположения", "Assumptions"), expert.assumptions)
-            VStack(alignment: .leading, spacing: 4) {
-              Text(store.text("Первая проверка", "First test")).ritmFont(11, weight: .semibold).foregroundStyle(RitmTheme.text)
-              Text(expert.firstTest).ritmFont(12, lineSpacing: 5).foregroundStyle(RitmTheme.muted).textSelection(.enabled)
-            }
-          }
-          .padding(.top, 8)
-          .frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-          HStack(spacing: 8) {
-            Text(IdeaText.role(expert.id, store: store)).ritmFont(12, weight: .bold).foregroundStyle(RitmTheme.text)
-            Text(IdeaText.verdict(expert.verdict, store: store)).ritmFont(11).foregroundStyle(RitmTheme.muted)
-          }
-          .frame(minHeight: 44)
-        }
-        .tint(RitmTheme.accentColor)
-        .padding(.horizontal, 12)
-        .background(RitmTheme.field, in: RoundedRectangle(cornerRadius: 12, style: .circular))
-        .overlay { RoundedRectangle(cornerRadius: 12, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1) }
-      }
-      Text(
-        report.discussion != nil
-          ? store.text("Модель: \(report.model). Каждый эксперт учитывает исходную идею, ваши уточнения и только свои прежние оценки. Общий вывод собирается после их ответов. Факты в интернете не проверяются.", "Model: \(report.model). Each expert considers the original idea, your clarifications and only their own earlier assessments. The joint view is built after their answers. Facts are not checked on the internet.")
-          : store.text("Модель: \(report.model). Каждый эксперт получает исходную идею отдельным запросом, без ответов остальных. Общий вывод собирается после их оценок. Факты в интернете не проверяются.", "Model: \(report.model). Each expert gets the original idea in a separate request, without the others' answers. The joint view is built after their assessments. Facts are not checked on the internet.")
-      )
-      .ritmFont(10, lineSpacing: 3)
-      .foregroundStyle(RitmTheme.muted)
-      VStack(alignment: .leading, spacing: 6) {
-        Button {
-          onDiscuss(false)
-        } label: {
-          Label(selected ? store.text("Обсуждение выбрано", "Discussion selected") : store.text("Обсудить с экспертами", "Discuss with the experts"), systemImage: "bubble.left")
-        }
-        .buttonStyle(RitmSecondaryButtonStyle())
-        .disabled(disabled || superseded)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        if superseded {
-          Text(store.text("Есть более новая оценка этой идеи — продолжите обсуждение под ней.", "There is a newer review of this idea — continue the discussion under it."))
-            .ritmFont(11).foregroundStyle(RitmTheme.muted)
-        } else if (report.discussion?.round ?? 1) >= AssistantPlan.discussionRounds {
-          Text(store.text("Достигнуто 8 оценок этой идеи. Начните новый разбор с её обновлённым описанием.", "This idea has reached 8 reviews. Start a new review with its updated description."))
-            .ritmFont(11).foregroundStyle(RitmTheme.muted)
-        }
-      }
-    }
-    .accessibilityElement(children: .contain)
-    .accessibilityLabel(store.text("Разбор идеи независимыми ИИ-экспертами", "Idea review by independent AI experts"))
-  }
-
-  private func verdictChip(_ verdict: IdeaVerdict) -> some View {
-    Text(IdeaText.verdict(verdict, store: store))
-      .ritmFont(11, weight: .semibold)
-      .foregroundStyle(verdict == .weak ? RitmTheme.danger : RitmTheme.accentColor)
-      .padding(.vertical, 4)
-      .padding(.horizontal, 9)
-      .background(verdict == .weak ? RitmTheme.dangerSoft : RitmTheme.soft, in: Capsule())
-  }
-
-  @ViewBuilder private func list(_ title: String, _ items: [String], numbered: Bool = false) -> some View {
-    if !items.isEmpty {
-      VStack(alignment: .leading, spacing: 4) {
-        Text(title).ritmFont(11, weight: .semibold).foregroundStyle(RitmTheme.text)
-        ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-          Text((numbered ? "\(index + 1). " : "• ") + item)
-            .ritmFont(12, lineSpacing: 5)
-            .foregroundStyle(RitmTheme.muted)
-            .textSelection(.enabled)
-        }
-      }
     }
   }
 }

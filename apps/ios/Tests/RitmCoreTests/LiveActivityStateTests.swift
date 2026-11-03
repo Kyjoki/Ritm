@@ -32,9 +32,9 @@ final class LiveActivityStateTests: XCTestCase {
     rest.start(now: t0)
     let c = content(state(rest: rest, done: 1), now: t0.addingTimeInterval(10))
     XCTAssertEqual(c.phase, .rest)
-    XCTAssertEqual(c.restEndDate, t0.addingTimeInterval(90))
+    XCTAssertEqual(c.restEndDate, t0.addingTimeInterval(180))
     XCTAssertEqual(c.setNumber, 2)
-    XCTAssertEqual(c.staleDate, t0.addingTimeInterval(90 + LiveActivityContent.restStaleGrace))
+    XCTAssertEqual(c.staleDate, t0.addingTimeInterval(180 + LiveActivityContent.restStaleGrace))
   }
 
   func testPausedRestKeepsStaticRemaining() {
@@ -44,7 +44,7 @@ final class LiveActivityStateTests: XCTestCase {
     let c = content(state(rest: rest), now: t0.addingTimeInterval(400))
     XCTAssertEqual(c.phase, .paused)
     XCTAssertNil(c.restEndDate)
-    XCTAssertEqual(c.pausedRestSeconds, 60)
+    XCTAssertEqual(c.pausedRestSeconds, 150)
   }
 
   func testPrivacyHidesWeights() {

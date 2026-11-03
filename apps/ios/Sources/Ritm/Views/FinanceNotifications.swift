@@ -51,7 +51,7 @@ final class FinanceNoticeCenter {
   }
 
   /// RitmStore.write brackets every confirmed write with these, including the reload that
-  /// follows it, so the owner's own saved operation never raises a banner or an unread badge.
+  /// follows it. Own writes raise notices like any other new entry.
   func beginOwnWrite() { ownWriteActive = true }
   func endOwnWrite() { ownWriteActive = false }
 
@@ -85,12 +85,9 @@ final class FinanceNoticeCenter {
     }
     let fresh = FinanceNotices.notices(entries, since: baseline, cards: cards)
     let unseen = primed ? fresh.filter { !seenIDs.contains($0.id) } : []
-    // Entries that arrive during the app's own write are the owner's own: no banner, no badge.
-    if ownWriteActive, !unseen.isEmpty {
-      readIDs.formUnion(unseen.map(\.id))
-      persistRead()
-    }
-    let arrival = ownWriteActive ? nil : unseen.first
+    // As in the prototype, an operation the owner adds themselves is a notice too: the banner
+    // slides in, the bell gets a badge and the list gets a row.
+    let arrival = unseen.first
     seenIDs = ids
     primed = true
     notices = fresh
@@ -231,7 +228,8 @@ extension FinanceNoticeCenter {
 
 // MARK: - Bell
 
-/// The header bell: unread count badge, and the anchor of the notification popover.
+/// The header bell (`.icon-btn` + `.badge`): unread count badge, and the anchor of the
+/// notification popover.
 struct FinanceBellButton: View {
   @Environment(RitmStore.self) private var store
   @Environment(\.ritmPageActive) private var pageActive
@@ -242,33 +240,48 @@ struct FinanceBellButton: View {
     Button {
       center.togglePopover()
     } label: {
-      Image(systemName: "bell")
-        .font(.system(size: 18))
+      RitmIcon(.bell)
+        .font(.system(size: 20))
         .foregroundStyle(center.isOpen ? RitmTheme.accentColor : RitmTheme.muted)
         .frame(width: 44, height: 44)
-        .ritmGlass(in: Circle(), interactive: true)
+        .ritmFloatingGlass(in: Circle(), interactive: true)
         .contentShape(Circle())
-        .overlay(alignment: .topTrailing) {
-          if unread > 0 {
-            Text(unread > 9 ? "9+" : "\(unread)")
-              .ritmFont(10, weight: .bold)
-              .foregroundStyle(RitmTheme.accentInk)
-              .padding(.horizontal, 4)
-              .frame(minWidth: 17, minHeight: 17)
-              .background(RitmTheme.accentColor, in: Capsule())
-              .offset(x: 4, y: -4)
-              .accessibilityHidden(true)
-          }
-        }
     }
     .buttonStyle(RitmGlassButtonStyle())
     .background { frameReader }
+    // The badge is an overlay at the corner (`.badge { top: -4px; right: -4px }`): it never
+    // changes the bell's or the header's layout, it only scales in when the count changes.
+    .overlay(alignment: .topTrailing) {
+      ZStack {
+        if unread > 0 {
+          badge(unread)
+            .id(unread)
+            .transition(.scale(scale: 0.5).combined(with: .opacity))
+        }
+      }
+      .animation(.easeOut(duration: 0.2), value: unread)
+      .allowsHitTesting(false)
+    }
     .accessibilityLabel(
       unread > 0
         ? store.text("Уведомления, непрочитанных: \(unread)", "Notifications, unread: \(unread)")
         : store.text("Уведомления", "Notifications")
     )
     .accessibilityValue(center.isOpen ? store.text("Открыто", "Open") : "")
+  }
+
+  /// `.badge`: 19 pt minimum, 10.5 pt bold, a 2 pt ring in the page colour, 4 pt out of the corner.
+  private func badge(_ unread: Int) -> some View {
+    Text(unread > 9 ? "9+" : "\(unread)")
+      .ritmFont(10.5, weight: .bold)
+      .monospacedDigit()
+      .foregroundStyle(RitmTheme.accentInk)
+      .padding(.horizontal, 5)
+      .frame(minWidth: 19, minHeight: 19)
+      .background(RitmTheme.accentColor, in: Capsule())
+      .overlay { Capsule().strokeBorder(RitmTheme.background, lineWidth: 2) }
+      .offset(x: 4, y: -4)
+      .accessibilityHidden(true)
   }
 
   private var frameReader: some View {
@@ -297,8 +310,9 @@ struct FinanceNotificationOverlay: View {
   let openNotice: (FinanceNotice) -> Void
   let openSettings: () -> Void
 
-  private static let headerHeight: CGFloat = 62
-  private static let bannerTop: CGFloat = headerHeight + 6
+  /// The top bar's row; the banner sits right under it (`.banner { top: 104px }`).
+  private static let headerHeight: CGFloat = 56
+  private static let bannerTop: CGFloat = headerHeight + 1
 
   /// The popover inflates out of the bell in 0.30 s with a tiny overshoot
   /// (cubic-bezier(.34, 1.32, .5, 1), about 3 %) and shrinks back in 0.18 s, plain ease-out.
@@ -309,14 +323,15 @@ struct FinanceNotificationOverlay: View {
       : .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.18)
   }
 
-  /// The banner inflates from its own centre like the popover (0.30 s, about 3 % overshoot) and
-  /// shrinks back into it while fading, slowly and evenly (0.46 s ease-in-out), after 2 s on screen.
+  /// MOTION.md §5: the banner slides down from under the top bar while fading in (0.26 s,
+  /// ease-out) and, after 2 s on screen, leaves upward in 0.2 s.
   private func bannerMotion(arriving: Bool) -> Animation {
     if reduceMotion { return .easeOut(duration: 0.12) }
-    return arriving
-      ? .timingCurve(0.34, 1.32, 0.5, 1, duration: 0.30)
-      : .timingCurve(0.65, 0, 0.35, 1, duration: 0.46)
+    return arriving ? RitmMotion.easeOut(0.26) : .easeIn(duration: 0.2)
   }
+
+  /// How far the banner travels: from behind the top bar.
+  private static let bannerTravel: CGFloat = 56
 
   var body: some View {
     let center = store.notices
@@ -346,106 +361,63 @@ struct FinanceNotificationOverlay: View {
           notice: banner, open: { openNotice(banner) }, close: { center.dismissBanner() }
         )
         .id(banner.id)
-        // The transition lives on the banner itself, so it scales about the banner's centre.
         .transition(
-          reduceMotion ? .opacity : .scale(scale: 0.4, anchor: .center).combined(with: .opacity))
+          reduceMotion
+            ? .opacity : .offset(y: -Self.bannerTravel).combined(with: .opacity))
       }
     }
-    .padding(.horizontal, 16)
+    .padding(.horizontal, 12)
     .padding(.top, Self.bannerTop)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     .animation(bannerMotion(arriving: visible != nil), value: visible?.id)
   }
 
+  /// `.pop`: 12 pt from both edges, 11 pt under the bell, at most 520 pt tall and clear of the bar.
   private func popover(_ center: FinanceNoticeCenter, in proxy: GeometryProxy) -> some View {
     let size = proxy.size
     let origin = proxy.frame(in: .global).origin
     let bell =
       center.bellFrame == .zero
-      ? CGRect(x: size.width - 112, y: 9, width: 44, height: 44)
+      ? CGRect(x: size.width - 94, y: 0, width: 44, height: 44)
       : center.bellFrame.offsetBy(dx: -origin.x, dy: -origin.y)
-    let width = min(340, size.width - 24)
-    // The popover's right edge lines up with the header's (bell + gap + theme toggle).
-    let left = min(max(bell.maxX + 52 - width, 12), size.width - width - 12)
-    let top = bell.maxY + 2
+    let width = size.width - 24
+    let top = bell.maxY + 11
     // The bell's centre, as a point of the full-size wrapper the transition scales.
     let anchor = UnitPoint(x: bell.midX / max(size.width, 1), y: bell.midY / max(size.height, 1))
-    let listLimit = max(120, min(380, size.height - top - 112 - 150))
-    return FinancePopover(
-      width: width, notchX: bell.midX - left, listLimit: listLimit, openNotice: openNotice,
-      openSettings: openSettings
-    )
-    .padding(.leading, left)
-    .padding(.top, top)
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    // Scaling the full-size wrapper about the bell's centre scales the popover about the bell,
-    // so it grows out of the bell (the notch with it) and closes back into it.
-    .transition(
-      reduceMotion ? .opacity : .scale(scale: 0.4, anchor: anchor).combined(with: .opacity))
+    let maxHeight = min(520, size.height - top - 118)
+    return FinancePopover(width: width, maxHeight: maxHeight, openNotice: openNotice, openSettings: openSettings)
+      .padding(.leading, 12)
+      .padding(.top, top)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+      // Scaling the full-size wrapper about the bell's centre scales the popover about the bell,
+      // so it grows out of the bell and closes back into it.
+      .transition(
+        reduceMotion ? .opacity : .scale(scale: 0.4, anchor: anchor).combined(with: .opacity))
   }
 }
 
-/// A rounded panel whose top edge carries a small notch pointing at the bell.
-private struct FinancePopoverShape: Shape {
-  static let notchHeight: CGFloat = 7
-  let notchX: CGFloat
-  var cornerRadius: CGFloat = 22
-
-  func path(in rect: CGRect) -> Path {
-    let top = rect.minY + Self.notchHeight
-    let radius = cornerRadius
-    let half: CGFloat = 8
-    let tip = min(max(notchX, rect.minX + radius + half), rect.maxX - radius - half)
-    var path = Path()
-    path.move(to: CGPoint(x: rect.minX + radius, y: top))
-    path.addLine(to: CGPoint(x: tip - half, y: top))
-    path.addLine(to: CGPoint(x: tip, y: rect.minY))
-    path.addLine(to: CGPoint(x: tip + half, y: top))
-    path.addLine(to: CGPoint(x: rect.maxX - radius, y: top))
-    path.addArc(
-      tangent1End: CGPoint(x: rect.maxX, y: top),
-      tangent2End: CGPoint(x: rect.maxX, y: top + radius), radius: radius)
-    path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
-    path.addArc(
-      tangent1End: CGPoint(x: rect.maxX, y: rect.maxY),
-      tangent2End: CGPoint(x: rect.maxX - radius, y: rect.maxY), radius: radius)
-    path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.maxY))
-    path.addArc(
-      tangent1End: CGPoint(x: rect.minX, y: rect.maxY),
-      tangent2End: CGPoint(x: rect.minX, y: rect.maxY - radius), radius: radius)
-    path.addLine(to: CGPoint(x: rect.minX, y: top + radius))
-    path.addArc(
-      tangent1End: CGPoint(x: rect.minX, y: top),
-      tangent2End: CGPoint(x: rect.minX + radius, y: top), radius: radius)
-    path.closeSubpath()
-    return path
-  }
-}
-
+/// The notification panel (`.pop`): glass, radius 22, a header with the count and «Прочитать все»,
+/// the list, and the «Настройки уведомлений» row.
 private struct FinancePopover: View {
   @Environment(RitmStore.self) private var store
   let width: CGFloat
-  let notchX: CGFloat
-  let listLimit: CGFloat
+  let maxHeight: CGFloat
   let openNotice: (FinanceNotice) -> Void
   let openSettings: () -> Void
 
   var body: some View {
     let center = store.notices
-    let shape = FinancePopoverShape(notchX: notchX)
+    let shape = RoundedRectangle(cornerRadius: 22, style: .circular)
     VStack(spacing: 0) {
       header(center)
-      separator
       list(center)
-      separator
       footer
     }
-    .padding(.top, FinancePopoverShape.notchHeight)
     .frame(width: width)
     .clipShape(shape)
     // A dense under-layer keeps the rows readable on any content behind the glass.
     .background(RitmTheme.glassDense.opacity(0.6), in: shape)
-    .ritmGlass(in: shape)
+    .ritmFloatingGlass(in: shape)
     .accessibilityElement(children: .contain)
     .accessibilityAddTraits(.isModal)
     .accessibilityLabel(store.text("Уведомления", "Notifications"))
@@ -453,137 +425,132 @@ private struct FinancePopover: View {
   }
 
   private var separator: some View {
-    Rectangle().fill(RitmTheme.line).frame(height: 1).padding(.horizontal, 16)
+    Rectangle().fill(RitmTheme.line).frame(height: 1)
   }
 
+  /// `.pop-h`: 17 pt title, the count badge, and the ghost «Прочитать все» (44 pt) at the end.
   private func header(_ center: FinanceNoticeCenter) -> some View {
     let unread = center.unreadCount
-    let title = HStack(spacing: 8) {
+    return HStack(spacing: 8) {
       Text(store.text("Уведомления", "Notifications"))
-        .ritmFont(18, weight: .semibold, tracking: -0.02)
+        .ritmFont(17, weight: .semibold, tracking: -0.04)
         .foregroundStyle(RitmTheme.text)
         .lineLimit(1)
         .accessibilityAddTraits(.isHeader)
       if unread > 0 {
         Text("\(unread)")
-          .ritmFont(11, weight: .bold)
+          .ritmFont(11.5, weight: .bold)
           .foregroundStyle(RitmTheme.accentInk)
           .padding(.horizontal, 7)
-          .frame(minWidth: 22, minHeight: 20)
+          .frame(minWidth: 22, minHeight: 22)
           .background(RitmTheme.accentColor, in: Capsule())
           .accessibilityHidden(true)
       }
-    }
-    let readAll = Button {
-      center.markAllRead()
-    } label: {
-      HStack(spacing: 6) {
-        Image(systemName: "checkmark.circle").font(.system(size: 14))
-        Text(store.text("Прочитать все", "Mark all read")).ritmFont(11, weight: .medium).lineLimit(1)
-      }
-      .foregroundStyle(RitmTheme.accentColor)
-      .padding(.horizontal, 10)
-      .frame(minHeight: 44)
-      .ritmGlassThumb(in: Capsule())
-      .contentShape(Capsule())
-    }
-    .buttonStyle(RitmPressStyle())
-    .disabled(unread == 0)
-    .opacity(unread == 0 ? 0.5 : 1)
-    let closeButton = Button {
-      center.closePopover()
-    } label: {
-      Image(systemName: "xmark")
-        .font(.system(size: 14, weight: .semibold))
-        .foregroundStyle(RitmTheme.muted)
-        .frame(width: 44, height: 44)
-        .contentShape(Rectangle())
-    }
-    .buttonStyle(RitmPressStyle())
-    .accessibilityLabel(store.text("Закрыть уведомления", "Close notifications"))
-    return ViewThatFits(in: .horizontal) {
-      HStack(spacing: 4) {
-        title
-        Spacer(minLength: 4)
-        readAll
-        closeButton
-      }
-      VStack(alignment: .leading, spacing: 0) {
-        HStack(spacing: 4) {
-          title
-          Spacer(minLength: 4)
-          closeButton
+      Spacer(minLength: 4)
+      Button {
+        center.markAllRead()
+      } label: {
+        HStack(spacing: 6) {
+          RitmIcon(.check).font(.system(size: 16))
+          Text(store.text("Прочитать все", "Mark all read"))
+            .ritmFont(11.5, weight: .semibold)
+            .lineLimit(1)
         }
-        readAll
+        .foregroundStyle(RitmTheme.accentColor)
+        .padding(.horizontal, 12)
+        .frame(minHeight: 44)
+        .background {
+          Capsule().fill(RitmGlassTokens.buttonFill)
+          Capsule().strokeBorder(RitmTheme.line, lineWidth: 1)
+        }
+        .contentShape(Capsule())
       }
+      .buttonStyle(RitmPressStyle())
+      .disabled(unread == 0)
+      .opacity(unread == 0 ? 0.5 : 1)
     }
     .padding(.leading, 16)
-    .padding(.trailing, 6)
-    .padding(.vertical, 2)
+    .padding(.trailing, 14)
+    .padding(.top, 12)
+    .padding(.bottom, 8)
   }
 
   @ViewBuilder private func list(_ center: FinanceNoticeCenter) -> some View {
     if center.notices.isEmpty {
       Text(store.text("Новых операций пока нет.", "No new activity yet."))
-        .ritmText(.body)
+        .ritmFont(12.5)
         .foregroundStyle(RitmTheme.muted)
-        .frame(maxWidth: .infinity, minHeight: 88, alignment: .center)
-        .padding(.horizontal, 16)
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 18)
     } else {
-      let rows = VStack(spacing: 0) {
-        ForEach(Array(center.notices.enumerated()), id: \.element.id) { index, notice in
-          FinanceNoticeRow(notice: notice, separated: index > 0) { openNotice(notice) }
+      // `.nlist`: the rows scroll when the panel hits its height limit.
+      ScrollView {
+        VStack(spacing: 0) {
+          ForEach(Array(center.notices.enumerated()), id: \.element.id) { index, notice in
+            FinanceNoticeRow(notice: notice, separated: index > 0) { openNotice(notice) }
+          }
         }
+        .padding(.horizontal, 8)
       }
-      ViewThatFits(in: .vertical) {
-        rows
-        ScrollView { rows }.scrollBounceBehavior(.basedOnSize)
-      }
-      .frame(maxHeight: listLimit)
+      .scrollBounceBehavior(.basedOnSize)
+      // The panel is as tall as its rows, up to the limit; header and footer take 117 pt.
+      .frame(maxHeight: max(88, maxHeight - 117))
     }
   }
 
+  /// `.pop-foot`: 52 pt, a hairline above, the label, a chevron.
   private var footer: some View {
-    Button(action: openSettings) {
-      HStack(spacing: 12) {
-        Image(systemName: "gearshape")
-          .font(.system(size: 18))
-          .foregroundStyle(RitmTheme.muted)
-          .frame(width: 26)
-          .accessibilityHidden(true)
-        Text(store.text("Настройки уведомлений", "Notification settings"))
-          .ritmFont(13, weight: .medium)
-          .foregroundStyle(RitmTheme.text)
-        Spacer(minLength: 8)
-        Image(systemName: "chevron.right")
-          .font(.system(size: 12, weight: .semibold))
-          .foregroundStyle(RitmTheme.muted)
-          .accessibilityHidden(true)
+    VStack(spacing: 0) {
+      separator
+      Button(action: openSettings) {
+        HStack(spacing: 12) {
+          RitmIcon(.sliders)
+            .font(.system(size: 20))
+            .foregroundStyle(RitmTheme.muted)
+            .accessibilityHidden(true)
+          Text(store.text("Настройки уведомлений", "Notification settings"))
+            .ritmFont(13, weight: .semibold)
+            .foregroundStyle(RitmTheme.text)
+          Spacer(minLength: 8)
+          RitmIcon(.chev)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(RitmTheme.muted)
+            .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 52)
+        .contentShape(Rectangle())
       }
-      .padding(.horizontal, 16)
-      .frame(minHeight: 52)
-      .contentShape(Rectangle())
+      .buttonStyle(RitmPressStyle(scale: 0.985))
     }
-    .buttonStyle(RitmPressStyle(scale: 0.985))
   }
 }
 
+/// `.ico-tile` / `.b-ico`: a soft rounded tile with the accent glyph; income gets the green one.
 private struct FinanceNoticeIcon: View {
   let symbol: String
   let size: CGFloat
+  let radius: CGFloat
+  var income = false
 
   var body: some View {
-    let shape = RoundedRectangle(cornerRadius: 14, style: .circular)
-    Image(systemName: symbol)
-      .font(.system(size: size * 0.4, weight: .regular))
-      .foregroundStyle(RitmTheme.accentColor)
+    let shape = RoundedRectangle(cornerRadius: radius, style: .circular)
+    RitmSymbol(symbol)
+      .font(.system(size: size * 0.5))
+      .foregroundStyle(income ? Self.incomeInk : RitmTheme.accentColor)
       .frame(width: size, height: size)
-      .background(RitmTheme.soft, in: shape)
-      .overlay { shape.strokeBorder(RitmTheme.line, lineWidth: 1) }
+      .background(income ? Self.incomeBackground : RitmTheme.soft, in: shape)
       .accessibilityHidden(true)
   }
+
+  static var incomeInk: Color { Color(light: 0x2A7F66, dark: 0x86D4B6) }
+  static var incomeBackground: Color { Color(rgb: 0x74BD9E, opacity: 0.16) }
 }
 
+/// `.n-item`: icon 40, title and meta, amount over the unread dot, chevron; 64 pt tall with a
+/// hairline between rows.
 private struct FinanceNoticeRow: View {
   @Environment(RitmStore.self) private var store
   let notice: FinanceNotice
@@ -595,47 +562,44 @@ private struct FinanceNoticeRow: View {
     let line = center.line(for: notice, store: store)
     let unread = !center.isRead(notice.id)
     Button(action: action) {
-      HStack(spacing: 12) {
-        FinanceNoticeIcon(symbol: line.symbol, size: 44)
-        VStack(alignment: .leading, spacing: 3) {
+      HStack(spacing: 10) {
+        FinanceNoticeIcon(
+          symbol: line.symbol, size: 40, radius: 12, income: notice.kind == .income)
+        VStack(alignment: .leading, spacing: 1) {
           Text(line.title)
-            .ritmFont(14, weight: .semibold, tracking: -0.01)
+            .ritmFont(13, weight: .bold, tracking: -0.02)
             .foregroundStyle(RitmTheme.text)
-            .lineLimit(2)
+            .lineLimit(1)
           Text(line.detail)
             .ritmFont(11)
             .foregroundStyle(RitmTheme.muted)
-            .lineLimit(2)
+            .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        VStack(alignment: .trailing, spacing: 6) {
+        VStack(alignment: .trailing, spacing: 5) {
           Text(line.amount)
-            .ritmFont(13, weight: .semibold)
+            .ritmFont(13, weight: .bold, tracking: -0.02)
             .monospacedDigit()
-            .foregroundStyle(notice.kind == .transfer ? RitmTheme.muted : RitmTheme.text)
+            .foregroundStyle(amountColor)
             .lineLimit(1)
             .minimumScaleFactor(0.6)
             .layoutPriority(1)
-          HStack(spacing: 8) {
-            if unread {
-              Circle().fill(RitmTheme.accentColor).frame(width: 8, height: 8)
-            }
-            Image(systemName: "chevron.right")
-              .font(.system(size: 11, weight: .semibold))
-              .foregroundStyle(RitmTheme.muted)
-          }
+          Circle()
+            .fill(unread ? RitmTheme.accentColor : Color.clear)
+            .frame(width: 9, height: 9)
         }
+        RitmIcon(.chev)
+          .font(.system(size: 14, weight: .semibold))
+          .foregroundStyle(RitmTheme.muted)
+          .frame(width: 16)
       }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 10)
+      .padding(8)
       .frame(minHeight: 64)
       .contentShape(Rectangle())
     }
     .buttonStyle(RitmPressStyle(scale: 0.985))
     .overlay(alignment: .top) {
-      if separated {
-        Rectangle().fill(RitmTheme.line).frame(height: 1).padding(.horizontal, 16)
-      }
+      if separated { Rectangle().fill(RitmTheme.line).frame(height: 1) }
     }
     .accessibilityLabel(
       [line.title, line.amount, line.detail]
@@ -643,10 +607,20 @@ private struct FinanceNoticeRow: View {
         + (unread ? ", " + store.text("не прочитано", "unread") : ""))
     .accessibilityHint(store.text("Открыть в разделе «Финансы»", "Open in Finance"))
   }
+
+  private var amountColor: Color {
+    switch notice.kind {
+    case .income: FinanceNoticeIcon.incomeInk
+    case .transfer: RitmTheme.muted
+    default: RitmTheme.text
+    }
+  }
 }
 
 // MARK: - Banner
 
+/// `.banner`: glass, radius 24, a 48 pt icon tile, «Операция добавлена», the amount at 20 pt,
+/// the subtitle; «Сейчас» and a 44 pt close button in the right column.
 private struct FinanceBanner: View {
   @Environment(RitmStore.self) private var store
   let notice: FinanceNotice
@@ -657,19 +631,21 @@ private struct FinanceBanner: View {
     let line = store.notices.line(for: notice, store: store)
     let kicker = store.text("Операция добавлена", "Transaction added")
     let spoken = [kicker, line.amount, line.subtitle].joined(separator: ", ")
-    let shape = RoundedRectangle(cornerRadius: 22, style: .circular)
+    let shape = RoundedRectangle(cornerRadius: 24, style: .circular)
     // The close control has its own column, so the rest of the banner is one tap target.
     HStack(alignment: .top, spacing: 0) {
       Button(action: open) {
         HStack(spacing: 12) {
-          FinanceNoticeIcon(symbol: line.symbol, size: 48)
-          VStack(alignment: .leading, spacing: 2) {
+          FinanceNoticeIcon(
+            symbol: line.symbol, size: 48, radius: 14, income: notice.kind == .income)
+          VStack(alignment: .leading, spacing: 0) {
             Text(kicker)
-              .ritmFont(11, weight: .medium)
+              .ritmFont(11.5)
               .foregroundStyle(RitmTheme.muted)
-              .lineLimit(2)
+              .lineLimit(1)
             Text(line.amount)
-              .ritmFont(20, weight: .semibold, tracking: -0.02)
+              .ritmFont(20, weight: .bold, tracking: -0.045)
+              .monospacedDigit()
               .foregroundStyle(RitmTheme.text)
               .lineLimit(1)
               .minimumScaleFactor(0.7)
@@ -679,14 +655,15 @@ private struct FinanceBanner: View {
               .lineLimit(1)
           }
           Spacer(minLength: 0)
-          Image(systemName: "chevron.right")
-            .font(.system(size: 12, weight: .semibold))
+          RitmIcon(.chev)
+            .font(.system(size: 14, weight: .semibold))
             .foregroundStyle(RitmTheme.muted)
+            .frame(width: 16)
         }
         .padding(.vertical, 12)
         .padding(.leading, 12)
         .padding(.trailing, 4)
-        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
       }
       .buttonStyle(RitmPressStyle(scale: 0.985))
@@ -696,26 +673,26 @@ private struct FinanceBanner: View {
         Text(store.text("Сейчас", "Now"))
           .ritmFont(11)
           .foregroundStyle(RitmTheme.muted)
-          .padding(.top, 8)
-          .padding(.trailing, 10)
+          .padding(.trailing, 4)
           .accessibilityHidden(true)
+        Spacer(minLength: 0)
         Button(action: close) {
-          Image(systemName: "xmark")
-            .font(.system(size: 12, weight: .semibold))
+          RitmIcon(.close)
+            .font(.system(size: 20))
             .foregroundStyle(RitmTheme.muted)
-            .frame(width: 28, height: 28)
-            .ritmGlassThumb(in: Circle())
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(RitmPressStyle())
         .accessibilityLabel(store.text("Закрыть", "Close"))
       }
-      .padding(.trailing, 2)
-      .padding(.bottom, 4)
+      .padding(.vertical, 10)
+      .padding(.trailing, 10)
     }
+    // As tall as its content: the right column's spacer must not stretch the banner.
+    .fixedSize(horizontal: false, vertical: true)
     .background(RitmTheme.glassDense.opacity(0.6), in: shape)
-    .ritmGlass(in: shape)
+    .ritmFloatingGlass(in: shape)
     .frame(maxWidth: 520)
     .onAppear {
       UIAccessibility.post(notification: .announcement, argument: spoken)

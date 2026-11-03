@@ -55,6 +55,7 @@ struct WorkoutsView: View {
 /// active workout adds the rest timer as a bottom inset above the navigation bar.
 struct WorkoutPage<Action: View, Bar: View, Content: View>: View {
   @Environment(RitmStore.self) private var store
+  @State private var shellInset: CGFloat = 0
   let title: String
   let action: Action
   let bar: Bar
@@ -91,8 +92,19 @@ struct WorkoutPage<Action: View, Bar: View, Content: View>: View {
       .frame(maxWidth: .infinity)
     }
     .scrollDismissesKeyboard(.interactively)
-    .safeAreaInset(edge: .bottom, spacing: 0) { bar }
+    .safeAreaInset(edge: .bottom, spacing: 0) {
+      // `.wk-tw { bottom: 102px }`: the bar's lower edge sits 102 pt above the screen edge, clear
+      // of the floating navigation bar, whatever room the shell already reserves (`shellInset`).
+      if Bar.self != EmptyView.self {
+        bar.padding(.bottom, max(0, Self.barClearance - shellInset))
+      }
+    }
+    // Outside the inset above: the bottom room the shell reserves for its navigation bar.
+    .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { shellInset = $0 }
   }
+
+  /// 102 pt from the screen edge minus the 8 pt the bar keeps under itself.
+  private static var barClearance: CGFloat { 94 }
 }
 
 extension WorkoutPage where Bar == EmptyView {
@@ -112,7 +124,7 @@ struct WorkoutHeaderButton: View {
 
   var body: some View {
     Button(action: action) {
-      Image(systemName: symbol)
+      RitmSymbol(symbol)
         .font(.system(size: 19))
         .foregroundStyle(prominent ? RitmTheme.ctaInk : RitmTheme.accentColor)
         .frame(width: 44, height: 44)
@@ -124,24 +136,77 @@ struct WorkoutHeaderButton: View {
   }
 }
 
-/// A square 44 pt icon button on a calm card (edit, delete, move).
+/// `.wk-ibtn`: a 44 pt raised tile (radius 14, hairline border) for edit, delete, move and swap.
 struct WorkoutIconButton: View {
   let symbol: String
   let label: String
   var tint: Color = RitmTheme.muted
+  var size: CGFloat = 17
   let action: () -> Void
+  @Environment(\.isEnabled) private var isEnabled
 
   var body: some View {
     Button(action: action) {
-      Image(systemName: symbol)
-        .font(.system(size: 16, weight: .medium))
+      RitmSymbol(symbol)
+        .font(.system(size: size, weight: .medium))
         .foregroundStyle(tint)
         .frame(width: 44, height: 44)
-        .background(RitmTheme.soft.opacity(0.7), in: RoundedRectangle(cornerRadius: 14, style: .circular))
+        .background(RitmTheme.glassRaised, in: RoundedRectangle(cornerRadius: 14, style: .circular))
+        .overlay {
+          RoundedRectangle(cornerRadius: 14, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1)
+        }
         .contentShape(Rectangle())
+        .opacity(isEnabled ? 1 : 0.35)
     }
     .buttonStyle(RitmPressStyle(scale: 0.94))
     .accessibilityLabel(label)
+  }
+}
+
+/// `.wk-rep`: the 44 pt raised rounded-rectangle text button of the editor («Заменить»).
+struct WorkoutRaisedButtonStyle: ButtonStyle {
+  @Environment(\.isEnabled) private var isEnabled
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .ritmFont(12, weight: .semibold)
+      .foregroundStyle(RitmTheme.accentColor)
+      .lineLimit(1)
+      .padding(.horizontal, 8)
+      .frame(minHeight: 44)
+      .background(RitmTheme.glassRaised, in: RoundedRectangle(cornerRadius: 14, style: .circular))
+      .overlay {
+        RoundedRectangle(cornerRadius: 14, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1)
+      }
+      .opacity(isEnabled ? 1 : 0.35)
+      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+      .animation(reduceMotion ? nil : RitmMotion.press, value: configuration.isPressed)
+  }
+}
+
+/// `.empty`: a centred muted line for a list without items.
+struct WorkoutEmptyText: View {
+  let text: String
+
+  var body: some View {
+    Text(text)
+      .ritmFont(12.5).foregroundStyle(RitmTheme.muted)
+      .multilineTextAlignment(.center)
+      .frame(maxWidth: .infinity)
+      .padding(.horizontal, 8).padding(.vertical, 18)
+  }
+}
+
+/// `--income`: the green of a gain against the last workout.
+enum WorkoutColors {
+  static var income: Color { Color(light: 0x2A7F66, dark: 0x86D4B6) }
+}
+
+extension View {
+  /// The label of a `.btn`: 12.5 pt, weight 650 (Inter's bold face).
+  func workoutButtonFont() -> some View {
+    ritmFont(12.5, weight: .bold)
   }
 }
 
@@ -153,12 +218,13 @@ struct WorkoutSectionLabel: View {
 
   var body: some View {
     HStack {
-      Text(title).ritmText(.cardTitle).foregroundStyle(RitmTheme.text)
+      Text(title).ritmFont(16, weight: .semibold, tracking: -0.035).foregroundStyle(RitmTheme.text)
         .accessibilityAddTraits(.isHeader)
       Spacer(minLength: 8)
       if let link {
         Button(action: action) {
-          Text(link).ritmFont(12.5, weight: .semibold).foregroundStyle(RitmTheme.accentColor)
+          Text(link).ritmFont(12.5, weight: .bold).foregroundStyle(RitmTheme.accentColor)
+            .padding(.horizontal, 4)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
@@ -216,7 +282,7 @@ struct WorkoutDangerButtonStyle: ButtonStyle {
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
-      .ritmText(.button)
+      .workoutButtonFont()
       .padding(.horizontal, 14)
       .frame(maxWidth: .infinity, minHeight: 48)
       .foregroundStyle(RitmTheme.danger)

@@ -88,8 +88,8 @@ final class RestTimerCommandsTests: XCTestCase {
     rest.start(now: t0)
     let result = state(rest: rest).applying(.extend(seconds: 30), now: t0.addingTimeInterval(10), expectedVersion: 0)
     XCTAssertEqual(result.outcome, .applied)
-    XCTAssertEqual(result.state.rest.endDate, t0.addingTimeInterval(120))
-    XCTAssertEqual(result.state.rest.remaining(now: t0.addingTimeInterval(10)), 110, accuracy: 0.001)
+    XCTAssertEqual(result.state.rest.endDate, t0.addingTimeInterval(210))
+    XCTAssertEqual(result.state.rest.remaining(now: t0.addingTimeInterval(10)), 200, accuracy: 0.001)
   }
 
   func testExtendWithoutARestStartsOneAndNeverGoesNegative() {
@@ -115,7 +115,7 @@ final class RestTimerCommandsTests: XCTestCase {
     rest.pause(now: t0.addingTimeInterval(30))
     let result = state(rest: rest).applying(.extend(seconds: 30), now: t0.addingTimeInterval(500), expectedVersion: 0)
     XCTAssertEqual(result.state.phase(now: t0.addingTimeInterval(500)), .paused)
-    XCTAssertEqual(result.state.rest.remaining(now: t0.addingTimeInterval(500)), 90, accuracy: 0.001)
+    XCTAssertEqual(result.state.rest.remaining(now: t0.addingTimeInterval(500)), 180, accuracy: 0.001)
   }
 
   func testSkipEndsTheRestAndNeverTicksASet() {

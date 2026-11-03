@@ -12,7 +12,8 @@ struct NativeChatRequest {
   var retryBlocked = false
 }
 
-/// «ИИ-помощник»: src/features/AssistantPage.tsx at 390 px.
+/// «ИИ-помощник» (proto/sections/assistant.js): one scrolling page with the title, the history
+/// panel and the chat panel; the composer is the last block of the chat panel.
 struct AssistantView: View {
   @Environment(RitmStore.self) private var store
   @Environment(RitmNavigation.self) private var navigation
@@ -28,7 +29,10 @@ struct AssistantView: View {
   @State private var deleteTarget: Conversation?
   @State private var initialized = false
   @State private var questionsOpen = false
+  @State private var openExperts: Set<String> = []
   @FocusState private var composerFocused: Bool
+
+  private static let endID = "chat-end"
 
   private var conversations: [Conversation] { store.bootstrap?.conversations ?? [] }
   private var conversation: Conversation? {
@@ -55,17 +59,27 @@ struct AssistantView: View {
   var body: some View {
     ZStack {
       RitmBackground()
-      VStack(alignment: .leading, spacing: 0) {
-        heading.padding(.horizontal, 16).ritmPageReveal(index: 0)
-        if let error = store.errorMessage, pending == nil {
-          RitmErrorBanner(message: error).padding(.horizontal, 16).padding(.bottom, 12)
-        }
-        MutationRecoveryView().padding(.horizontal, 16)
-        if historyOpen { history.padding(.horizontal, 16).padding(.bottom, 9) }
-        chat
+      ScrollViewReader { proxy in
+        ScrollView {
+          VStack(alignment: .leading, spacing: 0) {
+            heading.ritmPageReveal(index: 0)
+            if let error = store.errorMessage, pending == nil {
+              RitmErrorBanner(message: error).padding(.bottom, 12)
+            }
+            MutationRecoveryView()
+            if historyOpen { history.padding(.bottom, 12) }
+            chat.ritmPageReveal(index: 1)
+          }
           .padding(.horizontal, 16)
-          .padding(.bottom, 8)
-          .ritmPageReveal(index: 1)
+          .padding(.bottom, 24)
+          .frame(maxWidth: 700)
+          .frame(maxWidth: .infinity)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .onChange(of: messages.count) { _, _ in
+          withAnimation(reduceMotion ? nil : RitmMotion.ease(0.28)) { proxy.scrollTo(Self.endID, anchor: .bottom) }
+        }
+        .onChange(of: sending) { _, value in if value { proxy.scrollTo(Self.endID, anchor: .bottom) } }
       }
     }
     .toolbar(.hidden, for: .navigationBar)
@@ -102,30 +116,25 @@ struct AssistantView: View {
         Button {
           withAnimation(reduceMotion ? nil : RitmMotion.ease(0.24)) { historyOpen.toggle() }
         } label: {
-          HStack(spacing: 8) {
-            Image(systemName: "clock.arrow.circlepath").font(.system(size: 15))
+          HStack(spacing: 7) {
+            RitmSymbol("clock.arrow.circlepath").font(.system(size: 15))
             Text(store.text("История", "History"))
-            Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
+            RitmSymbol("chevron.down").font(.system(size: 12, weight: .semibold))
               .rotationEffect(.degrees(historyOpen ? 180 : 0))
           }
-          .frame(maxWidth: .infinity)
         }
-        .buttonStyle(RitmSecondaryButtonStyle())
+        .buttonStyle(AssistantButtonStyle())
         .accessibilityAddTraits(historyOpen ? .isSelected : [])
         Button {
           Task { await createConversation() }
         } label: {
-          HStack(spacing: 8) {
-            Image(systemName: "plus").font(.system(size: 14, weight: .semibold))
-            Text(store.text("Новый диалог", "New conversation"))
-          }
-          .frame(maxWidth: .infinity)
+          AssistantButtonLabel(title: store.text("Новый диалог", "New conversation"), symbol: "plus", iconSize: 14)
         }
-        .buttonStyle(RitmSecondaryButtonStyle())
+        .buttonStyle(AssistantButtonStyle())
         .disabled(!store.canWrite || sending)
       }
+      .padding(.bottom, 14)
     }
-    .padding(.bottom, 24)
   }
 
   private var history: some View {
@@ -134,33 +143,30 @@ struct AssistantView: View {
         Text(store.text("Диалоги", "Conversations")).ritmFont(15, weight: .bold).foregroundStyle(RitmTheme.text)
         Spacer()
         Text("\(conversations.count)")
-          .ritmFont(11)
+          .ritmFont(11, weight: .medium)
           .foregroundStyle(RitmTheme.muted)
           .padding(.vertical, 3)
           .padding(.horizontal, 7)
-          .overlay { RoundedRectangle(cornerRadius: 7, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1) }
+          .assistantBox(RitmTheme.panel, radius: 7)
       }
       .padding(.horizontal, 8)
-      .padding(.bottom, 14)
+      .padding(.bottom, 12)
       if conversations.isEmpty {
         VStack(spacing: 8) {
-          Image(systemName: "bubble.left").font(.system(size: 20))
+          RitmSymbol("bubble.left").font(.system(size: 20))
           Text(store.text("Ваши диалоги появятся здесь.", "Your conversations will appear here.")).ritmFont(12)
         }
         .foregroundStyle(RitmTheme.muted)
         .frame(maxWidth: .infinity)
         .padding(12)
       } else {
-        ScrollView {
-          VStack(spacing: 5) {
-            ForEach(conversations) { item in conversationRow(item) }
-          }
+        LazyVStack(spacing: 5) {
+          ForEach(conversations) { item in conversationRow(item) }
         }
-        .frame(maxHeight: 240)
       }
       if let target = deleteTarget { deleteConfirmation(target) }
       HStack(spacing: 8) {
-        Image(systemName: "checkmark.shield").font(.system(size: 15)).accessibilityHidden(true)
+        RitmSymbol("checkmark.shield").font(.system(size: 15)).accessibilityHidden(true)
         Text(store.text("Расписание меняется только с вашего согласия.", "Your schedule changes only with your consent."))
           .ritmFont(11, lineSpacing: 3)
       }
@@ -169,10 +175,11 @@ struct AssistantView: View {
       .padding(.horizontal, 8)
       .frame(maxWidth: .infinity, alignment: .leading)
       .overlay(alignment: .top) { Rectangle().fill(RitmTheme.line).frame(height: 1) }
+      .padding(.top, 16)
     }
     .padding(.vertical, 17)
     .padding(.horizontal, 11)
-    .background { RitmPanelBackground(radius: 24, raised: true) }
+    .background { RitmPanelBackground(radius: 24) }
     .transition(.opacity.combined(with: .move(edge: .top)))
   }
 
@@ -187,7 +194,7 @@ struct AssistantView: View {
         withAnimation(reduceMotion ? nil : RitmMotion.ease(0.24)) { historyOpen = false }
       } label: {
         HStack(spacing: 9) {
-          Image(systemName: "bubble.left").font(.system(size: 14))
+          RitmSymbol("bubble.left").font(.system(size: 14))
           Text(title).lineLimit(1).truncationMode(.tail)
           Spacer(minLength: 0)
         }
@@ -203,8 +210,9 @@ struct AssistantView: View {
       Button {
         deleteTarget = item
       } label: {
-        Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(RitmTheme.muted)
+        RitmSymbol("trash").font(.system(size: 14)).foregroundStyle(RitmTheme.muted)
           .frame(width: 44, height: 44)
+          .contentShape(Rectangle())
       }
       .buttonStyle(RitmPressStyle())
       .disabled(sending)
@@ -219,80 +227,74 @@ struct AssistantView: View {
 
   private func deleteConfirmation(_ target: Conversation) -> some View {
     let title = target.title.isEmpty ? store.text("Новый диалог", "New conversation") : target.title
-    return VStack(alignment: .leading, spacing: 6) {
+    return VStack(alignment: .leading, spacing: 0) {
       Text(store.text("Удалить диалог?", "Delete conversation?")).ritmFont(12, weight: .bold)
         .foregroundStyle(RitmTheme.text)
       Text(store.text("«\(title)» и его сообщения будут удалены.", "“\(title)” and its messages will be deleted."))
-        .ritmFont(11, lineSpacing: 4)
+        .ritmFont(11, lineSpacing: 3)
         .foregroundStyle(RitmTheme.muted)
-      HStack(spacing: 7) {
+        .padding(.top, 6)
+      HStack(spacing: 8) {
         Button(store.text("Оставить", "Keep")) { deleteTarget = nil }
-          .buttonStyle(RitmSecondaryButtonStyle())
+          .buttonStyle(AssistantButtonStyle())
         Button(store.text("Удалить", "Delete")) { Task { await deleteConversation(target.id) } }
-          .buttonStyle(RitmSecondaryButtonStyle())
+          .buttonStyle(AssistantButtonStyle())
           .disabled(!store.canWrite)
       }
-      .padding(.top, 5)
+      .padding(.top, 10)
     }
     .padding(12)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 11, style: .circular))
-    .overlay { RoundedRectangle(cornerRadius: 11, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1) }
+    .assistantBox(RitmTheme.soft, radius: 11)
     .padding(.vertical, 12)
   }
 
   // MARK: Chat panel
 
   private var chat: some View {
-    VStack(spacing: 0) {
+    let list = messages
+    return VStack(spacing: 0) {
       chatHeader
-      ScrollViewReader { proxy in
-        ScrollView {
-          VStack(alignment: .leading, spacing: 20) {
-            if messages.isEmpty && pending == nil { welcome }
-            ForEach(messages) { message in
-              AssistantMessageView(
-                message: message, conversationID: conversation?.id ?? "",
-                discussionSelected: mode == .ideaReview && discussionID == message.id,
-                discussionDisabled: sending || failed || (message.ideaReview.map { _ in AssistantPlan.discussionLimitReached(message) } ?? false),
-                superseded: message.ideaReview != nil
-                  && AssistantPlan.latestReview(messages, from: message.id)?.id != message.id,
-                onConversation: { updatedConversation = $0 },
-                onDiscuss: { showQuestions in discuss(message.id, showQuestions: showQuestions) })
-            }
-            if let pending { pendingRequest(pending) }
-            if mode == .ideaReview { discussionContext }
-            Color.clear.frame(height: 1).id("chat-end")
-          }
-          .padding(.vertical, 18)
-          .padding(.horizontal, 16)
-        }
-        .scrollDismissesKeyboard(.interactively)
-        .onChange(of: messages.count) { _, _ in
-          withAnimation(reduceMotion ? nil : RitmMotion.ease(0.28)) { proxy.scrollTo("chat-end", anchor: .bottom) }
-        }
-        .onChange(of: sending) { _, value in if value { proxy.scrollTo("chat-end", anchor: .bottom) } }
+      LazyVStack(alignment: .leading, spacing: 20) {
+        if list.isEmpty && pending == nil { welcome }
+        ForEach(list) { message in messageRow(message, in: list) }
+        if let pending { pendingRequest(pending) }
+        if mode == .ideaReview { discussionContext }
+        Color.clear.frame(height: 1).id(Self.endID)
       }
+      .padding(.vertical, 18)
+      .padding(.horizontal, 16)
+      .frame(maxWidth: .infinity, alignment: .leading)
       .background(RitmTheme.glassDense)
       .overlay(alignment: .top) { Rectangle().fill(RitmTheme.line).frame(height: 1) }
       composerArea
     }
-    .frame(maxHeight: .infinity)
-    .background { RitmPanelBackground(radius: 24, raised: true) }
-    .clipShape(RoundedRectangle(cornerRadius: 24, style: .circular))
+    .background { RitmPanelBackground(radius: 24) }
+  }
+
+  private func messageRow(_ message: ChatMessage, in list: [ChatMessage]) -> some View {
+    let review = message.ideaReview != nil
+    return AssistantMessageView(
+      message: message, conversationID: conversation?.id ?? "",
+      discussionSelected: mode == .ideaReview && discussionID == message.id,
+      discussionDisabled: sending || failed || (review && AssistantPlan.discussionLimitReached(message)),
+      superseded: review && AssistantPlan.latestReview(list, from: message.id)?.id != message.id,
+      openKeys: $openExperts,
+      onConversation: { updatedConversation = $0 },
+      onDiscuss: { showQuestions in discuss(message.id, showQuestions: showQuestions) })
   }
 
   private var chatHeader: some View {
     VStack(alignment: .leading, spacing: 10) {
       HStack(spacing: 12) {
-        RitmOrb(size: 51)
+        AssistantOrb(size: 51)
         VStack(alignment: .leading, spacing: 3) {
           Text(mode == .ideaReview ? store.text("Разбор идей", "Idea review") : store.text("Помощник Ritm", "Ritm assistant"))
             .ritmFont(14, weight: .bold)
             .foregroundStyle(RitmTheme.text)
           Text(
             configured
-              ? store.text("Готов к вашему запросу", "Ready for your request")
+              ? store.text("Знает ваши задачи и привычки", "Knows your tasks and habits")
               : store.text("Настройте OpenAI для начала диалога", "Set up OpenAI to start a conversation")
           )
           .ritmFont(10)
@@ -327,13 +329,11 @@ struct AssistantView: View {
 
   private var welcome: some View {
     VStack(alignment: .leading, spacing: 0) {
-      Image(systemName: "sparkles")
+      RitmIcon(.sparklesAssistant)
         .font(.system(size: 22))
         .foregroundStyle(RitmTheme.accentColor)
         .frame(width: 52, height: 52)
-        .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 17, style: .circular))
-        .overlay { RoundedRectangle(cornerRadius: 17, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1) }
-        .shadow(color: Color(rgb: 0x9F71D3, opacity: 0.1), radius: 15, y: 6)
+        .assistantBox(RitmTheme.soft, radius: 17)
         .accessibilityHidden(true)
       Text(mode == .ideaReview ? store.text("Посмотрим на идею с четырёх сторон", "Let's look at the idea from four sides") : store.text("С чего начнём?", "Where shall we start?"))
         .ritmFont(24, weight: .bold, tracking: -0.04)
@@ -349,7 +349,7 @@ struct AssistantView: View {
             "Помогу распределить дела, найти свободное время и сделать первый шаг.",
             "I'll help spread your tasks, find free time and take the first step.")
       )
-      .ritmFont(12, lineSpacing: 5)
+      .ritmFont(12, lineSpacing: 4.5)
       .foregroundStyle(RitmTheme.muted)
       .padding(.top, 8)
       if mode == .ideaReview {
@@ -361,8 +361,7 @@ struct AssistantView: View {
             }
             .padding(11)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RitmTheme.panel, in: RoundedRectangle(cornerRadius: 13, style: .circular))
-            .overlay { RoundedRectangle(cornerRadius: 13, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1) }
+            .assistantBox(RitmTheme.panel, radius: 13)
           }
         }
         .padding(.top, 16)
@@ -381,7 +380,7 @@ struct AssistantView: View {
       choose(store.text(prompt.title, prompt.english))
     } label: {
       HStack(spacing: 10) {
-        Image(systemName: prompt.symbol)
+        RitmSymbol(prompt.symbol)
           .font(.system(size: 16))
           .foregroundStyle(RitmTheme.accentColor)
           .frame(width: 33, height: 33)
@@ -391,13 +390,12 @@ struct AssistantView: View {
           Text(store.text(prompt.subtitle, prompt.englishSubtitle)).ritmFont(10).foregroundStyle(RitmTheme.muted)
         }
         Spacer(minLength: 0)
-        Image(systemName: "arrow.right").font(.system(size: 14)).foregroundStyle(RitmTheme.accentColor)
+        RitmSymbol("arrow.right").font(.system(size: 14)).foregroundStyle(RitmTheme.accentColor)
           .accessibilityHidden(true)
       }
       .padding(11)
       .frame(minHeight: 59)
-      .background(RitmTheme.panel, in: RoundedRectangle(cornerRadius: 13, style: .circular))
-      .overlay { RoundedRectangle(cornerRadius: 13, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1) }
+      .assistantBox(RitmTheme.panel, radius: 13)
       .contentShape(Rectangle())
     }
     .buttonStyle(RitmPressStyle(scale: 0.98))
@@ -406,7 +404,7 @@ struct AssistantView: View {
 
   private var setupCard: some View {
     HStack(alignment: .top, spacing: 10) {
-      Image(systemName: "slider.horizontal.3").font(.system(size: 16)).foregroundStyle(RitmTheme.accentColor)
+      RitmSymbol("slider.horizontal.3").font(.system(size: 16)).foregroundStyle(RitmTheme.accentColor)
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 6) {
         Text(store.text("Помощник пока не подключён", "The assistant is not connected yet"))
@@ -417,17 +415,15 @@ struct AssistantView: View {
             "Добавьте API-ключ OpenAI в настройках. После подключения Ritm сможет отвечать на ваши запросы.",
             "Add an OpenAI API key in Settings. Once connected, Ritm can answer your requests.")
         )
-        .ritmFont(11, lineSpacing: 5)
+        .ritmFont(11, lineSpacing: 3.5)
         .foregroundStyle(RitmTheme.muted)
         Button(store.text("Открыть настройки", "Open settings")) { navigation.section = .settings }
-          .buttonStyle(RitmSecondaryButtonStyle())
-          .frame(maxWidth: .infinity)
+          .buttonStyle(AssistantButtonStyle())
           .padding(.top, 4)
       }
     }
     .padding(12)
-    .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 13, style: .circular))
-    .overlay { RoundedRectangle(cornerRadius: 13, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1) }
+    .assistantBox(RitmTheme.soft, radius: 13)
   }
 
   // MARK: Sending state
@@ -436,15 +432,15 @@ struct AssistantView: View {
     UserMessageRow {
       VStack(alignment: .leading, spacing: 7) {
         Text(store.text("Вы", "You")).ritmFont(10, weight: .bold).foregroundStyle(RitmTheme.accentColor)
-        Text(request.text).ritmFont(13, lineSpacing: 9).foregroundStyle(RitmTheme.text).textSelection(.enabled)
+        Text(request.text).ritmFont(13, lineSpacing: 6.5).foregroundStyle(RitmTheme.text)
         Text(sending ? store.text("Отправляем…", "Sending…") : store.text("Не удалось получить ответ", "Could not get a reply"))
-          .ritmFont(10)
+          .ritmFont(10, lineSpacing: 3)
           .foregroundStyle(RitmTheme.muted)
       }
     }
     if sending {
       HStack(spacing: 10) {
-        RitmOrb(size: 32)
+        AssistantOrb(size: 32)
         Text(
           request.mode == .ideaReview
             ? (request.reviewMessageID != nil
@@ -454,7 +450,7 @@ struct AssistantView: View {
         )
         .ritmFont(12)
         .foregroundStyle(RitmTheme.muted)
-        ThinkingDots()
+        AssistantThinkingDots()
       }
       .frame(minHeight: 40)
       .accessibilityElement(children: .combine)
@@ -468,78 +464,89 @@ struct AssistantView: View {
     VStack(alignment: .leading, spacing: 0) {
       Text(store.text("Не удалось получить ответ", "Could not get a reply")).ritmFont(12, weight: .bold)
         .foregroundStyle(RitmTheme.text)
-      Text(failure).ritmFont(12, lineSpacing: 7).foregroundStyle(RitmTheme.muted).padding(.top, 7).padding(.bottom, 12)
-      TimelineView(.periodic(from: .now, by: 1)) { context in
-        let remaining = request.retryAt.map { max(0, Int(ceil($0.timeIntervalSince(context.date)))) } ?? 0
-        HStack(spacing: 8) {
-          Button {
-            Task { await submit(request) }
-          } label: {
-            Label(
-              remaining > 0
-                ? store.text("Повторить через \(remaining) с", "Retry in \(remaining) s")
-                : store.text("Повторить", "Retry"),
-              systemImage: "arrow.clockwise")
-          }
-          .buttonStyle(RitmSecondaryButtonStyle())
-          .disabled(!configured || sending || remaining > 0 || request.retryBlocked || !store.canWrite)
-          Button(store.text("Изменить сообщение", "Edit message")) {
-            composer = request.text
-            mode = request.mode
-            discussionID = request.reviewMessageID
-            pending = nil
-            composerFocused = true
-          }
-          .buttonStyle(RitmSecondaryButtonStyle())
+      Text(failure).ritmFont(12, lineSpacing: 4.5).foregroundStyle(RitmTheme.muted).padding(.top, 7).padding(.bottom, 4)
+      // The clock only ticks while a retry pause is running.
+      if let retryAt = request.retryAt, retryAt > Date() {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+          retryRow(request, remaining: max(0, Int(ceil(retryAt.timeIntervalSince(context.date)))))
         }
+      } else {
+        retryRow(request, remaining: 0)
       }
       if !configured {
         Button(store.text("Настройки", "Settings")) { navigation.section = .settings }
-          .buttonStyle(RitmSecondaryButtonStyle())
+          .buttonStyle(AssistantButtonStyle())
           .padding(.top, 8)
       }
     }
     .padding(15)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 12, style: .circular))
-    .overlay { RoundedRectangle(cornerRadius: 12, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1) }
+    .assistantBox(RitmTheme.soft, radius: 12)
+  }
+
+  private func retryRow(_ request: NativeChatRequest, remaining: Int) -> some View {
+    ViewThatFits(in: .horizontal) {
+      HStack(spacing: 8) { retryButtons(request, remaining: remaining) }
+      VStack(spacing: 8) { retryButtons(request, remaining: remaining) }
+    }
+    .padding(.top, 10)
+  }
+
+  @ViewBuilder private func retryButtons(_ request: NativeChatRequest, remaining: Int) -> some View {
+    Button {
+      Task { await submit(request) }
+    } label: {
+      AssistantButtonLabel(
+        title: remaining > 0
+          ? store.text("Повторить через \(remaining) с", "Retry in \(remaining) s")
+          : store.text("Повторить", "Retry"),
+        symbol: "arrow.clockwise")
+    }
+    .buttonStyle(AssistantButtonStyle())
+    .disabled(!configured || sending || remaining > 0 || request.retryBlocked || !store.canWrite)
+    Button(store.text("Изменить сообщение", "Edit message")) {
+      composer = request.text
+      mode = request.mode
+      discussionID = request.reviewMessageID
+      pending = nil
+      composerFocused = true
+    }
+    .buttonStyle(AssistantButtonStyle())
   }
 
   @ViewBuilder private var discussionContext: some View {
     if let review = selectedReview {
-      VStack(alignment: .leading, spacing: 5) {
-        HStack {
+      VStack(alignment: .leading, spacing: 6) {
+        HStack(spacing: 8) {
           Text(store.text("Обсуждение идеи · Оценка №\(review.ideaReview?.discussion?.round ?? 1)", "Idea discussion · Review #\(review.ideaReview?.discussion?.round ?? 1)"))
             .ritmFont(12, weight: .bold)
             .foregroundStyle(RitmTheme.accentColor)
-          Spacer(minLength: 8)
+          Spacer(minLength: 0)
           Button {
             startNewIdea()
           } label: {
-            Label(store.text("Новая идея", "New idea"), systemImage: "plus")
+            AssistantButtonLabel(title: store.text("Новая идея", "New idea"), symbol: "plus", iconSize: 13)
           }
-          .buttonStyle(RitmSecondaryButtonStyle())
+          .buttonStyle(AssistantButtonStyle(small: true))
           .disabled(sending || failed)
         }
         Text(AssistantPlan.ideaText(messages, review: review))
-          .ritmFont(12, lineSpacing: 3)
+          .ritmFont(12, lineSpacing: 3.5)
           .foregroundStyle(RitmTheme.text)
           .lineLimit(2)
         if let questions = review.ideaReview?.synthesis.questions, !questions.isEmpty {
-          DisclosureGroup(isExpanded: $questionsOpen) {
-            VStack(alignment: .leading, spacing: 4) {
-              ForEach(Array(questions.enumerated()), id: \.offset) { index, question in
-                Text("\(index + 1). \(question)").ritmFont(12, lineSpacing: 3).foregroundStyle(RitmTheme.text)
-              }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-          } label: {
+          AssistantDisclosure(isOpen: $questionsOpen) {
             Text(store.text("Вопросы экспертов (\(questions.count))", "Expert questions (\(questions.count))"))
               .ritmFont(12)
               .foregroundStyle(RitmTheme.accentColor)
-              .frame(minHeight: 44)
+          } content: {
+            VStack(alignment: .leading, spacing: 4) {
+              ForEach(Array(questions.enumerated()), id: \.offset) { index, question in
+                Text("\(index + 1). \(question)").ritmFont(12, lineSpacing: 3.5).foregroundStyle(RitmTheme.text)
+              }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
           }
-          .tint(RitmTheme.accentColor)
         }
         Text(
           discussionLimit
@@ -548,29 +555,31 @@ struct AssistantView: View {
               ? store.text("Появилась новая оценка. Выберите её, чтобы продолжить обсуждение.", "A newer review is available. Choose it to continue the discussion.")
               : store.text("Ответьте на вопросы или уточните идею. Каждый эксперт пересмотрит своё мнение с учётом ваших ответов.", "Answer the questions or refine the idea. Each expert will revisit their view with your answers.")
         )
-        .ritmFont(12, lineSpacing: 3)
+        .ritmFont(10, lineSpacing: 3)
         .foregroundStyle(RitmTheme.muted)
         if discussionStale {
           Button(store.text("Перейти к новой оценке", "Go to the newer review")) { discussionID = review.id }
-            .buttonStyle(RitmSecondaryButtonStyle())
+            .buttonStyle(AssistantButtonStyle())
             .disabled(sending || failed)
         }
       }
       .padding(.vertical, 10)
       .padding(.horizontal, 12)
-      .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 12, style: .circular))
-      .overlay { RoundedRectangle(cornerRadius: 12, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1) }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .assistantBox(RitmTheme.soft, radius: 12)
     } else if discussionID != nil {
-      VStack(alignment: .leading, spacing: 8) {
+      VStack(alignment: .leading, spacing: 6) {
         Text(store.text("Эта оценка больше недоступна. Выберите сохранённый разбор или начните новую идею.", "This review is no longer available. Choose a saved review or start a new idea."))
-          .ritmFont(12, lineSpacing: 3)
+          .ritmFont(10, lineSpacing: 3)
           .foregroundStyle(RitmTheme.muted)
         Button(store.text("Новая идея", "New idea")) { startNewIdea() }
-          .buttonStyle(RitmSecondaryButtonStyle())
+          .buttonStyle(AssistantButtonStyle())
           .disabled(sending || failed)
       }
-      .padding(12)
-      .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 12, style: .circular))
+      .padding(.vertical, 10)
+      .padding(.horizontal, 12)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .assistantBox(RitmTheme.soft, radius: 12)
     }
   }
 
@@ -578,31 +587,7 @@ struct AssistantView: View {
 
   private var composerArea: some View {
     VStack(alignment: .leading, spacing: 0) {
-      if !messages.isEmpty && mode == .assistant {
-        ScrollView(.horizontal) {
-          HStack(spacing: 6) {
-            ForEach(AssistantPrompt.all, id: \.title) { prompt in
-              Button {
-                choose(store.text(prompt.title, prompt.english))
-              } label: {
-                Text(store.text(prompt.title, prompt.english))
-                  .ritmFont(11)
-                  .foregroundStyle(RitmTheme.muted)
-                  .padding(.horizontal, 11)
-                  .frame(minHeight: 44)
-                  .ritmGlass(in: Capsule(), interactive: true)
-                  .contentShape(Capsule())
-              }
-              .buttonStyle(RitmGlassButtonStyle())
-              .disabled(sending)
-            }
-          }
-          .padding(.trailing, 12)
-        }
-        .scrollIndicators(.hidden)
-        .padding(.vertical, 12)
-        .padding(.trailing, -12)
-      }
+      if !messages.isEmpty && mode == .assistant { chips }
       if !configured && !messages.isEmpty {
         HStack {
           Text(store.text("Для новых ответов подключите OpenAI.", "Connect OpenAI for new replies.")).ritmFont(10)
@@ -613,63 +598,15 @@ struct AssistantView: View {
           } label: {
             HStack(spacing: 4) {
               Text(store.text("Настройки", "Settings"))
-              Image(systemName: "arrow.right").font(.system(size: 11))
+              RitmSymbol("arrow.right").font(.system(size: 11))
             }
           }
           .buttonStyle(RitmTextButtonStyle())
         }
-        .overlay(alignment: .top) { Rectangle().fill(RitmTheme.line).frame(height: 1) }
       }
-      if mode == .ideaReview {
-        Text(store.text("Четыре отдельные оценки и общий вывод. Одна модель, пять запросов OpenAI; без проверки фактов в интернете.", "Four separate assessments and a joint conclusion. One model, five OpenAI requests; no fact-checking on the internet."))
-          .ritmFont(10, lineSpacing: 3)
-          .foregroundStyle(RitmTheme.muted)
-          .padding(.top, 10)
-      }
-      HStack(alignment: .bottom, spacing: 8) {
-        TextField(
-          "", text: $composer,
-          prompt: Text(placeholder).foregroundColor(RitmTheme.muted), axis: .vertical
-        )
-        .lineLimit(2...6)
-        .ritmFont(16)
-        .foregroundStyle(RitmTheme.text)
-        .focused($composerFocused)
-        .disabled(sending)
-        .padding(.vertical, 5)
-        .onChange(of: composer) { _, value in
-          var limited = value
-          while limited.utf16.count > 6000 { limited.removeLast() }
-          if limited != value { composer = limited }
-        }
-        .accessibilityLabel(composerLabel)
-        Button {
-          Task { await send() }
-        } label: {
-          Group {
-            if sending {
-              ProgressView().tint(RitmTheme.ctaInk)
-            } else {
-              Image(systemName: "arrow.up").font(.system(size: 18, weight: .semibold))
-            }
-          }
-          .foregroundStyle(RitmTheme.ctaInk)
-          .frame(width: 44, height: 44)
-          .ritmGlass(in: Circle(), prominent: true, interactive: true)
-          .contentShape(Circle())
-          .opacity(canSend ? 1 : 0.6)
-        }
-        .buttonStyle(RitmGlassButtonStyle())
-        .disabled(!canSend)
-        .accessibilityLabel(sending ? store.text("Отправка сообщения", "Sending message") : store.text("Отправить сообщение", "Send message"))
-      }
-      .padding(.vertical, 8)
-      .padding(.leading, 12)
-      .padding(.trailing, 8)
-      .ritmGlass(in: RoundedRectangle(cornerRadius: 24, style: .circular))
-      .padding(.top, 12)
+      field
       HStack(spacing: 5) {
-        Image(systemName: "checkmark.shield").font(.system(size: 10))
+        RitmSymbol("checkmark.shield").font(.system(size: 10))
         Text(mode == .ideaReview ? store.text("Разбор идеи не меняет ваше расписание", "An idea review does not change your schedule") : store.text("Изменения только после вашего подтверждения", "Changes only after your confirmation"))
       }
       .ritmFont(9)
@@ -680,7 +617,84 @@ struct AssistantView: View {
     }
     .padding(.horizontal, 12)
     .padding(.bottom, 13)
-    .background(RitmTheme.panel)
+  }
+
+  /// `.a-chips`: quick prompts, one line that scrolls sideways; plain pills, no glass.
+  private var chips: some View {
+    ScrollView(.horizontal) {
+      HStack(spacing: 6) {
+        ForEach(AssistantPrompt.all, id: \.title) { prompt in
+          Button {
+            choose(store.text(prompt.title, prompt.english))
+          } label: {
+            Text(store.text(prompt.title, prompt.english))
+              .ritmFont(11)
+              .foregroundStyle(RitmTheme.muted)
+              .padding(.horizontal, 11)
+              .frame(minHeight: 44)
+              .background(RitmTheme.panel, in: Capsule())
+              .overlay { Capsule().strokeBorder(RitmTheme.line, lineWidth: 1) }
+              .contentShape(Capsule())
+          }
+          .buttonStyle(RitmPressStyle())
+          .disabled(sending)
+        }
+      }
+      .padding(.trailing, 12)
+    }
+    .scrollIndicators(.hidden)
+    .padding(.vertical, 12)
+    .padding(.trailing, -12)
+  }
+
+  /// `.a-field`: the input and the 44 pt send button in one field-coloured box.
+  private var field: some View {
+    HStack(alignment: .bottom, spacing: 8) {
+      TextField(
+        "", text: $composer,
+        prompt: Text(placeholder).foregroundColor(RitmTheme.muted), axis: .vertical
+      )
+      .lineLimit(2...6)
+      .ritmFont(16)
+      .foregroundStyle(RitmTheme.text)
+      .focused($composerFocused)
+      .disabled(sending)
+      .padding(.vertical, 5)
+      .onChange(of: composer) { _, value in
+        var limited = value
+        while limited.utf16.count > 6000 { limited.removeLast() }
+        if limited != value { composer = limited }
+      }
+      .accessibilityLabel(composerLabel)
+      Button {
+        Task { await send() }
+      } label: {
+        Group {
+          if sending {
+            ProgressView().tint(RitmTheme.accentInk)
+          } else {
+            RitmSymbol("arrow.up").font(.system(size: 18, weight: .semibold))
+          }
+        }
+        .foregroundStyle(RitmTheme.accentInk)
+        .frame(width: 44, height: 44)
+        .background(RitmTheme.ctaGradient, in: RoundedRectangle(cornerRadius: 13, style: .circular))
+        .opacity(canSend || sending ? 1 : 0.6)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(RitmPressStyle())
+      .disabled(!canSend)
+      .accessibilityLabel(sending ? store.text("Отправка сообщения", "Sending message") : store.text("Отправить сообщение", "Send message"))
+    }
+    .padding(.vertical, 8)
+    .padding(.leading, 12)
+    .padding(.trailing, 8)
+    .background(RitmTheme.field, in: RoundedRectangle(cornerRadius: 14, style: .circular))
+    .overlay {
+      RoundedRectangle(cornerRadius: 14, style: .circular)
+        .strokeBorder(composerFocused ? RitmTheme.accentColor : RitmTheme.line, lineWidth: 1)
+    }
+    .padding(.top, 12)
   }
 
   private var placeholder: String {
@@ -834,68 +848,5 @@ struct AssistantView: View {
           "Не удалось выполнить действие. Проверьте соединение и попробуйте ещё раз.",
           "Could not complete the action. Check the connection and try again.")
     }
-  }
-}
-
-/// The web's suggestion list and quick chips.
-struct AssistantPrompt {
-  let title: String
-  let subtitle: String
-  let english: String
-  let englishSubtitle: String
-  let symbol: String
-
-  static let all = [
-    AssistantPrompt(title: "Что у меня сегодня?", subtitle: "Собрать дела в один план", english: "What's on today?", englishSubtitle: "Gather tasks into one plan", symbol: "calendar"),
-    AssistantPrompt(title: "Спланируй неделю", subtitle: "Оставить место для отдыха", english: "Plan my week", englishSubtitle: "Leave room for rest", symbol: "clock"),
-    AssistantPrompt(title: "Разбей задачу на шаги", subtitle: "Начать с понятного действия", english: "Break a task into steps", englishSubtitle: "Start with a clear action", symbol: "checklist"),
-    AssistantPrompt(title: "Подготовь отчёт о выполненном", subtitle: "Увидеть свой прогресс", english: "Report what I've done", englishSubtitle: "See your progress", symbol: "bubble.left"),
-  ]
-}
-
-/// The user's bubble: soft fill, one contour, a sharp corner at the bottom right.
-struct UserBubble: ViewModifier {
-  func body(content: Content) -> some View {
-    let shape = UnevenRoundedRectangle(
-      topLeadingRadius: 15, bottomLeadingRadius: 15, bottomTrailingRadius: 4, topTrailingRadius: 15,
-      style: .circular)
-    content
-      .padding(.vertical, 12)
-      .padding(.horizontal, 13)
-      .background(RitmTheme.soft, in: shape)
-      .overlay { shape.strokeBorder(RitmTheme.line, lineWidth: 1) }
-  }
-}
-
-/// A user message sits on the right and leaves at least 6 % of the row free (max-width: 94%).
-struct UserMessageRow<Content: View>: View {
-  @ViewBuilder let content: Content
-
-  var body: some View {
-    HStack(spacing: 0) {
-      Spacer(minLength: 20)
-      content.modifier(UserBubble())
-    }
-  }
-}
-
-/// `.assistant-thinking-dots`.
-private struct ThinkingDots: View {
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-  var body: some View {
-    TimelineView(.animation(minimumInterval: 0.15, paused: reduceMotion)) { context in
-      let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.2) / 1.2
-      HStack(spacing: 3) {
-        ForEach(0..<3, id: \.self) { index in
-          let shifted = (phase - Double(index) * 0.125 + 1).truncatingRemainder(dividingBy: 1)
-          Circle()
-            .fill(RitmTheme.accentColor)
-            .frame(width: 3, height: 3)
-            .opacity(reduceMotion ? 1 : 0.35 + 0.65 * (shifted < 0.5 ? 1 - shifted * 2 : (shifted - 0.5) * 2))
-        }
-      }
-    }
-    .accessibilityHidden(true)
   }
 }

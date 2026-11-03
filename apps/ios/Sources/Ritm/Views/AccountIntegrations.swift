@@ -5,21 +5,47 @@ enum IntegrationKind: String, Identifiable {
   case google, ai, telegram
   var id: String { rawValue }
 }
+/// `<input type=time>` of the settings card: the value and a clock; a tap opens a wheel in a popover.
 struct TimeStringPicker: View {
   let title: String
   @Binding var value: String
   let zone: String
+  @State private var open = false
+
+  private var date: Binding<Date> {
+    Binding(
+      get: {
+        let day = FeatureDate.date("2026-01-01", zone: zone)
+        let minutes = TaskSchedule.timeMinutes(value) ?? 0
+        return FeatureDate.calendar(zone).date(
+          bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: day) ?? day
+      }, set: { value = FeatureDate.time($0, zone: zone) })
+  }
+
   var body: some View {
-    DatePicker(
-      title,
-      selection: Binding(
-        get: {
-          let date = FeatureDate.date("2026-01-01", zone: zone)
-          let minutes = TaskSchedule.timeMinutes(value) ?? 0
-          return FeatureDate.calendar(zone).date(
-            bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: date) ?? date
-        }, set: { value = FeatureDate.time($0, zone: zone) }), displayedComponents: .hourAndMinute
-    ).environment(\.timeZone, TimeZone(identifier: zone) ?? .current).frame(minHeight: 44)
+    Button {
+      open = true
+    } label: {
+      HStack {
+        Text(value).monospacedDigit()
+        Spacer(minLength: 8)
+        RitmSymbol("clock").font(.system(size: 15)).foregroundStyle(RitmTheme.muted)
+      }
+      .frame(maxWidth: .infinity, minHeight: 44)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(title)
+    .accessibilityValue(value)
+    .popover(isPresented: $open) {
+      DatePicker("", selection: date, displayedComponents: .hourAndMinute)
+        .datePickerStyle(.wheel)
+        .labelsHidden()
+        .environment(\.timeZone, TimeZone(identifier: zone) ?? .current)
+        .frame(width: 200, height: 160)
+        .padding(12)
+        .presentationCompactAdaptation(.popover)
+    }
   }
 }
 struct IntegrationSecretEditor: View {

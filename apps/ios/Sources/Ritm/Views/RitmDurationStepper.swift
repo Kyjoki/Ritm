@@ -68,7 +68,7 @@ struct RitmDurationStepper: View {
     return Button {
       change(delta)
     } label: {
-      Image(systemName: symbol)
+      RitmSymbol(symbol)
         .font(.system(size: 17, weight: .semibold))
         .foregroundStyle(RitmTheme.accentColor)
         .frame(width: 44, height: 44)

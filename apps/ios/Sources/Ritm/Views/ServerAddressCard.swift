@@ -31,9 +31,10 @@ struct ServerAddressCard: View {
           }
       }
       if let message {
-        Label(message, systemImage: failed ? "exclamationmark.circle" : "checkmark.circle")
-          .ritmFont(11, lineSpacing: 3)
+        Label { Text(message) } icon: { RitmSymbol(failed ? "exclamationmark.circle" : "checkmark.circle") }
+          .ritmFont(11, lineSpacing: 3.5)
           .foregroundStyle(failed ? RitmTheme.danger : RitmTheme.accentColor)
+          .frame(maxWidth: .infinity, alignment: .leading)
           .padding(.top, 10)
       } else {
         SettingsHint(
@@ -51,17 +52,17 @@ struct ServerAddressCard: View {
           Task { await checkAndSave() }
         } label: {
           HStack {
-            if checking { ProgressView().tint(RitmTheme.ink) }
+            if checking { ProgressView().tint(RitmTheme.ctaInk) }
             Text(
               checking
                 ? store.text("Проверяем…", "Checking…")
                 : store.text("Проверить и сохранить", "Check and save"))
           }
         }
-        .buttonStyle(RitmPrimaryButtonStyle(minHeight: 48))
+        .buttonStyle(SettingsPrimaryButtonStyle())
         .disabled(busy || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         Button(store.text("Сбросить", "Reset")) { confirmingReset = true }
-          .buttonStyle(RitmTextButtonStyle(size: 12))
+          .buttonStyle(SettingsTextButtonStyle(size: 11))
           .disabled(busy || store.serverAddress == .production)
       }
       .padding(.top, 16)

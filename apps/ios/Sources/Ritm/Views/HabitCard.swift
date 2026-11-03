@@ -3,7 +3,7 @@ import SwiftUI
 
 /// `.habit-card` on a phone: identity and actions, streak line, the week of marks, today's
 /// action or counter, and the 3 / 7 / 14 / 30 awards.
-struct HabitCard: View {
+struct HabitCard: View, Equatable {
   let habit: Habit
   let today: String
   let busy: Bool
@@ -15,27 +15,26 @@ struct HabitCard: View {
   @Environment(RitmStore.self) private var store
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+  /// Cards compare by what they draw, so an unrelated change on the page does not rebuild them.
+  nonisolated static func == (lhs: HabitCard, rhs: HabitCard) -> Bool {
+    lhs.habit == rhs.habit && lhs.today == rhs.today && lhs.busy == rhs.busy
+      && lhs.isRecord == rhs.isRecord
+  }
+
   private var archived: Bool { habit.archived == true }
-  private var best: Int { HabitSchedule.bestStreak(habit, today: today) }
-  private var scheduledToday: Bool { HabitSchedule.isScheduled(habit, on: today) }
-  private var doneToday: Bool { HabitSchedule.isComplete(habit, on: today) }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
+    // The streaks walk the whole history: once per render, not once per use.
+    let best = HabitSchedule.bestStreak(habit, today: today)
+    let streak = HabitSchedule.streak(habit, today: today)
+    return VStack(alignment: .leading, spacing: 0) {
       head
-      meta.padding(.top, 13).padding(.bottom, 4)
+      meta(best: best, streak: streak).padding(.top, 13).padding(.bottom, 4)
       if !archived {
-        ScrollView(.horizontal) {
-          HStack(spacing: 8) {
-            ForEach(HabitSchedule.week(containing: today), id: \.self) { day in dayButton(day) }
-          }
-          .frame(minWidth: 366)
-        }
-        .scrollIndicators(.hidden)
-        .padding(.top, 18)
+        week.padding(.top, 18)
         bottom.padding(.top, 16)
       }
-      awards
+      awards(best: best)
     }
     .padding(.vertical, 17)
     .padding(.horizontal, 14)
@@ -43,10 +42,14 @@ struct HabitCard: View {
     .background { RitmPanelBackground() }
   }
 
+  private func label(_ day: String, _ template: String) -> String {
+    HabitDates.label(day, zone: store.timeZone, language: store.language, template: template)
+  }
+
   private var head: some View {
     HStack(alignment: .top, spacing: 12) {
       HStack(spacing: 13) {
-        Image(systemName: habitSymbol(habit.icon))
+        RitmSymbol(habitSymbol(habit.icon))
           .font(.system(size: 18, weight: .medium))
           .foregroundStyle(RitmTheme.accentColor)
           .frame(width: 42, height: 42)
@@ -88,16 +91,16 @@ struct HabitCard: View {
     }
     // 25 October 2026 is a Sunday, the web's reference week.
     return weekdays.compactMap { HabitSchedule.addDays(to: "2026-10-25", days: $0) }
-      .map { FeatureDate.label($0, zone: "UTC", language: store.language, template: "EEE") }
+      .map { HabitDates.label($0, zone: "UTC", language: store.language, template: "EEE") }
       .joined(separator: " · ")
   }
 
-  private var meta: some View {
+  private func meta(best: Int, streak: Int) -> some View {
     let next = HabitsPlan.nextMilestone(habit, best: best)
     return HStack(spacing: 20) {
       HStack(spacing: 5) {
-        Image(systemName: "flame").font(.system(size: 13)).foregroundStyle(RitmTheme.accentColor)
-        metaCount(store.text("Серия", "Streak"), HabitSchedule.streak(habit, today: today))
+        RitmSymbol("flame").font(.system(size: 13)).foregroundStyle(RitmTheme.accentColor)
+        metaCount(store.text("Серия", "Streak"), streak)
       }
       .scaleEffect(isRecord && !reduceMotion ? 1.08 : 1, anchor: .leading)
       .animation(reduceMotion ? nil : RitmMotion.ease(0.42), value: isRecord)
@@ -120,19 +123,24 @@ struct HabitCard: View {
     }
   }
 
+  /// `.sh-week`: seven equal tiles with a 4 pt gap, always the whole week on screen.
+  private var week: some View {
+    HStack(spacing: 4) {
+      ForEach(HabitSchedule.week(containing: today), id: \.self) { day in dayButton(day) }
+    }
+  }
+
   private func dayButton(_ day: String) -> some View {
     let status = HabitsPlan.dayStatus(habit, on: day, today: today)
     let done = status == .done
     let canMark = HabitSchedule.canMark(habit, on: day, today: today)
-    let label = FeatureDate.label(day, zone: store.timeZone, language: store.language, template: "EEE d MMMM")
+    let full = label(day, "EEE d MMMM")
     let shape = RoundedRectangle(cornerRadius: 14, style: .circular)
     return Button {
       onProgress(day, done ? 0 : HabitSchedule.target(habit))
     } label: {
       VStack(spacing: 4) {
-        Text(FeatureDate.label(day, zone: store.timeZone, language: store.language, template: "EEE"))
-          .ritmFont(10)
-          .foregroundStyle(RitmTheme.muted)
+        Text(label(day, "EEE")).ritmFont(10).foregroundStyle(RitmTheme.muted)
         Text("\(Int(day.suffix(2)) ?? 0)").ritmFont(14, weight: .bold).foregroundStyle(RitmTheme.text)
         ZStack {
           Circle()
@@ -142,17 +150,15 @@ struct HabitCard: View {
                 done ? RitmTheme.accentColor : status == .rest ? Color.clear : RitmTheme.line, lineWidth: 1)
             }
           if done {
-            Image(systemName: "checkmark").font(.system(size: 9, weight: .heavy)).foregroundStyle(RitmTheme.accentInk)
+            RitmSymbol("checkmark").font(.system(size: 10, weight: .heavy)).foregroundStyle(RitmTheme.accentInk)
           } else if status == .rest {
             Text("–").ritmFont(13, weight: .bold).foregroundStyle(RitmTheme.muted)
           }
         }
         .frame(width: 18, height: 18)
       }
-      .padding(.vertical, 7)
-      .padding(.horizontal, 2)
-      .frame(maxWidth: .infinity, minHeight: 68)
-      .frame(minWidth: 44)
+      .padding(.vertical, 8)
+      .frame(maxWidth: .infinity, minHeight: 72)
       .background(status == .rest ? Color.clear : done ? HabitStyle.chosen : HabitStyle.tile, in: shape)
       .overlay { shape.strokeBorder(done ? HabitStyle.chosenBorder : RitmTheme.panelBorder, lineWidth: 1) }
       .overlay {
@@ -165,8 +171,8 @@ struct HabitCard: View {
     .disabled(!canMark || busy || !store.canWrite)
     .accessibilityLabel(
       (done
-        ? store.text("Снять отметку \(habit.title) за \(label)", "Undo \(habit.title) on \(label)")
-        : store.text("Отметить \(habit.title) за \(label)", "Mark \(habit.title) on \(label)")) + ". "
+        ? store.text("Снять отметку \(habit.title) за \(full)", "Undo \(habit.title) on \(full)")
+        : store.text("Отметить \(habit.title) за \(full)", "Mark \(habit.title) on \(full)")) + ". "
         + statusText(status, done: done))
     .accessibilityAddTraits(done ? .isSelected : [])
   }
@@ -180,7 +186,11 @@ struct HabitCard: View {
     }
   }
 
+  /// `.sh-bot`: the caption on the left; a plain habit's button sits beside it on the right, a
+  /// counted habit's controls take their own row below (`.sh-ctl`, 100 % wide).
   private var bottom: some View {
+    let scheduledToday = HabitSchedule.isScheduled(habit, on: today)
+    let doneToday = HabitSchedule.isComplete(habit, on: today)
     let progress = HabitSchedule.progress(habit, on: today)
     let counted = scheduledToday && habit.target != nil
     return VStack(alignment: .leading, spacing: 10) {
@@ -190,19 +200,18 @@ struct HabitCard: View {
             .ritmFont(11)
             .foregroundStyle(RitmTheme.muted)
           if scheduledToday {
-            progressText(progress)
+            progressText(progress, done: doneToday)
               .ritmFont(12, weight: .bold)
               .foregroundStyle(RitmTheme.text)
           }
         }
         Spacer(minLength: 0)
         if scheduledToday && !counted {
-          markButton(doneToday ? store.text("Отменить", "Undo") : store.text("Выполнить", "Complete")) {
+          markButton(doneToday ? store.text("Отменить", "Undo") : store.text("Выполнить", "Complete"), done: doneToday) {
             onProgress(today, doneToday ? 0 : 1)
           }
         }
       }
-      // The count editor gets a full row: − value +, Save, the goal and Reset do not fit beside the text.
       if counted {
         HabitStepper(habit: habit, today: today, busy: busy, onSave: { onProgress(today, $0) })
       }
@@ -210,36 +219,35 @@ struct HabitCard: View {
   }
 
   /// «3 / 8 стаканов»: the recorded count runs up to the new value.
-  @ViewBuilder private func progressText(_ progress: Int) -> some View {
+  @ViewBuilder private func progressText(_ progress: Int, done: Bool) -> some View {
     if let target = habit.target {
       let unit = (habit.unit ?? "").isEmpty ? "" : " " + (habit.unit ?? "")
       RitmCountText(progress) { "\($0) / \(target)" + unit }
     } else {
-      Text(doneToday ? store.text("Выполнено", "Completed") : store.text("Ещё не выполнено", "Not done yet"))
+      Text(done ? store.text("Выполнено", "Completed") : store.text("Ещё не выполнено", "Not done yet"))
     }
   }
 
-  private func markButton(_ title: String, action: @escaping () -> Void) -> some View {
-    Group {
-      if doneToday {
-        Button(action: action) { Label(title, systemImage: "checkmark") }
-          .buttonStyle(RitmSecondaryButtonStyle())
-      } else {
-        Button(action: action) { Label(title, systemImage: "checkmark").padding(.horizontal, 4) }
-          .buttonStyle(RitmPrimaryButtonStyle())
-          .fixedSize()
+  private func markButton(_ title: String, done: Bool, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      HStack(spacing: 6) {
+        RitmSymbol("checkmark").font(.system(size: 14, weight: .semibold))
+        Text(title)
       }
     }
+    .buttonStyle(HabitCapsuleStyle(prominent: !done))
+    .fixedSize()
     .disabled(busy || !store.canWrite)
   }
 
-  private var awards: some View {
+  /// `.sh-aw`: the 3 / 7 / 14 / 30 chips under a hairline.
+  private func awards(best: Int) -> some View {
     let earned = HabitsPlan.awards(habit, best: best)
     return HStack(spacing: 6) {
       ForEach(HabitSchedule.milestones, id: \.self) { milestone in
         let won = earned.contains(milestone)
         HStack(spacing: 3) {
-          Image(systemName: "flame").font(.system(size: 11))
+          RitmSymbol("flame").font(.system(size: 11))
           Text("\(milestone)")
         }
         .ritmFont(10)
@@ -265,7 +273,8 @@ struct HabitCard: View {
   }
 }
 
-/// `HabitProgressEditor`: − value +, Save when edited, complete or undo the goal, and reset.
+/// `.sh-ctl`: − value +, Save when edited, complete or undo the goal, and reset. The items flow
+/// left to right and wrap to a second row when the card is too narrow.
 private struct HabitStepper: View {
   let habit: Habit
   let today: String
@@ -281,12 +290,19 @@ private struct HabitStepper: View {
   private var done: Bool { HabitSchedule.isComplete(habit, on: today) }
 
   var body: some View {
-    // One row when everything fits; otherwise the count pill and Save, then the goal and Reset.
     ViewThatFits(in: .horizontal) {
       HStack(spacing: 8) {
         counter
         saveButton
         goalButton
+        resetButton
+      }
+      VStack(alignment: .leading, spacing: 8) {
+        HStack(spacing: 8) {
+          counter
+          saveButton
+          goalButton
+        }
         resetButton
       }
       VStack(alignment: .leading, spacing: 8) {
@@ -314,7 +330,7 @@ private struct HabitStepper: View {
         .multilineTextAlignment(.center)
         .ritmFont(12, weight: .bold)
         .foregroundStyle(RitmTheme.text)
-        .frame(width: 54, height: 44)
+        .frame(width: 44, height: 44)
         .accessibilityLabel(store.text("Введите прогресс ", "Enter progress ") + habit.title)
       stepButton("plus", store.text("Увеличить прогресс ", "Increase progress ")) { onSave((value ?? progress) + 1) }
         .disabled(busy || !valid || (value ?? target) >= target)
@@ -326,7 +342,7 @@ private struct HabitStepper: View {
   @ViewBuilder private var saveButton: some View {
     if valid, let value, value != progress {
       Button(store.text("Сохранить", "Save")) { onSave(value) }
-        .buttonStyle(RitmPrimaryButtonStyle())
+        .buttonStyle(HabitCapsuleStyle(prominent: true))
         .fixedSize()
         .disabled(busy)
     }
@@ -336,9 +352,13 @@ private struct HabitStepper: View {
     Button {
       onSave(done ? 0 : target)
     } label: {
-      Label(done ? store.text("Отменить", "Undo") : store.text("Выполнить цель", "Complete goal"), systemImage: "checkmark")
+      HStack(spacing: 6) {
+        RitmSymbol("checkmark").font(.system(size: 14, weight: .semibold))
+        Text(done ? store.text("Отменить", "Undo") : store.text("Выполнить цель", "Complete goal"))
+      }
     }
-    .buttonStyle(RitmSecondaryButtonStyle())
+    .buttonStyle(HabitCapsuleStyle())
+    .fixedSize()
     .disabled(busy)
   }
 
@@ -353,7 +373,7 @@ private struct HabitStepper: View {
 
   private func stepButton(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
     Button(action: action) {
-      Image(systemName: symbol)
+      RitmSymbol(symbol)
         .font(.system(size: 15, weight: .semibold))
         .foregroundStyle(RitmTheme.accentColor)
         .frame(width: 44, height: 44)

@@ -1,6 +1,7 @@
 import RitmCore
 import SwiftUI
 
+/// The habit sheet (`HabitEditor`): name, icon, weekdays, an optional numeric goal, Cancel / Save.
 struct HabitEditor: View {
   @Environment(RitmStore.self) private var store
   @Environment(\.dismiss) private var dismiss
@@ -26,84 +27,205 @@ struct HabitEditor: View {
       && !weekdays.isEmpty && unit.utf16.count <= 24
       && (!quantitative || (1...10_000).contains(Int(target) ?? 0))
   }
+
   var body: some View {
-    NavigationStack {
-      Form {
-        Section(store.text("Название", "Name")) {
-          TextField(
-            store.text("Например, чтение", "For example, reading"), text: $title, axis: .vertical
-          ).lineLimit(2...4)
-          Text("\(title.utf16.count) / 80").font(.caption).foregroundStyle(
-            title.utf16.count > 80 ? Color.red : Color.secondary)
+    ZStack {
+      RitmBackground()
+      ScrollView {
+        VStack(alignment: .leading, spacing: 18) {
+          header
+          nameField
+          iconField
+          weekdayField
+          goalField
+          if let message = store.errorMessage { RitmErrorBanner(message: message) }
+          if store.uncertainWrite {
+            Button(store.text("Закрыть и проверить список", "Close and check list")) { dismiss() }
+              .buttonStyle(HabitCapsuleStyle())
+          }
+          buttons
         }
-        Section(store.text("Значок", "Icon")) {
-          ScrollView(.horizontal) {
-            HStack {
-              ForEach(HabitIcon.allCases, id: \.self) { value in
-                Button {
-                  icon = value
-                } label: {
-                  Image(systemName: habitSymbol(value)).frame(width: 44, height: 44).background(
-                    icon == value ? RitmTheme.lavender.opacity(0.23) : .clear,
-                    in: RoundedRectangle(cornerRadius: 10))
-                }.buttonStyle(.plain).accessibilityLabel(value.rawValue).accessibilityAddTraits(
-                  icon == value ? .isSelected : [])
-              }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 28)
+        .frame(maxWidth: 700)
+        .frame(maxWidth: .infinity)
+      }
+      .scrollIndicators(.hidden)
+      .scrollDismissesKeyboard(.interactively)
+    }
+    .presentationDetents([.large])
+    .ritmSheetGrabber()
+    .presentationCornerRadius(22)
+    .interactiveDismissDisabled(busy)
+  }
+
+  // MARK: Blocks
+
+  private var header: some View {
+    HStack(alignment: .center) {
+      Text(
+        habit == nil
+          ? store.text("Новая привычка", "New habit") : store.text("Изменить привычку", "Edit habit")
+      )
+      .ritmFont(20, weight: .semibold, tracking: -0.045)
+      .foregroundStyle(RitmTheme.text)
+      .accessibilityAddTraits(.isHeader)
+      Spacer(minLength: 12)
+      HabitIconButton(symbol: "xmark", label: store.text("Закрыть", "Close")) { dismiss() }
+        .disabled(busy)
+    }
+    .padding(.top, 20)
+  }
+
+  private var nameField: some View {
+    let tooLong = title.utf16.count > 80
+    return section(store.text("Название", "Name")) {
+      VStack(alignment: .leading, spacing: 0) {
+        TextField(
+          store.text("Например, чтение", "For example, reading"), text: $title, axis: .vertical
+        )
+        .lineLimit(2...4)
+        .ritmFont(14)
+        .foregroundStyle(RitmTheme.text)
+        .padding(12)
+        Text("\(title.utf16.count) / 80")
+          .ritmFont(11)
+          .foregroundStyle(tooLong ? RitmTheme.danger : RitmTheme.muted)
+          .padding(.horizontal, 12)
+          .padding(.bottom, 8)
+      }
+      .habitBox()
+    }
+  }
+
+  private var iconField: some View {
+    section(store.text("Значок", "Icon")) {
+      ScrollView(.horizontal) {
+        HStack(spacing: 4) {
+          ForEach(HabitIcon.allCases, id: \.self) { value in
+            Button {
+              icon = value
+            } label: {
+              RitmSymbol(habitSymbol(value))
+                .font(.system(size: 20))
+                .foregroundStyle(icon == value ? RitmTheme.accentColor : RitmTheme.text)
+                .frame(width: 44, height: 44)
+                .background(
+                  icon == value ? RitmTheme.accentColor.opacity(0.23) : .clear,
+                  in: RoundedRectangle(cornerRadius: 10, style: .circular))
             }
-          }.scrollIndicators(.hidden)
+            .buttonStyle(RitmPressStyle())
+            .accessibilityLabel(value.rawValue)
+            .accessibilityAddTraits(icon == value ? .isSelected : [])
+          }
         }
-        Section(store.text("Дни недели", "Weekdays")) {
-          ForEach(0..<7) { day in
-            Toggle(
+        .padding(4)
+      }
+      .scrollIndicators(.hidden)
+      .habitBox()
+    }
+  }
+
+  private var weekdayField: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      section(store.text("Дни недели", "Weekdays")) {
+        VStack(spacing: 0) {
+          ForEach(0..<7, id: \.self) { day in
+            if day > 0 { divider }
+            switchRow(
               weekdayName(day, russian: store.language == .ru),
               isOn: Binding(
                 get: { weekdays.contains(day) },
                 set: { if $0 { weekdays.insert(day) } else { weekdays.remove(day) } }))
           }
-          if weekdays.isEmpty {
-            Text(store.text("Выберите хотя бы один день.", "Choose at least one day."))
-              .foregroundStyle(.red)
-          }
         }
-        Section {
-          Toggle(store.text("Количественная цель", "Quantity target"), isOn: $quantitative)
-          if quantitative {
-            TextField(store.text("Цель (1–10000)", "Target (1–10000)"), text: $target).keyboardType(
-              .numberPad)
-            TextField(
-              store.text("Единица: минуты, стаканы…", "Unit: minutes, glasses…"), text: $unit)
-          }
-        } footer: {
-          Text(
-            store.text(
-              "Изменение расписания не переписывает прошлые отметки.",
-              "Schedule changes preserve historical marks."))
-        }
-        if let message = store.errorMessage { Section { RitmErrorBanner(message: message) } }
-        if store.uncertainWrite {
-          Section {
-            Button(store.text("Закрыть и проверить список", "Close and check list")) {
-              dismiss()
-            }
-          }
-        }
-      }.scrollDismissesKeyboard(.interactively)
-        .navigationTitle(
-          habit == nil
-            ? store.text("Новая привычка", "New habit")
-            : store.text("Изменить привычку", "Edit habit")
-        ).navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-          ToolbarItem(placement: .cancellationAction) {
-            Button(store.text("Отмена", "Cancel")) { dismiss() }.disabled(busy)
-          }
-          ToolbarItem(placement: .confirmationAction) {
-            Button(store.text("Сохранить", "Save")) { Task { await save() } }.disabled(
-              !valid || busy || !store.canWrite)
-          }
-        }.interactiveDismissDisabled(busy)
+        .habitBox()
+      }
+      if weekdays.isEmpty {
+        Text(store.text("Выберите хотя бы один день.", "Choose at least one day."))
+          .ritmFont(12)
+          .foregroundStyle(RitmTheme.danger)
+          .padding(.top, 6)
+          .padding(.horizontal, 2)
+      }
     }
   }
+
+  private var goalField: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      VStack(spacing: 0) {
+        switchRow(store.text("Количественная цель", "Quantity target"), isOn: $quantitative)
+        if quantitative {
+          TextField(store.text("Цель (1–10000)", "Target (1–10000)"), text: $target)
+            .keyboardType(.numberPad)
+            .ritmFont(14)
+            .foregroundStyle(RitmTheme.text)
+            .padding(12)
+          divider
+          TextField(
+            store.text("Единица: минуты, стаканы…", "Unit: minutes, glasses…"), text: $unit
+          )
+          .ritmFont(14)
+          .foregroundStyle(RitmTheme.text)
+          .padding(12)
+        }
+      }
+      .habitBox()
+      Text(
+        store.text(
+          "Изменение расписания не переписывает прошлые отметки.",
+          "Schedule changes preserve historical marks."
+        )
+      )
+      .ritmFont(12)
+      .foregroundStyle(RitmTheme.muted)
+      .padding(.top, 8)
+      .padding(.horizontal, 2)
+    }
+  }
+
+  private var buttons: some View {
+    HStack(spacing: 10) {
+      Button(store.text("Отмена", "Cancel")) { dismiss() }
+        .buttonStyle(HabitCapsuleStyle())
+        .frame(maxWidth: .infinity)
+        .disabled(busy)
+      Button(store.text("Сохранить", "Save")) { Task { await save() } }
+        .buttonStyle(HabitCapsuleStyle(prominent: true))
+        .frame(maxWidth: .infinity)
+        .disabled(!valid || busy || !store.canWrite)
+    }
+  }
+
+  // MARK: Pieces
+
+  /// `.sf-l`: the small uppercase label above a box.
+  private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content)
+    -> some View
+  {
+    VStack(alignment: .leading, spacing: 6) {
+      Text(title)
+        .ritmFont(11, weight: .semibold, tracking: 0.05)
+        .textCase(.uppercase)
+        .foregroundStyle(RitmTheme.muted)
+      content()
+    }
+  }
+
+  private var divider: some View {
+    Rectangle().fill(RitmTheme.line).frame(height: 1)
+  }
+
+  /// `.sf-row`: a 46 pt row with a label and a switch.
+  private func switchRow(_ title: String, isOn: Binding<Bool>) -> some View {
+    Toggle(isOn: isOn) {
+      Text(title).ritmFont(14).foregroundStyle(RitmTheme.text)
+    }
+    .tint(RitmTheme.accentColor)
+    .padding(.horizontal, 14)
+    .frame(minHeight: 46)
+  }
+
   private func save() async {
     busy = true
     defer { busy = false }
@@ -129,6 +251,17 @@ struct HabitEditor: View {
     }
   }
 }
+
+extension View {
+  /// `.sf-box`: a 14 pt rounded field surface with a hairline.
+  fileprivate func habitBox() -> some View {
+    let shape = RoundedRectangle(cornerRadius: 14, style: .circular)
+    return background(RitmTheme.field, in: shape)
+      .overlay { shape.strokeBorder(RitmTheme.line, lineWidth: 1) }
+      .clipShape(shape)
+  }
+}
+
 func habitSymbol(_ icon: HabitIcon?) -> String {
   switch icon ?? .sparkles {
   case .sparkles: "sparkles"

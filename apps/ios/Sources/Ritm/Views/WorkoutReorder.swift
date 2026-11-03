@@ -163,13 +163,14 @@ final class WorkoutReorderModel {
 
 /// The ⠿ grip. A long press of 0.18 s starts the drag; a quicker swipe scrolls the page.
 struct WorkoutDragHandle: View {
+  var size: CGFloat = 20
   let began: @MainActor (CGFloat, UIView) -> Void
   let moved: @MainActor (CGFloat) -> Void
   let ended: @MainActor (Bool) -> Void
 
   var body: some View {
-    Image(systemName: "circle.grid.2x3.fill")
-      .font(.system(size: 18))
+    RitmSymbol("circle.grid.2x3.fill")
+      .font(.system(size: size))
       .foregroundStyle(RitmTheme.muted)
       .frame(width: 44, height: 44)
       .overlay { WorkoutHandleGesture(began: began, moved: moved, ended: ended) }
@@ -218,18 +219,12 @@ private struct WorkoutHandleGesture: UIViewRepresentable {
 
 // MARK: - List
 
-private struct WorkoutFramesKey: PreferenceKey {
-  static var defaultValue: [String: CGRect] { [:] }
-  static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
-    value.merge(nextValue()) { $1 }
-  }
-}
-
 /// A column of reorderable cards. `row` receives the item and the handle to place inside it.
 struct WorkoutReorderList<Item: Identifiable, Row: View>: View where Item.ID == String {
   let items: [Item]
   var spacing: CGFloat = 10
-  var cornerRadius: CGFloat = 22
+  var cornerRadius: CGFloat = 23
+  var handleSize: CGFloat = 20
   let onMove: (Int, Int) -> Void
   @ViewBuilder let row: (Item, WorkoutDragHandle) -> Row
 
@@ -244,25 +239,27 @@ struct WorkoutReorderList<Item: Identifiable, Row: View>: View where Item.ID == 
     VStack(spacing: spacing) {
       ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
         let dragged = model.active?.id == item.id
+        let offset = model.offset(of: item.id, at: index)
         row(item, handle(for: item.id, ids: ids))
-          .background {
-            GeometryReader { proxy in
-              Color.clear.preference(
-                key: WorkoutFramesKey.self,
-                value: [item.id: proxy.frame(in: .named(Self.space))])
+          // Frames are read once per layout change, outside any drag; no preference merging.
+          .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { frame in
+            if model.active == nil { model.frames[item.id] = frame }
+          }
+          .overlay {
+            if dragged {
+              RoundedRectangle(cornerRadius: cornerRadius, style: .circular)
+                .strokeBorder(RitmTheme.accentColor, lineWidth: 1)
+                .allowsHitTesting(false)
             }
           }
           .scaleEffect(dragged && !reduceMotion ? 1.015 : 1)
           .shadow(color: .black.opacity(dragged ? 0.22 : 0), radius: dragged ? 16 : 0, y: dragged ? 8 : 0)
-          .offset(y: model.offset(of: item.id, at: index))
-          .animation(dragged ? nil : slide, value: model.offset(of: item.id, at: index))
+          .offset(y: offset)
+          .animation(dragged ? nil : slide, value: offset)
           .zIndex(dragged ? 1 : 0)
       }
     }
     .coordinateSpace(name: Self.space)
-    .onPreferenceChange(WorkoutFramesKey.self) { frames in
-      if model.active == nil { model.frames = frames }
-    }
     .background(alignment: .topLeading) { slot }
   }
 
@@ -270,7 +267,7 @@ struct WorkoutReorderList<Item: Identifiable, Row: View>: View where Item.ID == 
     if let active = model.active {
       let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .circular)
       shape
-        .fill(RitmTheme.accentColor.opacity(0.08))
+        .fill(RitmTheme.soft)
         .overlay { shape.strokeBorder(RitmTheme.accentColor, style: StrokeStyle(lineWidth: 2, dash: [6, 5])) }
         .frame(height: active.height)
         .offset(y: active.slotY)
@@ -281,6 +278,7 @@ struct WorkoutReorderList<Item: Identifiable, Row: View>: View where Item.ID == 
 
   private func handle(for id: String, ids: [String]) -> WorkoutDragHandle {
     WorkoutDragHandle(
+      size: handleSize,
       began: { fingerY, view in
         model.begin(
           id: id, ids: ids, spacing: spacing, animation: slide, fingerY: fingerY, view: view,

@@ -239,7 +239,7 @@ struct RitmCountText: View {
       if reduceMotion {
         Text(format(value))
       } else {
-        TimelineView(.animation(paused: run.begin == nil)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: run.begin == nil)) { context in
           Text(format(run.value(at: context.date)))
         }
       }

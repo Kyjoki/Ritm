@@ -20,7 +20,7 @@ struct WorkoutHomeView: View {
         ) { go(.history) }
       },
       content: {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 12) {
           if let session = workouts.session { activeCard(session).ritmPageReveal(index: 0) }
           programs.ritmPageReveal(index: 1)
           recent.ritmPageReveal(index: 2)
@@ -33,25 +33,34 @@ struct WorkoutHomeView: View {
   // MARK: Active workout
 
   private func activeCard(_ session: WorkoutSession) -> some View {
-    RitmCard(padding: 16, radius: 22) {
+    RitmCard(padding: 14) {
       HStack(spacing: 12) {
         VStack(alignment: .leading, spacing: 4) {
           Text(store.text("Идёт тренировка", "Workout in progress"))
-            .ritmText(.eyebrow).foregroundStyle(RitmTheme.accentColor)
-          Text(session.programName).ritmText(.cardTitle).foregroundStyle(RitmTheme.text)
-            .lineLimit(2)
+            .ritmFont(11, weight: .bold).foregroundStyle(RitmTheme.accentColor)
+            .padding(.horizontal, 10).padding(.vertical, 4)
+            .background(RitmTheme.soft, in: Capsule())
+            .overlay { Capsule().strokeBorder(RitmTheme.line, lineWidth: 1) }
+          Text(session.programName).ritmFont(16, weight: .semibold, tracking: -0.03)
+            .foregroundStyle(RitmTheme.text).lineLimit(2)
           HStack(spacing: 0) {
             Text(store.text("Выполнено подходов: ", "Sets done: "))
-            RitmCountText(session.doneSets) { "\($0)" }
+            RitmCountText(session.doneSets) { "\($0)" }.fontWeight(.bold)
             Text(store.text(" из ", " of ") + "\(session.totalSets)")
           }
           .ritmText(.body).foregroundStyle(RitmTheme.muted)
         }
         Spacer(minLength: 8)
-        Button(store.text("Продолжить", "Resume")) { go(.active) }
-          .buttonStyle(RitmPrimaryButtonStyle())
-          .fixedSize()
+        Button { go(.active) } label: {
+          Text(store.text("Продолжить", "Resume")).workoutButtonFont()
+        }
+        .buttonStyle(RitmPrimaryButtonStyle(minHeight: 48))
+        .fixedSize()
       }
+    }
+    .overlay {
+      RoundedRectangle(cornerRadius: 23, style: .circular).strokeBorder(RitmTheme.accentColor, lineWidth: 1)
+        .allowsHitTesting(false)
     }
   }
 
@@ -62,10 +71,10 @@ struct WorkoutHomeView: View {
     VStack(alignment: .leading, spacing: 8) {
       WorkoutSectionLabel(title: store.text("Программы", "Programs"))
       if list.isEmpty {
-        emptyPrograms
+        WorkoutEmptyText(text: store.text("Программ пока нет. Добавьте первую.", "No programs yet. Add the first one."))
       } else {
         WorkoutReorderList(
-          items: list, spacing: 8, cornerRadius: 20,
+          items: list, spacing: 8, cornerRadius: 20, handleSize: 20,
           onMove: { workouts.moveProgram(from: $0, to: $1) }
         ) { program, handle in
           let index = list.firstIndex { $0.id == program.id } ?? 0
@@ -78,37 +87,15 @@ struct WorkoutHomeView: View {
               withAnimation(RitmMotion.easeOut(0.22)) { workouts.moveProgram(from: index, to: target) }
             })
         }
-        Button {
-          addProgram()
-        } label: {
-          Label(store.text("Добавить программу", "Add program"), systemImage: "plus")
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(RitmSecondaryButtonStyle(minHeight: 48))
-        .padding(.top, 4)
       }
-    }
-  }
-
-  private var emptyPrograms: some View {
-    RitmCard(padding: 20, radius: 22) {
-      VStack(spacing: 16) {
-        Image(systemName: "dumbbell")
-          .font(.system(size: 26))
-          .foregroundStyle(RitmTheme.accentColor)
-          .accessibilityHidden(true)
-        Text(store.text("Создайте первую программу", "Create your first program"))
-          .ritmText(.cardTitle).foregroundStyle(RitmTheme.text)
-          .multilineTextAlignment(.center)
-        Button {
-          addProgram()
-        } label: {
-          Label(store.text("Новая программа", "New program"), systemImage: "plus")
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(RitmPrimaryButtonStyle(minHeight: 48))
+      Button {
+        addProgram()
+      } label: {
+        Label { Text(store.text("Добавить программу", "Add program")) } icon: { RitmSymbol("plus") }
+          .workoutButtonFont()
+          .frame(maxWidth: .infinity)
       }
-      .frame(maxWidth: .infinity)
+      .buttonStyle(RitmSecondaryButtonStyle(minHeight: 48))
     }
   }
 
@@ -137,15 +124,16 @@ struct WorkoutHomeView: View {
 
   @ViewBuilder private var recent: some View {
     let records = Array(workouts.history.records.prefix(3))
-    if !records.isEmpty {
-      VStack(alignment: .leading, spacing: 8) {
-        WorkoutSectionLabel(
-          title: store.text("Последние тренировки", "Latest workouts"),
-          link: store.text("Вся история", "All history")
-        ) { go(.history) }
-        ForEach(records) { record in
-          WorkoutHistoryRow(record: record) { opened = record }
-        }
+    VStack(alignment: .leading, spacing: 8) {
+      WorkoutSectionLabel(
+        title: store.text("Последние тренировки", "Latest workouts"),
+        link: store.text("Вся история", "All history")
+      ) { go(.history) }
+      if records.isEmpty {
+        WorkoutEmptyText(text: store.text("Пока нет завершённых тренировок.", "No finished workouts yet."))
+      }
+      ForEach(records) { record in
+        WorkoutHistoryRow(record: record) { opened = record }
       }
     }
   }
@@ -178,7 +166,7 @@ private struct WorkoutProgramRow: View {
 
   var body: some View {
     HStack(spacing: 2) {
-      handle.frame(width: 36)
+      handle.frame(width: 30)
       Button(action: start) {
         HStack(spacing: 10) {
           Text(badge)
@@ -186,29 +174,26 @@ private struct WorkoutProgramRow: View {
             .foregroundStyle(RitmTheme.accentColor)
             .frame(width: 38, height: 38)
             .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 12, style: .circular))
-          VStack(alignment: .leading, spacing: 1) {
+          VStack(alignment: .leading, spacing: 0) {
             Text(program.name.isEmpty ? store.text("Без названия", "Untitled") : program.name)
-              .ritmFont(14.5, weight: .semibold).foregroundStyle(RitmTheme.text).lineLimit(1)
+              .ritmFont(14.5, weight: .semibold, tracking: -0.03).foregroundStyle(RitmTheme.text).lineLimit(1)
             Text(summary).ritmFont(11.5).foregroundStyle(RitmTheme.muted).lineLimit(1)
           }
           Spacer(minLength: 4)
-          Image(systemName: "play.fill").font(.system(size: 13)).foregroundStyle(RitmTheme.accentColor)
+          RitmSymbol("play.fill").font(.system(size: 14)).foregroundStyle(RitmTheme.accentColor)
         }
+        .padding(.leading, 2).padding(.trailing, 6)
         .frame(minHeight: 52)
         .contentShape(Rectangle())
       }
       .buttonStyle(RitmPressStyle())
       .accessibilityLabel(store.text("Начать тренировку «\(program.name)»", "Start workout “\(program.name)”"))
-      Button(action: edit) {
-        Image(systemName: "pencil")
-          .font(.system(size: 16)).foregroundStyle(RitmTheme.muted)
-          .frame(width: 44, height: 44)
-          .contentShape(Rectangle())
-      }
-      .buttonStyle(RitmPressStyle(scale: 0.92))
-      .accessibilityLabel(store.text("Изменить программу «\(program.name)»", "Edit program “\(program.name)”"))
+      WorkoutIconButton(
+        symbol: "pencil", label: store.text("Изменить программу «\(program.name)»", "Edit program “\(program.name)”"),
+        size: 16, action: edit)
     }
-    .padding(.leading, 4).padding(.trailing, 2).padding(.vertical, 4)
+    .padding(.leading, 6).padding(.trailing, 4).padding(.vertical, 4)
+    .frame(minHeight: 60)
     .background { RitmPanelBackground(radius: 20) }
     .accessibilityElement(children: .contain)
     .accessibilityAction(named: store.text("Вверх", "Move up")) { move(-1) }
@@ -228,7 +213,7 @@ struct WorkoutHistoryRow: View {
       HStack(spacing: 8) {
         VStack(alignment: .leading, spacing: 2) {
           Text(WorkoutText.date(record.endedAt, language: store.language))
-            .ritmFont(13.5, weight: .semibold).foregroundStyle(RitmTheme.text)
+            .ritmFont(13.5, weight: .bold).foregroundStyle(RitmTheme.text)
           Text(
             "\(record.programName) · "
               + WorkoutText.exercises(record.exercises.count, russian: russian)
@@ -237,11 +222,13 @@ struct WorkoutHistoryRow: View {
         }
         Spacer(minLength: 4)
         RitmCountText(record.volume) { WorkoutText.kilograms($0, russian: russian) }
-          .ritmFont(13, weight: .semibold).foregroundStyle(RitmTheme.text)
-        Image(systemName: "chevron.right").font(.system(size: 12)).foregroundStyle(RitmTheme.muted)
+          .ritmFont(13, weight: .bold).foregroundStyle(RitmTheme.text)
+        RitmSymbol("chevron.right").font(.system(size: 13, weight: .semibold))
+          .foregroundStyle(RitmTheme.muted)
+          .frame(width: 16)
           .accessibilityHidden(true)
       }
-      .padding(.horizontal, 14)
+      .padding(.horizontal, 12).padding(.vertical, 8)
       .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
       .background { RitmPanelBackground(radius: 18) }
       .contentShape(Rectangle())
@@ -267,10 +254,7 @@ struct WorkoutHistoryView: View {
       content: {
         let records = store.workouts.history.records
         if records.isEmpty {
-          Text(store.text("Пока нет завершённых тренировок", "No finished workouts yet"))
-            .ritmText(.body).foregroundStyle(RitmTheme.muted)
-            .frame(maxWidth: .infinity, minHeight: 120)
-            .background { RitmPanelBackground(radius: 20) }
+          WorkoutEmptyText(text: store.text("Пока нет завершённых тренировок.", "No finished workouts yet."))
             .ritmPageReveal(index: 0)
         } else {
           LazyVStack(spacing: 8) {
