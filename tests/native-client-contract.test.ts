@@ -128,6 +128,31 @@ test('native JSON clients share data while sessions, origins and habit versions 
   };
   assert.ok(sharedHabits.habits[0].completedDates.includes(habit.startDate));
 
+  const workout = await call('/api/workouts/programs/native-1', 'PUT', phone, {
+    data: { name: 'Native contract program' },
+    expectedUpdatedAt: null,
+  });
+  assert.equal(workout.status, 200);
+  const sharedWorkouts = (await (await call('/api/workouts', 'GET', desktop)).json()) as {
+    programs: { id: string }[];
+  };
+  assert.deepEqual(
+    sharedWorkouts.programs.map((item) => item.id),
+    ['native-1'],
+  );
+  assert.equal(
+    (
+      await call(
+        '/api/workouts/programs/native-1',
+        'PUT',
+        phone,
+        { data: {}, expectedUpdatedAt: null },
+        'https://untrusted.example',
+      )
+    ).status,
+    403,
+  );
+
   assert.equal(
     (await call('/api/tasks', 'POST', phone, {}, 'https://untrusted.example')).status,
     403,

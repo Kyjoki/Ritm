@@ -22,6 +22,12 @@ export function requestLanguage(header?: string): Language {
 const messages: Record<string, string> = {
   'Проверьте название привычки и выбранную дату.': 'Check the habit name and selected date.',
   'Привычка не найдена. Обновите страницу.': 'Habit not found. Refresh the page.',
+  'Тренировка не найдена. Обновите страницу.': 'Workout not found. Refresh the page.',
+  'Тренировка изменилась. Обновите данные и повторите действие.':
+    'The workout changed. Refresh and try again.',
+  'Достигнут предел сохранённых тренировок.': 'The saved workouts limit has been reached.',
+  'Проверьте данные тренировки: объект JSON до 64 КБ и корректный идентификатор.':
+    'Check the workout data: a JSON object up to 64 KB and a valid identifier.',
   'Привычка изменилась. Обновите данные и повторите действие.':
     'This habit changed. Refresh your data and try again.',
   'Можно отметить только сегодняшний или прошедший день.': 'You can only mark today or a past day.',

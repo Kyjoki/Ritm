@@ -16,6 +16,9 @@ import type {
   FinanceEntryInput,
   Habit,
   HabitInput,
+  WorkoutDoc,
+  WorkoutKind,
+  WorkoutsSnapshot,
 } from '../shared/types.ts';
 import { AppError, conflict, missing } from './errors.ts';
 import {
@@ -52,6 +55,7 @@ import {
   updateHabitProgress,
 } from './habits.ts';
 import { localDate } from './store.ts';
+import { assertWorkoutDelete, assertWorkoutPut } from './workouts.ts';
 
 const { Pool } = pg;
 type Connection = Pick<PgPool | PoolClient, 'query'>;
@@ -356,6 +360,64 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
         client,
         habits.filter((habit) => habit.id !== id),
       );
+    });
+  }
+  private workoutTable(kind: WorkoutKind) {
+    return kind === 'programs' ? 'workout_programs' : 'workout_sessions';
+  }
+  private workoutFrom(row: Record<string, unknown>): WorkoutDoc {
+    return {
+      id: String(row.id),
+      updatedAt: new Date(row.updated_at as string | Date).toISOString(),
+      data: decoded<Record<string, unknown>>(row.data),
+    };
+  }
+  private async workoutDocs(client: Connection, kind: WorkoutKind): Promise<WorkoutDoc[]> {
+    const result = await client.query(
+      `SELECT id, data, updated_at FROM ${this.workoutTable(kind)} ORDER BY updated_at DESC, id`,
+    );
+    return result.rows.map((row) => this.workoutFrom(row));
+  }
+  async workouts(): Promise<WorkoutsSnapshot> {
+    return {
+      programs: await this.workoutDocs(this.pool, 'programs'),
+      sessions: await this.workoutDocs(this.pool, 'sessions'),
+    };
+  }
+  private async lockedWorkout(
+    client: Connection,
+    kind: WorkoutKind,
+    id: string,
+  ): Promise<WorkoutDoc | undefined> {
+    const result = await client.query(
+      `SELECT id, data, updated_at FROM ${this.workoutTable(kind)} WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    return result.rows[0] ? this.workoutFrom(result.rows[0]) : undefined;
+  }
+  async putWorkout(
+    kind: WorkoutKind,
+    id: string,
+    data: Record<string, unknown>,
+    expectedUpdatedAt: string | null,
+  ): Promise<WorkoutDoc> {
+    return this.transaction(async (client) => {
+      const table = this.workoutTable(kind);
+      const current = await this.lockedWorkout(client, kind, id);
+      const counted = await client.query(`SELECT count(*) AS n FROM ${table}`);
+      assertWorkoutPut(current, expectedUpdatedAt, Number(counted.rows[0]?.n ?? 0), kind);
+      const updatedAt = this.stamp(current?.updatedAt);
+      await client.query(
+        `INSERT INTO ${table} (id, data, updated_at) VALUES ($1, $2::jsonb, $3::timestamptz) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at`,
+        [id, JSON.stringify(data), updatedAt],
+      );
+      return { id, updatedAt, data };
+    });
+  }
+  async deleteWorkout(kind: WorkoutKind, id: string, expectedUpdatedAt: string): Promise<void> {
+    await this.transaction(async (client) => {
+      assertWorkoutDelete(await this.lockedWorkout(client, kind, id), expectedUpdatedAt);
+      await client.query(`DELETE FROM ${this.workoutTable(kind)} WHERE id = $1`, [id]);
     });
   }
   async financeEntries(): Promise<FinanceEntry[]> {

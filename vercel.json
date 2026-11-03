@@ -4,7 +4,8 @@
     "deploymentEnabled": {
       "codex/ritm-native-ios": false,
       "claude/ritm-native-ios-parity": false,
-      "claude/ritm-health-live-activity": false
+      "claude/ritm-health-live-activity": false,
+      "claude/ritm-workouts-sync": false
     }
   },
   "framework": "vite",

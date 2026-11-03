@@ -10,7 +10,9 @@ export function apiRequestGuard(req: Request, res: Response, next: NextFunction)
   try {
     if (Buffer.byteLength(req.originalUrl) > 8192)
       throw new AppError(414, 'URL_TOO_LONG', 'Адрес запроса слишком длинный.');
-    if (!methods.includes(req.method)) {
+    // PUT exists only for versioned workout documents.
+    const putAllowed = req.method === 'PUT' && req.originalUrl.startsWith('/api/workouts/');
+    if (!methods.includes(req.method) && !putAllowed) {
       res.setHeader('Allow', methods.join(', '));
       throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Этот метод запроса не поддерживается.');
     }

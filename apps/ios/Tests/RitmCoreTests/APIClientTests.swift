@@ -7,14 +7,14 @@ import XCTest
   import FoundationNetworking
 #endif
 
-private struct StubReply: Sendable {
+struct StubReply: Sendable {
   var status = 200
   var json: String
   var headers: [String: String] = [:]
   var responseURL: URL? = nil
 }
 
-private actor StubTransport: HTTPTransport {
+actor StubTransport: HTTPTransport {
   private var replies: [StubReply]
   private var recorded: [URLRequest] = []
   init(_ replies: [StubReply]) { self.replies = replies }

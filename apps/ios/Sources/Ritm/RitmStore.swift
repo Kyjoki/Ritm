@@ -79,6 +79,8 @@ final class RitmStore {
   /// The training log («Тренировки»); local to this iPhone and NOT cleared by sign-out or a
   /// server switch: it is the owner's own log, not account data held by the server.
   let workouts = WorkoutStore()
+  /// Mirrors the training log with the server in the background; the local files stay the truth.
+  let workoutSync = WorkoutSyncCoordinator()
   /// Saving finished workouts to Apple Health; local to this iPhone, not cleared by sign-out.
   let health = HealthExportStore()
 
@@ -110,6 +112,10 @@ final class RitmStore {
     // A workout resumed after a relaunch: reuse its lock-screen card and pending notification.
     workouts.syncAlerts()
     workouts.onWorkoutFinished = { [health] in health.exportIfEnabled($0) }
+    workoutSync.configure(workouts: workouts) { [weak self] in
+      guard let self, isSignedIn, let client else { return nil }
+      return .init(remote: client, serverKey: serverAddress.description)
+    }
     health.reconcileOnLaunch()
   }
 
@@ -293,6 +299,7 @@ final class RitmStore {
         return
       }
       isSignedIn = true
+      workoutSync.request()
       await refresh()
     } catch {
       await present(error)
@@ -335,6 +342,7 @@ final class RitmStore {
     }
     isMutating = false
     if isSignedIn {
+      workoutSync.request()
       await refresh()
       schedulePolling()
     }
@@ -616,6 +624,7 @@ final class RitmStore {
     wallet.reset()
     walletFolder.disconnect()
     payments.reset()
+    workoutSync.reset()
     await clearAccount()
     isMutating = false
     if revokeFailed {
@@ -633,6 +642,7 @@ final class RitmStore {
       now = Date()
       workouts.syncAlerts()
       schedulePolling()
+      workoutSync.request()
       Task { await refresh() }
     }
   }

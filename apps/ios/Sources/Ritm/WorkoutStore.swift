@@ -5,8 +5,10 @@ import UIKit
 
 /// The training log of «Тренировки»: programs, history and the workout in progress.
 ///
-/// It lives ONLY on this iPhone, as JSON files in Application Support. The Ritm server has no
-/// workout model and nothing here is sent to it, to the assistant or to any AI request. It is
+/// It is local-first: JSON files in Application Support are what the UI reads and writes, so it
+/// works offline and instantly. Programs and finished workouts are mirrored to the Ritm server in
+/// the background by `WorkoutSyncCoordinator`; the active workout and rest timer never leave the
+/// iPhone, and nothing here is sent to the assistant or to any AI request. It is
 /// deliberately NOT cleared by sign-out or by a server switch: that is the owner's own training
 /// log, not account data that the server holds, so leaving an account must not erase it.
 ///
@@ -35,6 +37,9 @@ final class WorkoutStore {
   @ObservationIgnored let alerts = WorkoutAlerts()
   /// Called with each completed workout, only after it is saved in the journal (never on cancel).
   @ObservationIgnored var onWorkoutFinished: ((WorkoutRecord) -> Void)?
+  /// Called after programs or finished workouts changed on this device (not for changes that
+  /// arrived from the server), so the background sync can send them.
+  @ObservationIgnored var onSyncableChange: (() -> Void)?
 
   @ObservationIgnored private let directory: URL
   @ObservationIgnored private var dirty: Set<File> = []
@@ -260,6 +265,28 @@ final class WorkoutStore {
   /// derive from it; a failure there never touches the journal.
   func syncAlerts(now: Date = Date()) { alerts.sync(session: session, rest: rest, now: now) }
 
+  // MARK: - Server sync
+
+  /// Programs and finished workouts as server documents (the active workout is never synced).
+  func syncDocuments() -> [WorkoutDocKind: [String: JSONValue]] {
+    WorkoutSyncCodec.documents(library: library, history: history)
+  }
+
+  /// Applies what the server sent. Not reported back to the sync as a local change.
+  func applySyncChanges(_ changes: [WorkoutDocKind: [String: JSONValue?]]) {
+    let next = WorkoutSyncCodec.apply(changes, library: library, history: history)
+    if next.library != library {
+      library = next.library
+      scheduleSave(.programs, notifySync: false)
+    }
+    if next.history != history {
+      history = next.history
+      scheduleSave(.history, notifySync: false)
+    }
+  }
+
+  var syncDirectory: URL { directory }
+
   // MARK: - Files
 
   private static func load<T: Decodable>(_ type: T.Type, _ file: File, in directory: URL) -> T? {
@@ -276,7 +303,8 @@ final class WorkoutStore {
     }
   }
 
-  private func scheduleSave(_ file: File) {
+  private func scheduleSave(_ file: File, notifySync: Bool = true) {
+    if notifySync, file != .session { onSyncableChange?() }
     dirty.insert(file)
     saveTasks[file]?.cancel()
     saveTasks[file] = Task { [weak self] in

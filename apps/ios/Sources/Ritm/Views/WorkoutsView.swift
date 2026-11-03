@@ -84,6 +84,15 @@ struct WorkoutPage<Action: View, Bar: View, Content: View>: View {
           )
           .padding(.bottom, 16)
         }
+        if store.workoutSync.failing {
+          Text(
+            store.text(
+              "Не удаётся синхронизировать тренировки. Всё сохранено на iPhone, попробуем снова.",
+              "Can't sync workouts right now. Everything is saved on this iPhone; we'll retry.")
+          )
+          .ritmText(.body).foregroundStyle(RitmTheme.muted)
+          .padding(.bottom, 12)
+        }
         content
       }
       .padding(.horizontal, 16)
@@ -92,6 +101,7 @@ struct WorkoutPage<Action: View, Bar: View, Content: View>: View {
       .frame(maxWidth: .infinity)
     }
     .scrollDismissesKeyboard(.interactively)
+    .refreshable { await store.workoutSync.syncNow() }
     .safeAreaInset(edge: .bottom, spacing: 0) {
       // `.wk-tw { bottom: 102px }`: the bar's lower edge sits 102 pt above the screen edge, clear
       // of the floating navigation bar, whatever room the shell already reserves (`shellInset`).

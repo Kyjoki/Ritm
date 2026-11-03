@@ -9,12 +9,17 @@ public struct APIError: Error, Sendable, Equatable, LocalizedError {
   public let status: Int
   public let code: String?
   public let retryAfterSeconds: Int?
+  /// On a 409 for a workout doc: the `updatedAt` of the version the server holds now.
+  public let currentUpdatedAt: String?
   public var errorDescription: String? { message }
   public var isConflict: Bool { status == 409 }
   public var requiresAuthentication: Bool { status == 401 && code == "AUTH_REQUIRED" }
 
-  public init(message: String, status: Int = 0, code: String? = nil, retryAfterSeconds: Int? = nil)
-  {
+  public init(
+    message: String, status: Int = 0, code: String? = nil, retryAfterSeconds: Int? = nil,
+    currentUpdatedAt: String? = nil
+  ) {
+    self.currentUpdatedAt = currentUpdatedAt
     self.message = message
     self.status = status
     self.code = code
@@ -338,7 +343,12 @@ public actor APIClient {
         response.statusCode == 429 ? rawDelay.flatMap { (1...3600).contains($0) ? $0 : nil } : nil
       throw APIError(
         message: error?.error ?? "Не удалось выполнить действие.", status: response.statusCode,
-        code: error?.code, retryAfterSeconds: delay)
+        code: error?.code, retryAfterSeconds: delay,
+        currentUpdatedAt: response.statusCode == 409
+          ? error?.current?.objectValue?["updatedAt"]?.stringValue : nil)
+    }
+    if T.self == EmptyReply.self, response.statusCode == 204 || data.isEmpty {
+      return EmptyReply() as! T
     }
     guard
       response.value(forHTTPHeaderField: "Content-Type")?.lowercased().contains("application/json")
@@ -659,7 +669,9 @@ private struct ErrorBody: Decodable {
   let error: String
   let code: String?
   let retryAfterSeconds: Int?
+  let current: JSONValue?
 }
+private struct EmptyReply: Decodable, Sendable {}
 private struct DeletedTaskEnvelope: Decodable, Sendable { let deletedTask: RitmTask }
 private struct TaskRestoreInput: Encodable { let task: RitmTask }
 private struct HabitUpdateInput: Encodable {
@@ -719,4 +731,46 @@ private struct ProposalInput: Encodable {
   let conversationId: String
   let messageId: String
   let proposalIds: [String]
+}
+
+// MARK: - Workouts sync
+
+private struct WorkoutPutInput: Encodable {
+  let data: JSONValue
+  let expectedUpdatedAt: String?
+  private enum CodingKeys: String, CodingKey { case data, expectedUpdatedAt }
+  func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(data, forKey: .data)
+    try c.encode(expectedUpdatedAt, forKey: .expectedUpdatedAt)  // `null` means "create"
+  }
+}
+
+extension APIClient: WorkoutSyncRemote {
+  public func fetchWorkouts() async throws -> WorkoutServerSnapshot {
+    try await request(path: ["workouts"])
+  }
+
+  public func putWorkoutDoc(
+    kind: WorkoutDocKind, id: String, data: JSONValue, expectedUpdatedAt: String?
+  ) async throws -> WorkoutDoc {
+    try await request(
+      path: ["workouts", kind.rawValue, try workoutID(id)], method: "PUT",
+      body: encoded(WorkoutPutInput(data: data, expectedUpdatedAt: expectedUpdatedAt)))
+  }
+
+  public func deleteWorkoutDoc(kind: WorkoutDocKind, id: String, expectedUpdatedAt: String)
+    async throws
+  {
+    let _: EmptyReply = try await request(
+      path: ["workouts", kind.rawValue, try workoutID(id)], method: "DELETE",
+      query: [URLQueryItem(name: "expectedUpdatedAt", value: expectedUpdatedAt)])
+  }
+
+  private func workoutID(_ id: String) throws -> String {
+    guard WorkoutSyncRules.isValidID(id) else {
+      throw APIError(message: "Некорректный идентификатор.", status: 400, code: "INVALID_INPUT")
+    }
+    return id
+  }
 }

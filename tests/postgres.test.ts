@@ -112,7 +112,7 @@ async function fixture(t: TestContext) {
 
 test('pg-mem: explicit migrations are repeatable and do not overwrite settings', async (t) => {
   const h = await fixture(t);
-  assert.deepEqual(h.applied, ['001-postgres.sql', '002-finance.sql']);
+  assert.deepEqual(h.applied, ['001-postgres.sql', '002-finance.sql', '003-workouts.sql']);
   await h.store.updateSettings({ displayName: 'Владелец', theme: 'light' });
   assert.deepEqual(await migrate(h.raw), []);
   assert.equal((await h.store.settings()).displayName, 'Владелец');

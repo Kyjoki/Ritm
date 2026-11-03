@@ -12,6 +12,9 @@ import type {
   FinanceEntryInput,
   Habit,
   HabitInput,
+  WorkoutDoc,
+  WorkoutKind,
+  WorkoutsSnapshot,
 } from '../shared/types.ts';
 import { AppError } from './errors.ts';
 
@@ -197,6 +200,14 @@ export interface WorkspaceRepository {
     expectedUpdatedAt: string,
   ): Awaitable<Habit>;
   deleteHabit(id: string, expectedUpdatedAt: string): Awaitable<void>;
+  workouts(): Awaitable<WorkoutsSnapshot>;
+  putWorkout(
+    kind: WorkoutKind,
+    id: string,
+    data: Record<string, unknown>,
+    expectedUpdatedAt: string | null,
+  ): Awaitable<WorkoutDoc>;
+  deleteWorkout(kind: WorkoutKind, id: string, expectedUpdatedAt: string): Awaitable<void>;
   financeEntries(): Awaitable<FinanceEntry[]>;
   createFinanceEntry(input: FinanceEntryInput): Awaitable<FinanceEntry>;
   updateFinanceEntry(

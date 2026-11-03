@@ -17,8 +17,12 @@ import type {
   FinanceEntryInput,
   Habit,
   HabitInput,
+  WorkoutDoc,
+  WorkoutKind,
+  WorkoutsSnapshot,
 } from '../shared/types.ts';
 import { AppError, conflict, missing } from './errors.ts';
+import { assertWorkoutDelete, assertWorkoutPut } from './workouts.ts';
 import {
   financeEntryInputSchema,
   habitInputSchema,
@@ -106,6 +110,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS deleted_tasks (id TEXT PRIMARY KEY, json TEXT NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, json TEXT NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS finance_entries (id TEXT PRIMARY KEY, json TEXT NOT NULL) STRICT;
+      CREATE TABLE IF NOT EXISTS workout_programs (id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL, created_at TEXT NOT NULL) STRICT;
+      CREATE TABLE IF NOT EXISTS workout_sessions (id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL, created_at TEXT NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, json TEXT NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS chat_requests (
         id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, conversation_id TEXT,
@@ -297,6 +303,59 @@ export class Store {
       if (!current) throw new AppError(404, 'NOT_FOUND', 'Привычка не найдена. Обновите страницу.');
       assertHabitVersion(current, expectedUpdatedAt);
       this.writeHabits(habits.filter((habit) => habit.id !== id));
+    });
+  }
+  private workoutTable(kind: WorkoutKind) {
+    return kind === 'programs' ? 'workout_programs' : 'workout_sessions';
+  }
+  private workoutFrom(row: Record<string, unknown>): WorkoutDoc {
+    return {
+      id: String(row.id),
+      updatedAt: String(row.updated_at),
+      data: JSON.parse(String(row.data)) as Record<string, unknown>,
+    };
+  }
+  private workoutDocs(kind: WorkoutKind): WorkoutDoc[] {
+    return this.db
+      .prepare(
+        `SELECT id, data, updated_at FROM ${this.workoutTable(kind)} ORDER BY updated_at DESC, id`,
+      )
+      .all()
+      .map((row) => this.workoutFrom(row));
+  }
+  private workoutDoc(kind: WorkoutKind, id: string): WorkoutDoc | undefined {
+    const row = this.db
+      .prepare(`SELECT id, data, updated_at FROM ${this.workoutTable(kind)} WHERE id=?`)
+      .get(id);
+    return row ? this.workoutFrom(row) : undefined;
+  }
+  workouts(): WorkoutsSnapshot {
+    return { programs: this.workoutDocs('programs'), sessions: this.workoutDocs('sessions') };
+  }
+  putWorkout(
+    kind: WorkoutKind,
+    id: string,
+    data: Record<string, unknown>,
+    expectedUpdatedAt: string | null,
+  ): WorkoutDoc {
+    return this.transaction(() => {
+      const table = this.workoutTable(kind);
+      const current = this.workoutDoc(kind, id);
+      const count = Number(this.db.prepare(`SELECT count(*) AS n FROM ${table}`).get()?.n ?? 0);
+      assertWorkoutPut(current, expectedUpdatedAt, count, kind);
+      const updatedAt = this.stamp(current?.updatedAt);
+      this.db
+        .prepare(
+          `INSERT INTO ${table}(id,data,updated_at,created_at) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`,
+        )
+        .run(id, JSON.stringify(data), updatedAt, updatedAt);
+      return { id, updatedAt, data };
+    });
+  }
+  deleteWorkout(kind: WorkoutKind, id: string, expectedUpdatedAt: string): void {
+    this.transaction(() => {
+      assertWorkoutDelete(this.workoutDoc(kind, id), expectedUpdatedAt);
+      this.db.prepare(`DELETE FROM ${this.workoutTable(kind)} WHERE id=?`).run(id);
     });
   }
   financeEntries(): FinanceEntry[] {

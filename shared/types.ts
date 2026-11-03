@@ -303,3 +303,14 @@ export interface TelegramStatus {
     problem: string | null;
   };
 }
+
+export type WorkoutKind = 'programs' | 'sessions';
+export interface WorkoutDoc {
+  id: string;
+  updatedAt: string;
+  data: Record<string, unknown>;
+}
+export interface WorkoutsSnapshot {
+  programs: WorkoutDoc[];
+  sessions: WorkoutDoc[];
+}

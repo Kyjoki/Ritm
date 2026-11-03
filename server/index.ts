@@ -27,6 +27,13 @@ import type { VoiceInterpreter } from './telegram-voice.ts';
 import { Security } from './security.ts';
 import { AppError, conflict } from './errors.ts';
 import {
+  WorkoutConflictError,
+  workoutDeleteQuerySchema,
+  workoutIdSchema,
+  workoutKindSchema,
+  workoutPutSchema,
+} from './workouts.ts';
+import {
   localizeError,
   localizeGoogleEvent,
   localizeGoogleResult,
@@ -534,6 +541,24 @@ export function createApp(options: AppOptions = {}) {
     await store.deleteHabit(id, expectedUpdatedAt);
     res.json({ deleted: true });
   });
+  app.get('/api/workouts', async (_req, res) => {
+    res.json(await store.workouts());
+  });
+  app.put('/api/workouts/:kind/:id', async (req, res) => {
+    const kind = workoutKindSchema.parse(req.params.kind);
+    const id = workoutIdSchema.parse(req.params.id);
+    const { data, expectedUpdatedAt } = workoutPutSchema.parse(req.body);
+    await security.limit(req, 'workout-write', 60, 60_000);
+    res.json(await store.putWorkout(kind, id, data, expectedUpdatedAt));
+  });
+  app.delete('/api/workouts/:kind/:id', async (req, res) => {
+    const kind = workoutKindSchema.parse(req.params.kind);
+    const id = workoutIdSchema.parse(req.params.id);
+    const { expectedUpdatedAt } = workoutDeleteQuerySchema.parse(req.query);
+    await security.limit(req, 'workout-write', 60, 60_000);
+    await store.deleteWorkout(kind, id, expectedUpdatedAt);
+    res.status(204).end();
+  });
   app.get('/api/finance', async (_req, res) => {
     res.json({ entries: await store.financeEntries() });
   });
@@ -845,6 +870,7 @@ export function createApp(options: AppOptions = {}) {
       res.status(error.status).json({
         error: localizeError(error.message, error.code, language),
         code: error.code,
+        ...(error instanceof WorkoutConflictError ? { current: error.current } : {}),
         ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
       });
       return;
@@ -860,15 +886,17 @@ export function createApp(options: AppOptions = {}) {
               ? 'Проверьте имя, почту, часовой пояс и время рабочего дня.'
               : path === '/api/login'
                 ? 'Введите логин и пароль приложения.'
-                : path.startsWith('/api/finance')
-                  ? 'Проверьте сумму, валюту, дату и описание финансовой записи.'
-                  : path.startsWith('/api/habits')
-                    ? 'Проверьте название привычки и выбранную дату.'
-                    : path === '/api/chat'
-                      ? 'Введите сообщение длиной до 6000 символов.'
-                      : path.startsWith('/api/proposals/')
-                        ? 'Не удалось выбрать изменения. Обновите диалог и повторите.'
-                        : 'Проверьте заполненные поля: название, дату, время и длительность.';
+                : path.startsWith('/api/workouts')
+                  ? 'Проверьте данные тренировки: объект JSON до 64 КБ и корректный идентификатор.'
+                  : path.startsWith('/api/finance')
+                    ? 'Проверьте сумму, валюту, дату и описание финансовой записи.'
+                    : path.startsWith('/api/habits')
+                      ? 'Проверьте название привычки и выбранную дату.'
+                      : path === '/api/chat'
+                        ? 'Введите сообщение длиной до 6000 символов.'
+                        : path.startsWith('/api/proposals/')
+                          ? 'Не удалось выбрать изменения. Обновите диалог и повторите.'
+                          : 'Проверьте заполненные поля: название, дату, время и длительность.';
       res.status(400).json({
         error: localizeError(message, 'VALIDATION_ERROR', language),
         code: 'VALIDATION_ERROR',
