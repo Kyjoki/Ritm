@@ -16,27 +16,55 @@ public enum WorkoutOrder {
 
 // MARK: - Exercise catalog
 
+/// The muscle group chip of an exercise and the filter of the exercise search.
+public enum WorkoutMuscle: String, Codable, CaseIterable, Sendable {
+  case chest, back, legs, shoulders, biceps, triceps, abs
+
+  public func title(language: Language) -> String {
+    switch self {
+    case .chest: language == .ru ? "Грудь" : "Chest"
+    case .back: language == .ru ? "Спина" : "Back"
+    case .legs: language == .ru ? "Ноги" : "Legs"
+    case .shoulders: language == .ru ? "Плечи" : "Shoulders"
+    case .biceps: language == .ru ? "Бицепс" : "Biceps"
+    case .triceps: language == .ru ? "Трицепс" : "Triceps"
+    case .abs: language == .ru ? "Пресс" : "Abs"
+    }
+  }
+}
+
 public enum WorkoutCatalog {
-  private static let builtinNames: [(id: String, ru: String, en: String)] = [
-    ("bench", "Жим лёжа", "Bench press"),
-    ("incline", "Жим гантелей на наклонной", "Incline dumbbell press"),
-    ("fly", "Разводка гантелей", "Dumbbell fly"),
-    ("french", "Французский жим", "Skull crusher"),
-    ("deadlift", "Становая тяга", "Deadlift"),
-    ("pullup", "Подтягивания", "Pull-up"),
-    ("row", "Тяга штанги в наклоне", "Barbell row"),
-    ("pulldown", "Тяга верхнего блока", "Lat pulldown"),
-    ("curl", "Подъём штанги на бицепс", "Barbell curl"),
-    ("squat", "Присед со штангой", "Barbell squat"),
-    ("legpress", "Жим ногами", "Leg press"),
-    ("rdl", "Румынская тяга", "Romanian deadlift"),
-    ("ohp", "Жим стоя", "Overhead press"),
-    ("lunge", "Выпады с гантелями", "Dumbbell lunge"),
-    ("dips", "Отжимания на брусьях", "Dips"),
-    ("crunch", "Скручивания", "Crunch"),
-    ("lateral", "Махи гантелями в стороны", "Lateral raise"),
-    ("legraise", "Подъём ног в висе", "Hanging leg raise"),
-    ("twist", "Русские скручивания", "Russian twist"),
+  private static let builtinNames: [(id: String, ru: String, en: String, muscle: WorkoutMuscle)] = [
+    ("bench", "Жим лёжа", "Bench press", .chest),
+    ("incline", "Жим гантелей на наклонной", "Incline dumbbell press", .chest),
+    ("fly", "Разводка гантелей", "Dumbbell fly", .chest),
+    ("dips", "Отжимания на брусьях", "Dips", .chest),
+    ("crossover", "Сведение в кроссовере", "Cable crossover", .chest),
+    ("deadlift", "Становая тяга", "Deadlift", .back),
+    ("pullup", "Подтягивания", "Pull-up", .back),
+    ("row", "Тяга штанги в наклоне", "Barbell row", .back),
+    ("pulldown", "Тяга верхнего блока", "Lat pulldown", .back),
+    ("dbrow", "Тяга гантели одной рукой", "One-arm dumbbell row", .back),
+    ("cablerow", "Тяга нижнего блока", "Seated cable row", .back),
+    ("squat", "Присед со штангой", "Barbell squat", .legs),
+    ("legpress", "Жим ногами", "Leg press", .legs),
+    ("rdl", "Румынская тяга", "Romanian deadlift", .legs),
+    ("lunge", "Выпады с гантелями", "Dumbbell lunge", .legs),
+    ("legcurl", "Сгибание ног лёжа", "Lying leg curl", .legs),
+    ("ohp", "Жим стоя", "Overhead press", .shoulders),
+    ("lateral", "Махи гантелями в стороны", "Lateral raise", .shoulders),
+    ("arnold", "Жим Арнольда", "Arnold press", .shoulders),
+    ("upright", "Тяга к подбородку", "Upright row", .shoulders),
+    ("reardelt", "Задние дельты в тренажёре", "Rear delt machine", .shoulders),
+    ("curl", "Подъём штанги на бицепс", "Barbell curl", .biceps),
+    ("hammer", "Молотки", "Hammer curl", .biceps),
+    ("preacher", "Сгибания на скамье Скотта", "Preacher curl", .biceps),
+    ("french", "Французский жим", "Skull crusher", .triceps),
+    ("pushdown", "Разгибания на блоке", "Triceps pushdown", .triceps),
+    ("closegrip", "Жим узким хватом", "Close-grip bench press", .triceps),
+    ("crunch", "Скручивания", "Crunch", .abs),
+    ("legraise", "Подъём ног в висе", "Hanging leg raise", .abs),
+    ("twist", "Русские скручивания", "Russian twist", .abs),
   ]
 
   /// Built-in ids are stable and never depend on the language.
@@ -44,7 +72,7 @@ public enum WorkoutCatalog {
 
   public static func builtin(language: Language) -> [WorkoutExercise] {
     builtinNames.map {
-      WorkoutExercise(id: builtinID($0.id), name: language == .ru ? $0.ru : $0.en)
+      WorkoutExercise(id: builtinID($0.id), name: language == .ru ? $0.ru : $0.en, muscle: $0.muscle)
     }
   }
 
@@ -55,12 +83,31 @@ public enum WorkoutCatalog {
   public static func name(of id: String, custom: [WorkoutExercise], language: Language) -> String? {
     all(custom: custom, language: language).first { $0.id == id }?.name
   }
+
+  public static func muscle(of id: String, custom: [WorkoutExercise]) -> WorkoutMuscle? {
+    all(custom: custom, language: .ru).first { $0.id == id }?.muscle
+  }
+
+  /// The exercises that match the search text and muscle group (any when `nil`).
+  public static func search(
+    _ query: String, muscle: WorkoutMuscle?, custom: [WorkoutExercise], language: Language
+  ) -> [WorkoutExercise] {
+    let key = query.trimmingCharacters(in: .whitespaces).lowercased()
+    return all(custom: custom, language: language).filter { exercise in
+      (muscle == nil || exercise.muscle == muscle)
+        && (key.isEmpty || exercise.name.lowercased().contains(key))
+    }
+  }
 }
 
 // MARK: - Programs
 
 extension WorkoutLibrary {
   public func program(_ id: String) -> WorkoutProgram? { programs.first { $0.id == id } }
+
+  public func muscle(of exerciseID: String) -> WorkoutMuscle? {
+    WorkoutCatalog.muscle(of: exerciseID, custom: customExercises)
+  }
 
   public func exerciseName(_ id: String, language: Language) -> String {
     WorkoutCatalog.name(of: id, custom: customExercises, language: language)
@@ -87,8 +134,10 @@ extension WorkoutLibrary {
     let copy = WorkoutProgram(
       id: makeID(), name: Self.clean(original.name + suffix),
       items: original.items.map {
-        WorkoutProgramItem(id: makeID(), exerciseID: $0.exerciseID, sets: $0.sets)
-      })
+        WorkoutProgramItem(
+          id: makeID(), exerciseID: $0.exerciseID, sets: $0.sets, reps: $0.reps,
+          restSeconds: $0.restSeconds)
+      }, colorIndex: original.colorIndex)
     programs.insert(copy, at: index + 1)
     return copy.id
   }
@@ -122,7 +171,9 @@ extension WorkoutLibrary {
     else { return false }
     update(programID) { program in
       program.items = program.items.map {
-        $0.id == itemID ? WorkoutProgramItem(id: $0.id, exerciseID: exerciseID, sets: $0.sets) : $0
+        var item = $0
+        if item.id == itemID { item.exerciseID = exerciseID }
+        return item
       }
     }
     return true
@@ -131,7 +182,13 @@ extension WorkoutLibrary {
   public mutating func setPlannedSets(_ count: Int, item itemID: String, in programID: String) {
     update(programID) { program in
       program.items = program.items.map {
-        $0.id == itemID ? WorkoutProgramItem(id: $0.id, exerciseID: $0.exerciseID, sets: count) : $0
+        var item = $0
+        if item.id == itemID {
+          item = WorkoutProgramItem(
+            id: item.id, exerciseID: item.exerciseID, sets: count, reps: item.reps,
+            restSeconds: item.restSeconds)
+        }
+        return item
       }
     }
   }
@@ -144,7 +201,7 @@ extension WorkoutLibrary {
   /// custom, any letter case) returns that exercise instead of a duplicate. Names are 2–40
   /// characters.
   public mutating func createExercise(
-    named raw: String, id: String = WorkoutID.make()
+    named raw: String, muscle: WorkoutMuscle? = nil, id: String = WorkoutID.make()
   ) -> WorkoutExercise? {
     let name = Self.clean(raw, limit: 40)
     guard name.count >= 2 else { return nil }
@@ -156,7 +213,7 @@ extension WorkoutLibrary {
         return found
       }
     }
-    let exercise = WorkoutExercise(id: "custom." + id, name: name)
+    let exercise = WorkoutExercise(id: "custom." + id, name: name, muscle: muscle)
     customExercises.append(exercise)
     return exercise
   }
@@ -179,6 +236,7 @@ extension WorkoutSessionItem {
   /// only, and the sets are pre-filled from it. Pre-filled values never count as done.
   public static func make(
     exerciseID: String, name: String, setCount: Int, history: WorkoutHistory,
+    plannedReps: Int? = nil, restSeconds: Int = WorkoutProgramItem.defaultRest,
     makeID: () -> String = WorkoutID.make
   ) -> WorkoutSessionItem {
     let previous = history.lastResult(exerciseID: exerciseID)
@@ -186,10 +244,11 @@ extension WorkoutSessionItem {
       let result = previous.flatMap { $0.set(at: index) ?? $0.sets.last }
       return WorkoutSet(
         id: makeID(), weight: result.map { WorkoutFormat.weight($0.weight) } ?? "",
-        reps: result.map { String($0.reps) } ?? "")
+        reps: result.map { String($0.reps) } ?? plannedReps.map(String.init) ?? "")
     }
     return WorkoutSessionItem(
-      id: makeID(), exerciseID: exerciseID, name: name, previous: previous, sets: sets)
+      id: makeID(), exerciseID: exerciseID, name: name, previous: previous, sets: sets,
+      restSeconds: restSeconds)
   }
 }
 
@@ -204,7 +263,8 @@ extension WorkoutSession {
     let items = program.items.map {
       WorkoutSessionItem.make(
         exerciseID: $0.exerciseID, name: library.exerciseName($0.exerciseID, language: language),
-        setCount: $0.sets, history: history, makeID: makeID)
+        setCount: $0.sets, history: history, plannedReps: $0.reps, restSeconds: $0.restSeconds,
+        makeID: makeID)
     }
     return WorkoutSession(
       id: makeID(), programID: program.id, programName: program.name, startedAt: now, items: items)
@@ -230,7 +290,8 @@ extension WorkoutSession {
     let old = items[index]
     let open = old.sets.filter { !$0.done }.count
     let replacement = WorkoutSessionItem.make(
-      exerciseID: exerciseID, name: name, setCount: max(1, open), history: history, makeID: makeID)
+      exerciseID: exerciseID, name: name, setCount: max(1, open), history: history,
+      restSeconds: old.restSeconds, makeID: makeID)
     if old.sets.contains(where: \.done) {
       items[index].sets = old.sets.filter(\.done)
       items.insert(replacement, at: index + 1)

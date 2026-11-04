@@ -7,7 +7,8 @@
       "claude/ritm-health-live-activity": false,
       "claude/ritm-workouts-sync": false,
       "claude/ritm-security": false,
-      "claude/ritm-session-keep": false
+      "claude/ritm-session-keep": false,
+      "claude/ritm-workouts-redesign": false
     }
   },
   "framework": "vite",

@@ -1,302 +1,257 @@
 import RitmCore
 import SwiftUI
 
-/// Where the exercise picker was opened from, and what a choice does.
-enum WorkoutPickerMode: Identifiable, Equatable {
-  case add
-  case replace(String)
-
-  var id: String {
-    switch self {
-    case .add: "add"
-    case .replace(let item): "replace-" + item
-    }
-  }
-}
-
-/// The program editor: name, order of programs, duplicate and delete, and the exercise cards
-/// (planned sets, replace, reorder, delete). Editing never touches a started workout or history.
+/// The program editor, also for a new program: name, colour, exercises with sets, reps and rest,
+/// «Сохранить» / «Отмена». Everything is a draft until «Сохранить»; editing never touches a
+/// started workout or the history.
 struct WorkoutEditorView: View {
   @Environment(RitmStore.self) private var store
   let programID: String
+  let isNew: Bool
   let go: (WorkoutScreen) -> Void
-  @State private var picker: WorkoutPickerMode?
-  @State private var deletingItem: String?
-  @State private var deletingProgram = false
-  @State private var name = ""
+  @State private var draft = WorkoutProgramDraft()
   @State private var loaded = false
-  @FocusState private var nameFocused: Bool
+  @State private var picking = false
+  @State private var deleting = false
 
   private var workouts: WorkoutStore { store.workouts }
 
   var body: some View {
     WorkoutPage(
-      title: store.text("Программа", "Program"),
-      action: {
-        WorkoutHeaderButton(
-          symbol: "chevron.left", label: store.text("Назад к программам", "Back to programs")
-        ) { close() }
-      },
+      header: { topBar },
       content: {
-        if let program = workouts.program(programID) {
-          content(program)
+        VStack(alignment: .leading, spacing: 0) {
+          label(store.text("Название", "Name"))
+          TextField(store.text("Название программы", "Program name"), text: $draft.name)
+            .ritmFont(17, weight: .semibold, tracking: -0.02).foregroundStyle(RitmTheme.text)
+            .submitLabel(.done)
+            .onChange(of: draft.name) { _, value in
+              if value.count > WorkoutProgram.nameLimit {
+                draft.name = String(value.prefix(WorkoutProgram.nameLimit))
+              }
+            }
+            .padding(.horizontal, 16).frame(height: 52)
+            .background(RitmTheme.field, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(RitmTheme.line, lineWidth: 1) }
+          label(store.text("Цвет", "Colour"))
+          swatches
+          label(store.text("Упражнения · \(draft.items.count)", "Exercises · \(draft.items.count)"))
+          exercisesList
+          Button {
+            picking = true
+          } label: {
+            HStack(spacing: 8) {
+              RitmSymbol("plus").font(.system(size: 18))
+              Text(store.text("Добавить упражнение", "Add exercise")).ritmFont(14.5, weight: .bold)
+            }
+            .foregroundStyle(RitmTheme.accentColor)
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .ritmGlass(in: Capsule(), interactive: true)
+            .contentShape(Capsule())
+          }
+          .buttonStyle(RitmGlassButtonStyle())
+          .padding(.top, 10)
+          if !isNew {
+            Button {
+              deleting = true
+            } label: {
+              HStack(spacing: 8) {
+                RitmSymbol("trash").font(.system(size: 18))
+                Text(store.text("Удалить программу", "Delete program")).ritmFont(14.5, weight: .bold)
+              }
+              .foregroundStyle(RitmTheme.danger)
+              .frame(maxWidth: .infinity, minHeight: 50)
+              .ritmGlass(in: Capsule(), interactive: true)
+              .contentShape(Capsule())
+            }
+            .buttonStyle(RitmGlassButtonStyle())
+            .padding(.top, 10)
+          }
         }
       }
     )
-    .onAppear {
-      guard !loaded else { return }
-      loaded = true
-      name = workouts.program(programID)?.name ?? ""
+    .onAppear(perform: load)
+    .sheet(isPresented: $picking) {
+      WorkoutExercisePicker(
+        title: store.text("Добавить упражнение", "Add exercise"),
+        used: Set(draft.items.map(\.exerciseID)),
+        usedNote: store.text("уже в программе", "already in the program")
+      ) { exercise in
+        withAnimation(RitmMotion.easeOut(0.24)) { _ = draft.add(exerciseID: exercise.id) }
+      }
     }
-    .onChange(of: workouts.program(programID) == nil) { _, gone in
-      if gone { go(.home) }
-    }
-    .sheet(item: $picker) { mode in pickerSheet(for: mode) }
-    .confirmationDialog(
-      store.text("Удалить программу?", "Delete program?"), isPresented: $deletingProgram,
-      titleVisibility: .visible
-    ) {
-      Button(store.text("Удалить программу", "Delete program"), role: .destructive) {
+    .alert(store.text("Удалить программу?", "Delete program?"), isPresented: $deleting) {
+      Button(store.text("Удалить", "Delete"), role: .destructive) {
         workouts.deleteProgram(programID)
         store.toasts.show(store.text("Программа удалена", "Program deleted"))
+        go(.home)
       }
       Button(store.text("Отмена", "Cancel"), role: .cancel) {}
     } message: {
       Text(
         store.text(
-          "История выполненных тренировок не изменится.", "Finished workouts stay in the history."))
-    }
-    .confirmationDialog(
-      store.text("Удалить упражнение?", "Delete exercise?"),
-      isPresented: Binding(get: { deletingItem != nil }, set: { if !$0 { deletingItem = nil } }),
-      titleVisibility: .visible
-    ) {
-      Button(store.text("Удалить упражнение", "Delete exercise"), role: .destructive) {
-        if let item = deletingItem {
-          withAnimation(RitmMotion.easeOut(0.24)) { workouts.removeItem(item, from: programID) }
-          store.toasts.show(store.text("Упражнение удалено из программы", "Exercise removed from the program"))
-        }
-        deletingItem = nil
-      }
-      Button(store.text("Отмена", "Cancel"), role: .cancel) { deletingItem = nil }
-    } message: {
-      Text(
-        store.text(
-          "История выполненных тренировок не изменится.", "Finished workouts stay in the history."))
+          "Программа будет удалена. История выполненных тренировок не изменится.",
+          "The program will be deleted. Finished workouts stay in the history."))
     }
   }
 
-  // MARK: Content
-
-  private func content(_ program: WorkoutProgram) -> some View {
-    VStack(alignment: .leading, spacing: 12) {
-      header(program).ritmPageReveal(index: 0)
-      if program.items.isEmpty {
-        WorkoutEmptyText(text: store.text("В программе пока нет упражнений.", "No exercises in this program yet."))
-          .ritmPageReveal(index: 1)
-      } else {
-        WorkoutReorderList(
-          items: program.items, spacing: 10, handleSize: 22,
-          onMove: { workouts.moveItem(in: programID, from: $0, to: $1) }
-        ) { item, handle in
-          let index = program.items.firstIndex { $0.id == item.id } ?? 0
-          exerciseCard(item, index: index, count: program.items.count, handle: handle)
-        }
-        .ritmPageReveal(index: 1)
-      }
-      Button {
-        picker = .add
-      } label: {
-        Label { Text(store.text("Добавить упражнение", "Add exercise")) } icon: { RitmSymbol("plus") }
-          .workoutButtonFont()
-          .frame(maxWidth: .infinity)
-      }
-      .buttonStyle(RitmSecondaryButtonStyle(minHeight: 48))
-      .ritmPageReveal(index: 2)
+  private func load() {
+    guard !loaded else { return }
+    loaded = true
+    if let program = workouts.program(programID) {
+      draft = WorkoutProgramDraft(program: program)
+    } else {
+      draft = WorkoutProgramDraft(colorIndex: workouts.library.programs.count % WorkoutProgram.colorCount)
     }
   }
 
-  private func header(_ program: WorkoutProgram) -> some View {
-    let index = workouts.library.programs.firstIndex { $0.id == program.id } ?? 0
-    let count = workouts.library.programs.count
-    return RitmCard(padding: 14) {
-      VStack(alignment: .leading, spacing: 12) {
-        VStack(alignment: .leading, spacing: 5) {
-          Text(store.text("Название программы", "Program name"))
-            .ritmFont(12, weight: .medium).foregroundStyle(RitmTheme.muted)
-          TextField(store.text("Название", "Name"), text: $name)
-            .focused($nameFocused)
-            .submitLabel(.done)
-            .onSubmit { commitName() }
-            .onChange(of: name) { _, value in
-              let limited = String(value.prefix(WorkoutProgram.nameLimit))
-              if limited != value { name = limited }
-              workouts.renameProgram(programID, to: limited)
-            }
-            .onChange(of: nameFocused) { _, focused in if !focused { commitName() } }
-            .ritmFont(14, weight: .medium)
-            .foregroundStyle(RitmTheme.text)
-            .padding(.horizontal, 12)
-            .frame(minHeight: 46)
-            .background(RitmTheme.field, in: RoundedRectangle(cornerRadius: 12, style: .circular))
-            .overlay {
-              RoundedRectangle(cornerRadius: 12, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1)
-            }
-        }
-        HStack(spacing: 6) {
-          WorkoutIconButton(symbol: "arrow.up", label: store.text("Переместить программу выше", "Move program up")) {
-            moveProgram(index, by: -1)
-          }
-          .disabled(index == 0)
-          WorkoutIconButton(symbol: "arrow.down", label: store.text("Переместить программу ниже", "Move program down")) {
-            moveProgram(index, by: 1)
-          }
-          .disabled(index >= count - 1)
-          Button {
-            duplicate()
-          } label: {
-            Text(store.text("Дублировать", "Duplicate")).frame(maxWidth: .infinity)
-          }
-          .buttonStyle(WorkoutRaisedButtonStyle())
-          WorkoutIconButton(
-            symbol: "trash", label: store.text("Удалить программу", "Delete program")
-          ) { deletingProgram = true }
-        }
+  // MARK: Pieces
+
+  private var topBar: some View {
+    HStack {
+      Button(store.text("Отмена", "Cancel")) { go(isNew ? .home : .program(programID)) }
+        .ritmFont(15, weight: .semibold).foregroundStyle(RitmTheme.accentColor)
+        .frame(minHeight: 44)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      Text(isNew ? store.text("Новая программа", "New program") : store.text("Изменить", "Edit"))
+        .ritmFont(16, weight: .bold, tracking: -0.03).foregroundStyle(RitmTheme.text)
+        .accessibilityAddTraits(.isHeader)
+      Button(action: save) {
+        Text(store.text("Сохранить", "Save")).ritmFont(13.5, weight: .bold)
+          .foregroundStyle(RitmTheme.ctaInk)
+          .padding(.horizontal, 16).frame(height: 38)
+          .ritmGlass(in: Capsule(), prominent: true, interactive: true)
+          .frame(minHeight: 44)
+          .contentShape(Capsule())
       }
+      .buttonStyle(RitmGlassButtonStyle())
+      .disabled(!draft.canSave).opacity(draft.canSave ? 1 : 0.4)
+      .frame(maxWidth: .infinity, alignment: .trailing)
     }
+    .padding(.bottom, 4)
   }
 
-  private func exerciseCard(
-    _ item: WorkoutProgramItem, index: Int, count: Int, handle: WorkoutDragHandle
-  ) -> some View {
-    let title = workouts.exerciseName(item.exerciseID, language: store.language)
-    return VStack(alignment: .leading, spacing: 8) {
-      HStack(spacing: 8) {
-        handle.padding(.leading, -6)
-        VStack(alignment: .leading, spacing: 0) {
-          Text(title).ritmFont(15, weight: .semibold, tracking: -0.03).foregroundStyle(RitmTheme.text)
-            .fixedSize(horizontal: false, vertical: true)
-          HStack(spacing: 0) {
-            Text(store.text("Подходов: ", "Sets: "))
-            Text("\(item.sets)").fontWeight(.bold)
-          }
-          .ritmFont(12).foregroundStyle(RitmTheme.muted)
-        }
-        Spacer(minLength: 4)
-        WorkoutIconButton(
-          symbol: "trash", label: store.text("Удалить упражнение «\(title)»", "Delete exercise “\(title)”")
-        ) { deletingItem = item.id }
-      }
-      HStack(spacing: 6) {
-        stepper(item)
+  private func label(_ text: String) -> some View {
+    Text(text.uppercased()).ritmFont(12, weight: .semibold, tracking: 0.06)
+      .foregroundStyle(RitmTheme.muted)
+      .padding(.horizontal, 4).padding(.top, 18).padding(.bottom, 8)
+  }
+
+  /// `.sws`: the six gradients of the program card.
+  private var swatches: some View {
+    HStack(spacing: 10) {
+      ForEach(0..<WorkoutProgram.colorCount, id: \.self) { index in
+        let selected = draft.colorIndex == index
         Button {
-          picker = .replace(item.id)
+          draft.colorIndex = index
         } label: {
-          Label { Text(store.text("Заменить", "Replace")) } icon: { RitmSymbol("arrow.left.arrow.right") }
-            .frame(maxWidth: .infinity)
+          RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(WorkoutPalette.gradient(index))
+            .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.3), lineWidth: 1) }
+            .frame(width: 42, height: 42)
+            .padding(4)
+            .overlay {
+              if selected {
+                RoundedRectangle(cornerRadius: 17, style: .continuous).strokeBorder(RitmTheme.accentColor, lineWidth: 2)
+              }
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(WorkoutRaisedButtonStyle())
-        .accessibilityLabel(store.text("Заменить упражнение «\(title)»", "Replace exercise “\(title)”"))
-        WorkoutIconButton(symbol: "arrow.up", label: store.text("Переместить выше", "Move up")) {
-          moveItem(index, by: -1)
-        }
-        .disabled(index == 0)
-        WorkoutIconButton(symbol: "arrow.down", label: store.text("Переместить ниже", "Move down")) {
-          moveItem(index, by: 1)
-        }
-        .disabled(index >= count - 1)
+        .buttonStyle(RitmPressStyle(scale: 0.92))
+        .padding(-4)
+        .accessibilityLabel(store.text("Цвет \(index + 1)", "Colour \(index + 1)"))
+        .accessibilityAddTraits(selected ? .isSelected : [])
       }
     }
-    .padding(12)
-    .background { RitmPanelBackground(radius: 23) }
-    .accessibilityElement(children: .contain)
-    .accessibilityAction(named: store.text("Вверх", "Move up")) { moveItem(index, by: -1) }
-    .accessibilityAction(named: store.text("Вниз", "Move down")) { moveItem(index, by: 1) }
   }
 
-  private func stepper(_ item: WorkoutProgramItem) -> some View {
-    HStack(spacing: 0) {
-      stepButton("minus", store.text("Меньше подходов", "Fewer sets"), enabled: item.sets > WorkoutProgramItem.setRange.lowerBound) {
-        workouts.setPlannedSets(item.sets - 1, item: item.id, in: programID)
-      }
-      Text("\(item.sets)").ritmFont(15, weight: .bold).monospacedDigit()
-        .frame(minWidth: 22).foregroundStyle(RitmTheme.text)
-        .accessibilityLabel(store.text("Подходов: \(item.sets)", "Sets: \(item.sets)"))
-      stepButton("plus", store.text("Больше подходов", "More sets"), enabled: item.sets < WorkoutProgramItem.setRange.upperBound) {
-        workouts.setPlannedSets(item.sets + 1, item: item.id, in: programID)
+  @ViewBuilder private var exercisesList: some View {
+    if draft.items.isEmpty {
+      WorkoutEmptyText(text: store.text("В программе пока нет упражнений.", "No exercises in this program yet."))
+    } else {
+      WorkoutReorderList(
+        items: draft.items, spacing: 8, cornerRadius: 20, handleSize: 20,
+        onMove: { draft.move(from: $0, to: $1) }
+      ) { item, handle in
+        row(item, handle: handle)
       }
     }
-    .background(RitmTheme.field, in: RoundedRectangle(cornerRadius: 14, style: .circular))
-    .overlay { RoundedRectangle(cornerRadius: 14, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1) }
   }
 
-  private func stepButton(
-    _ symbol: String, _ label: String, enabled: Bool, action: @escaping () -> Void
+  /// `.ed-row`: grip, name and muscle, ×; below it the sets, reps and rest steppers.
+  private func row(_ item: WorkoutProgramItem, handle: WorkoutDragHandle) -> some View {
+    let name = workouts.exerciseName(item.exerciseID, language: store.language)
+    return VStack(spacing: 8) {
+      HStack(spacing: 8) {
+        handle
+        VStack(alignment: .leading, spacing: 4) {
+          Text(name).ritmFont(14.5, weight: .semibold, tracking: -0.02).foregroundStyle(RitmTheme.text)
+            .fixedSize(horizontal: false, vertical: true)
+          if let muscle = workouts.library.muscle(of: item.exerciseID) { WorkoutMuscleChip(muscle: muscle) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        Button {
+          withAnimation(RitmMotion.easeOut(0.24)) { draft.remove(item.id) }
+        } label: {
+          RitmSymbol("xmark").font(.system(size: 18)).foregroundStyle(RitmTheme.muted)
+            .frame(width: 44, height: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(RitmPressStyle(scale: 0.92))
+        .accessibilityLabel(store.text("Удалить упражнение «\(name)»", "Remove exercise “\(name)”"))
+      }
+      HStack(spacing: 8) {
+        stepper(item, .sets, title: store.text("Подходы", "Sets"), value: "\(item.sets)")
+        stepper(item, .reps, title: store.text("Повторы", "Reps"), value: "\(item.reps)")
+        stepper(
+          item, .rest, title: store.text("Отдых", "Rest"),
+          value: "\(item.restSeconds)" + store.text(" с", " s"))
+      }
+    }
+    .padding(.leading, 4).padding(.trailing, 4).padding(.vertical, 6)
+    .padding(.bottom, 4)
+    .background { RitmPanelBackground(radius: 20) }
+  }
+
+  private func stepper(
+    _ item: WorkoutProgramItem, _ field: WorkoutProgramDraft.Field, title: String, value: String
   ) -> some View {
+    VStack(spacing: 4) {
+      Text(title).ritmFont(10.5, weight: .semibold).foregroundStyle(RitmTheme.muted)
+      HStack(spacing: 0) {
+        stepButton("−", enabled: draft.canStep(item.id, field, direction: -1), label: title + " −") {
+          draft.step(item.id, field, direction: -1)
+        }
+        Text(value).ritmFont(14, weight: .bold).monospacedDigit().foregroundStyle(RitmTheme.text)
+          .frame(maxWidth: .infinity).minimumScaleFactor(0.8).lineLimit(1)
+        stepButton("+", enabled: draft.canStep(item.id, field, direction: 1), label: title + " +") {
+          draft.step(item.id, field, direction: 1)
+        }
+      }
+      .padding(3)
+      .background(WorkoutPalette.inset, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+      .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(WorkoutPalette.stroke, lineWidth: 1) }
+    }
+    .frame(maxWidth: .infinity)
+  }
+
+  private func stepButton(_ symbol: String, enabled: Bool, label: String, action: @escaping () -> Void)
+    -> some View
+  {
     Button(action: action) {
-      RitmSymbol(symbol).font(.system(size: 17, weight: .medium))
-        .foregroundStyle(RitmTheme.accentColor)
-        .frame(width: 44, height: 44).contentShape(Rectangle())
+      Text(symbol).ritmFont(16, weight: .bold).foregroundStyle(RitmTheme.accentColor)
+        .frame(width: 32, height: 36)
+        .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .contentShape(Rectangle())
     }
     .buttonStyle(RitmPressStyle(scale: 0.92))
     .disabled(!enabled).opacity(enabled ? 1 : 0.35)
     .accessibilityLabel(label)
   }
 
-  // MARK: Actions
-
-  private func moveItem(_ index: Int, by delta: Int) {
-    guard let program = workouts.program(programID), program.items.indices.contains(index + delta) else { return }
-    withAnimation(RitmMotion.easeOut(0.22)) { workouts.moveItem(in: programID, from: index, to: index + delta) }
-  }
-
-  private func moveProgram(_ index: Int, by delta: Int) {
-    guard workouts.library.programs.indices.contains(index + delta) else { return }
-    withAnimation(RitmMotion.easeOut(0.22)) { workouts.moveProgram(from: index, to: index + delta) }
-  }
-
-  private func duplicate() {
-    commitName()
-    if workouts.duplicateProgram(programID, suffix: store.text(" (копия)", " (copy)")) != nil {
-      store.toasts.show(store.text("Программа продублирована", "Program duplicated"))
-      go(.home)
-    }
-  }
-
-  /// An empty name is replaced by a numbered one when the field is left.
-  private func commitName() {
-    guard name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-    let number = (workouts.library.programs.firstIndex { $0.id == programID } ?? 0) + 1
-    name = store.text("Программа \(number)", "Program \(number)")
-    workouts.renameProgram(programID, to: name)
-  }
-
-  private func close() {
-    commitName()
-    go(.home)
-  }
-
-  @ViewBuilder private func pickerSheet(for mode: WorkoutPickerMode) -> some View {
-    let used = Set(workouts.program(programID)?.items.map(\.exerciseID) ?? [])
-    switch mode {
-    case .add:
-      WorkoutExercisePicker(
-        title: store.text("Добавить упражнение", "Add exercise"), used: used,
-        usedNote: store.text("уже в программе", "already in the program"),
-        createLabel: store.text("Создать и добавить", "Create and add")
-      ) { exercise in
-        withAnimation(RitmMotion.easeOut(0.24)) { _ = workouts.addItem(to: programID, exerciseID: exercise.id) }
-        store.toasts.show(store.text("Упражнение добавлено", "Exercise added"))
-      }
-    case .replace(let itemID):
-      WorkoutExercisePicker(
-        title: store.text("Заменить упражнение", "Replace exercise"), used: used,
-        usedNote: store.text("уже в программе", "already in the program"),
-        createLabel: store.text("Создать и заменить", "Create and replace")
-      ) { exercise in
-        _ = workouts.replaceItem(itemID, in: programID, with: exercise.id)
-        store.toasts.show(store.text("Упражнение заменено", "Exercise replaced"))
-      }
-    }
+  private func save() {
+    guard workouts.saveProgram(draft, as: programID) else { return }
+    store.toasts.show(store.text("Программа сохранена", "Program saved"))
+    go(isNew ? .home : .program(programID))
   }
 }

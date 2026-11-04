@@ -96,6 +96,7 @@ final class RitmStore {
   @ObservationIgnored private var vault: SessionVault
   @ObservationIgnored private let notifications = LocalNotifications()
   @ObservationIgnored private var started = false
+  @ObservationIgnored private var noticeDay = ""
   @ObservationIgnored private var active = true
   @ObservationIgnored private var refreshing = false
   @ObservationIgnored private var refreshRequested = false
@@ -119,7 +120,18 @@ final class RitmStore {
     workouts.alerts.language = { [weak self] in self?.language ?? .ru }
     // A workout resumed after a relaunch: reuse its lock-screen card and pending notification.
     workouts.syncAlerts()
-    workouts.onWorkoutFinished = { [health] in health.exportIfEnabled($0) }
+    workouts.onWorkoutFinished = { [weak self] record in
+      self?.health.exportIfEnabled(record)
+      self?.tickLinkedHabit()
+    }
+    workouts.onNewRecords = { [weak self] beats in
+      guard let self, let first = beats.first else { return }
+      let more = beats.count > 1 ? " (+\(beats.count - 1))" : ""
+      toasts.show(
+        text("Новый рекорд: ", "New record: ")
+          + "\(first.name) \(WorkoutFormat.weight(first.weight, comma: language == .ru)) "
+          + text("кг", "kg") + more)
+    }
     workoutSync.configure(workouts: workouts) { [weak self] in
       guard let self, isSignedIn, let client else { return nil }
       return .init(remote: client, serverKey: serverAddress.description)
@@ -162,11 +174,7 @@ final class RitmStore {
   var timeZone: String { bootstrap?.settings.timeZone ?? "Asia/Qyzylorda" }
   var today: String { HabitSchedule.dateKey(now, timeZone: timeZone) }
   var todayLabel: String {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: language == .ru ? "ru_RU" : "en_US")
-    formatter.timeZone = TimeZone(identifier: timeZone)
-    formatter.setLocalizedDateFormatFromTemplate("EEEE d MMMM")
-    return formatter.string(from: now)
+    FormatterCache.shared.template("EEEE d MMMM", date: now, zone: timeZone, language: language)
   }
   func text(_ ru: String, _ en: String) -> String { language == .ru ? ru : en }
 
@@ -277,11 +285,8 @@ final class RitmStore {
     guard let start = parseISO(event.start.dateTime), let end = parseISO(event.end.dateTime) else {
       return text("Смотрите время в календаре", "See time in Calendar")
     }
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = TimeZone(identifier: timeZone)
-    formatter.dateFormat = "h:mm a"
-    return "\(formatter.string(from: start)) – \(formatter.string(from: end))"
+    let clock = FormatterCache.shared
+    return "\(clock.clock(start, zone: timeZone)) – \(clock.clock(end, zone: timeZone))"
   }
 
   func start() async {
@@ -427,9 +432,13 @@ final class RitmStore {
   }
 
   private func applyFinance(_ entries: [FinanceEntry]) {
-    financeEntries = entries
-    financeLoaded = true
-    financeFailed = false
+    let unchanged = financeLoaded && financeEntries == entries && noticeDay == today
+    set(\.financeEntries, entries)
+    set(\.financeLoaded, true)
+    set(\.financeFailed, false)
+    // The poll mostly brings back the same rows: skip rebuilding the cards and notices then.
+    guard !unchanged else { return }
+    noticeDay = today
     notices.update(entries: entries, today: today)
   }
 
@@ -461,7 +470,7 @@ final class RitmStore {
     if bootstrap == nil { isLoading = true }
     defer {
       refreshing = false
-      isLoading = false
+      set(\.isLoading, false)
       if refreshRequested, active, isSignedIn, !isMutating {
         refreshRequested = false
         Task { await refresh() }
@@ -474,16 +483,16 @@ final class RitmStore {
       guard ticket == generation, isSignedIn, !Task.isCancelled else { return }
       let freshHabits = try await client.habits()
       guard ticket == generation, isSignedIn, !Task.isCancelled else { return }
-      bootstrap = freshAccount
+      set(\.bootstrap, freshAccount)
       // A habit tick in flight shows its own, newer state; the next snapshot brings the server's.
-      if habitSending.isEmpty { habits = freshHabits }
-      now = Date()
-      isOffline = false
+      if habitSending.isEmpty { set(\.habits, freshHabits) }
+      touchNow()
+      set(\.isOffline, false)
       if connectionErrorShown {
         errorMessage = nil
         connectionErrorShown = false
       }
-      lastSyncedAt = now
+      set(\.lastSyncedAt, now)
       await client.setLanguage(freshAccount.settings.language)
       await refreshCalendar(ticket: ticket)
       await refreshFinance(ticket: ticket)
@@ -503,6 +512,29 @@ final class RitmStore {
     else { return }
     let count = isCompletedToday(current) ? 0 : HabitSchedule.target(current)
     _ = await tickHabit(id: current.id, date: today, count: count)
+  }
+
+  // MARK: Workout and habit
+
+  /// A finished (not cancelled) workout ticks the linked habit for today, once per day.
+  private func tickLinkedHabit() {
+    let day = today
+    guard
+      let habit = habits.first(where: { $0.id == workouts.settings.linkedHabitID }),
+      WorkoutHabitLink.shouldTick(habit: habit, settings: workouts.settings, today: day)
+    else { return }
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      _ = await tickHabit(id: habit.id, date: day, count: HabitSchedule.target(habit))
+      guard let after = habits.first(where: { $0.id == habit.id }),
+        HabitSchedule.progress(after, on: day) >= HabitSchedule.target(after)
+      else { return }
+      workouts.markHabitTicked(day: day)
+      let recordToast = text("Новый рекорд", "New record")
+      if toasts.current?.text.hasPrefix(recordToast) != true {
+        toasts.show(text("Привычка «\(after.title)» отмечена", "Habit “\(after.title)” ticked"))
+      }
+    }
   }
 
   // MARK: Habit ticks
@@ -711,9 +743,23 @@ final class RitmStore {
       while !Task.isCancelled {
         do { try await Task.sleep(for: .seconds(30)) } catch { return }
         guard !Task.isCancelled else { return }
-        self?.now = Date()  // The greeting and «today» follow the clock even while offline.
+        self?.touchNow()  // The greeting and «today» follow the clock even while offline.
         await self?.refresh()
       }
+    }
+  }
+
+  /// Writes only when the value differs: an `@Observable` write always invalidates readers, and
+  /// the 30 s poll mostly brings back the same data.
+  private func set<Value: Equatable>(_ path: ReferenceWritableKeyPath<RitmStore, Value>, _ value: Value) {
+    if self[keyPath: path] != value { self[keyPath: path] = value }
+  }
+
+  /// Moves `now` forward only when the minute changes: nothing on screen is finer than that.
+  private func touchNow() {
+    let fresh = Date()
+    if Int(fresh.timeIntervalSinceReferenceDate / 60) != Int(now.timeIntervalSinceReferenceDate / 60) {
+      now = fresh
     }
   }
 
@@ -722,39 +768,41 @@ final class RitmStore {
     do {
       let status = try await client.googleStatus()
       guard ticket == generation, isSignedIn, !Task.isCancelled else { return }
-      googleStatus = status
+      set(\.googleStatus, status)
       guard status.status == .connected else {
-        todayEvents = []
-        googleTasks = nil
-        calendarReady = false
-        calendarPartial = false
-        calendarFailed = false
-        calendarStatusText = text(
+        set(\.todayEvents, [])
+        set(\.googleTasks, nil)
+        set(\.calendarReady, false)
+        set(\.calendarPartial, false)
+        set(\.calendarFailed, false)
+        set(\.calendarStatusText, text(
           "Подключите Google Calendar в веб-версии Ritm.",
-          "Connect Google Calendar in Ritm on the web.")
+          "Connect Google Calendar in Ritm on the web."))
         return
       }
       let result = try await client.googleEvents(
         from: today, to: HabitSchedule.addDays(to: today, days: 1) ?? today, timeZone: timeZone)
       guard ticket == generation, isSignedIn, !Task.isCancelled else { return }
-      todayEvents = result.events.sorted {
+      let sortedEvents = result.events.sorted {
         ($0.start.dateTime ?? $0.start.date ?? "") < ($1.start.dateTime ?? $1.start.date ?? "")
       }
-      googleTasks = result.tasks
-      calendarReady = true
-      calendarPartial = result.partial
-      calendarFailed = false
-      calendarStatusText =
+      set(\.todayEvents, sortedEvents)
+      set(\.googleTasks, result.tasks)
+      set(\.calendarReady, true)
+      set(\.calendarPartial, result.partial)
+      set(\.calendarFailed, false)
+      let statusText =
         result.partial
         ? text("Google вернул часть расписания.", "Google returned a partial schedule.")
         : text("Google Calendar · синхронизировано", "Google Calendar · synced")
+      set(\.calendarStatusText, statusText)
     } catch {
       guard ticket == generation, !Task.isCancelled else { return }
-      calendarReady = false
-      calendarFailed = true
-      calendarStatusText = text(
+      set(\.calendarReady, false)
+      set(\.calendarFailed, true)
+      set(\.calendarStatusText, text(
         "Не удалось обновить расписание. Показаны последние полученные события.",
-        "Could not refresh the schedule. Showing the last received events.")
+        "Could not refresh the schedule. Showing the last received events."))
       if let failure = error as? APIError, failure.status == 401 { await present(error) }
     }
   }
@@ -835,9 +883,6 @@ final class RitmStore {
   }
 
   private func parseISO(_ value: String?) -> Date? {
-    guard let value else { return nil }
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+    FeatureDate.instant(value)
   }
 }

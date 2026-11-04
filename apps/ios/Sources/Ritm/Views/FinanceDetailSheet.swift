@@ -115,12 +115,8 @@ struct FinanceFormat {
   /// «29 октября, 6:24 PM» for the moment the record was created (times use AM/PM).
   func addedAt(_ iso: String) -> String? {
     guard let instant = FeatureDate.instant(iso) else { return nil }
-    let clock = DateFormatter()
-    clock.locale = Locale(identifier: "en_US_POSIX")
-    clock.timeZone = TimeZone(identifier: zone)
-    clock.dateFormat = "h:mm a"
     let key = HabitSchedule.dateKey(instant, timeZone: zone)
-    return date(key, template: "d MMMM") + ", " + clock.string(from: instant)
+    return date(key, template: "d MMMM") + ", " + FormatterCache.shared.clock(instant, zone: zone)
   }
 }
 

@@ -1,16 +1,28 @@
 import Foundation
 
-/// Maps the native programs and finished workouts to server documents and back.
+/// What the server's documents turn into on this iPhone.
+public struct WorkoutSyncApplied: Equatable, Sendable {
+  public var library: WorkoutLibrary
+  public var history: WorkoutHistory
+  public var bests: WorkoutBests
+  public var settings: WorkoutSettings
+}
+
+/// Maps the native programs, finished workouts, records and settings to server documents and back.
 ///
 /// - program doc: the Codable `WorkoutProgram` plus `order` (its place in the list) and
 ///   `exercises` (the owner's own exercises it uses, so another device can show their names);
-/// - session doc: the Codable `WorkoutRecord`.
+/// - session doc: the Codable `WorkoutRecord`;
+/// - record doc: the Codable `WorkoutBest` (id `rec-<exercise>`, `deleted` for a removed record);
+/// - settings doc: the Codable `WorkoutSettings` under the single id `workouts`; absent while
+///   everything is at its default.
 /// Ids are the native UUIDs, which already satisfy the server rule; anything that does not is
 /// left out of the sync and stays on this iPhone only.
 public enum WorkoutSyncCodec {
-  public static func documents(library: WorkoutLibrary, history: WorkoutHistory)
-    -> [WorkoutDocKind: [String: JSONValue]]
-  {
+  public static func documents(
+    library: WorkoutLibrary, history: WorkoutHistory, bests: WorkoutBests = WorkoutBests(),
+    settings: WorkoutSettings = WorkoutSettings()
+  ) -> [WorkoutDocKind: [String: JSONValue]] {
     var programs: [String: JSONValue] = [:]
     for (index, program) in library.programs.enumerated()
     where WorkoutSyncRules.isValidID(program.id) {
@@ -25,7 +37,17 @@ public enum WorkoutSyncCodec {
     for record in history.records where WorkoutSyncRules.isValidID(record.id) {
       if let value = JSONValue.encoding(record) { sessions[record.id] = value }
     }
-    return [.programs: programs, .sessions: sessions]
+    var records: [String: JSONValue] = [:]
+    for best in bests.items where WorkoutSyncRules.isValidID(best.id) {
+      if let value = JSONValue.encoding(best) { records[best.id] = value }
+    }
+    var settingsDocs: [String: JSONValue] = [:]
+    if !settings.isDefault, let value = JSONValue.encoding(settings) {
+      settingsDocs[WorkoutSettings.docID] = value
+    }
+    return [
+      .programs: programs, .sessions: sessions, .records: records, .settings: settingsDocs,
+    ]
   }
 
   /// Whether the doc can be turned back into a native model (used to refuse unreadable docs).
@@ -33,6 +55,8 @@ public enum WorkoutSyncCodec {
     switch kind {
     case .programs: return program(id: id, data: data) != nil
     case .sessions: return record(id: id, data: data) != nil
+    case .records: return best(data: data) != nil
+    case .settings: return id == WorkoutSettings.docID && data.decoded(WorkoutSettings.self) != nil
     }
   }
 
@@ -48,14 +72,21 @@ public enum WorkoutSyncCodec {
     return JSONValue.object(object).decoded(WorkoutRecord.self)
   }
 
+  static func best(data: JSONValue) -> WorkoutBest? {
+    data.decoded(WorkoutBest.self)
+  }
+
   /// Applies inbound changes (`nil` removes) to the local files. Programs end up ordered by
   /// `order` (ties by id); history stays newest first. Unreadable docs are skipped.
   public static func apply(
     _ changes: [WorkoutDocKind: [String: JSONValue?]], library: WorkoutLibrary,
-    history: WorkoutHistory
-  ) -> (library: WorkoutLibrary, history: WorkoutHistory) {
+    history: WorkoutHistory, bests: WorkoutBests = WorkoutBests(),
+    settings: WorkoutSettings = WorkoutSettings()
+  ) -> WorkoutSyncApplied {
     var library = library
     var history = history
+    var bests = bests
+    var settings = settings
 
     if let inbound = changes[.programs], !inbound.isEmpty {
       var ranked: [(order: Double, program: WorkoutProgram)] = library.programs.enumerated()
@@ -85,6 +116,18 @@ public enum WorkoutSyncCodec {
       records.sort { ($0.endedAt, $1.id) > ($1.endedAt, $0.id) }
       history = WorkoutHistory(records: records)
     }
-    return (library, history)
+
+    if let inbound = changes[.records], !inbound.isEmpty {
+      for (id, change) in inbound {
+        bests.items.removeAll { $0.id == id }
+        if let value = change, let best = best(data: value), best.id == id { bests.items.append(best) }
+      }
+      bests.items.sort { $0.id < $1.id }
+    }
+
+    if let inbound = changes[.settings], let change = inbound[WorkoutSettings.docID] {
+      settings = change?.decoded(WorkoutSettings.self) ?? WorkoutSettings()
+    }
+    return WorkoutSyncApplied(library: library, history: history, bests: bests, settings: settings)
   }
 }

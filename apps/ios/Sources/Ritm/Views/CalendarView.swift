@@ -706,7 +706,7 @@ struct CalendarView: View {
     let (from, to) = range
     let currentStatus = await store.read { try await $0.googleStatus() }
     guard ticket == readID, !Task.isCancelled else { return }
-    if let currentStatus { status = currentStatus }
+    if let currentStatus, currentStatus != status { status = currentStatus }
     guard currentStatus?.status == .connected else {
       if currentStatus != nil {
         events = []
@@ -721,10 +721,10 @@ struct CalendarView: View {
     let result = await store.read { try await $0.googleEvents(from: from, to: to, timeZone: zone) }
     guard ticket == readID, !Task.isCancelled else { return }
     if let result {
-      events = result.events
-      partial = result.partial
-      fetchedAt = result.fetchedAt
-      failed = false
+      if events != result.events { events = result.events }
+      if partial != result.partial { partial = result.partial }
+      if fetchedAt != result.fetchedAt { fetchedAt = result.fetchedAt }
+      if failed { failed = false }
     } else {
       failed = true
     }

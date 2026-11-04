@@ -3,9 +3,22 @@ import type { WorkoutDoc, WorkoutKind } from '../shared/types.ts';
 import { AppError } from './errors.ts';
 
 export const MAX_WORKOUT_DATA_BYTES = 64 * 1024;
-export const MAX_WORKOUT_DOCS: Record<WorkoutKind, number> = { programs: 300, sessions: 10_000 };
+export const MAX_WORKOUT_DOCS: Record<WorkoutKind, number> = {
+  programs: 300,
+  sessions: 10_000,
+  records: 500,
+  settings: 10,
+};
 
-export const workoutKindSchema = z.enum(['programs', 'sessions']);
+/** Fixed whitelist: the only table names ever interpolated into workout SQL. */
+export const WORKOUT_TABLES: Record<WorkoutKind, string> = {
+  programs: 'workout_programs',
+  sessions: 'workout_sessions',
+  records: 'workout_records',
+  settings: 'workout_settings',
+};
+
+export const workoutKindSchema = z.enum(['programs', 'sessions', 'records', 'settings']);
 export const workoutIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
 
 const workoutDataSchema = z

@@ -16,12 +16,15 @@ public struct RestTimer: Codable, Equatable, Sendable {
   public private(set) var endDate: Date?
   /// Set while the timer is paused.
   public private(set) var pausedRemaining: TimeInterval?
+  /// How long the current rest was meant to last (an exercise can rest longer than the preset,
+  /// and «+15 с» adds to it): the full circle of the countdown ring. `nil` means the preset.
+  public private(set) var length: TimeInterval?
 
   public init(preset: TimeInterval = RestTimer.defaultPreset) {
     self.preset = Self.presets.contains(preset) ? preset : Self.defaultPreset
   }
 
-  private enum CodingKeys: String, CodingKey { case preset, endDate, pausedRemaining }
+  private enum CodingKeys: String, CodingKey { case preset, endDate, pausedRemaining, length }
 
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -33,7 +36,13 @@ public struct RestTimer: Codable, Equatable, Sendable {
       pausedRemaining = paused
     }
     if endDate != nil { pausedRemaining = nil }
+    if let saved = try? c.decodeIfPresent(TimeInterval.self, forKey: .length), saved.isFinite, saved > 0 {
+      length = saved
+    }
   }
+
+  /// The full length the ring counts down from.
+  public var totalLength: TimeInterval { length ?? preset }
 
   public func phase(now: Date) -> Phase {
     if let endDate { return now >= endDate ? .finished : .running }
@@ -60,6 +69,7 @@ public struct RestTimer: Codable, Equatable, Sendable {
     case .idle, .finished:
       endDate = now.addingTimeInterval(preset)
       pausedRemaining = nil
+      length = nil
     }
   }
 
@@ -73,12 +83,22 @@ public struct RestTimer: Codable, Equatable, Sendable {
   public mutating func restart(now: Date) {
     endDate = now.addingTimeInterval(preset)
     pausedRemaining = nil
+    length = nil
+  }
+
+  /// A fresh rest of `seconds` (the exercise's own rest); the preset stays as it is.
+  public mutating func restart(now: Date, seconds: TimeInterval) {
+    guard seconds.isFinite, seconds > 0 else { return restart(now: now) }
+    endDate = now.addingTimeInterval(seconds)
+    pausedRemaining = nil
+    length = seconds
   }
 
   /// Back to the idle state with the chosen preset.
   public mutating func reset() {
     endDate = nil
     pausedRemaining = nil
+    length = nil
   }
 
   /// «Пропустить»: ends the rest at once.
@@ -87,11 +107,16 @@ public struct RestTimer: Codable, Equatable, Sendable {
   /// Adds time to a running or paused rest; an idle or finished one starts with just that.
   public mutating func extend(now: Date, by seconds: TimeInterval = RestTimer.extensionStep) {
     switch phase(now: now) {
-    case .running: endDate = endDate?.addingTimeInterval(seconds)
-    case .paused: pausedRemaining = (pausedRemaining ?? 0) + seconds
+    case .running:
+      endDate = endDate?.addingTimeInterval(seconds)
+      length = totalLength + seconds
+    case .paused:
+      pausedRemaining = (pausedRemaining ?? 0) + seconds
+      length = totalLength + seconds
     case .idle, .finished:
       endDate = now.addingTimeInterval(seconds)
       pausedRemaining = nil
+      length = seconds
     }
   }
 
@@ -101,8 +126,12 @@ public struct RestTimer: Codable, Equatable, Sendable {
     let phase = phase(now: now)
     preset = value
     switch phase {
-    case .running: endDate = now.addingTimeInterval(value)
-    case .paused: pausedRemaining = value
+    case .running:
+      endDate = now.addingTimeInterval(value)
+      length = nil
+    case .paused:
+      pausedRemaining = value
+      length = nil
     case .idle, .finished: reset()
     }
   }

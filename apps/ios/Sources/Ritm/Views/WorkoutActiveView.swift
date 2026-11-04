@@ -2,30 +2,38 @@ import RitmCore
 import SwiftUI
 import UIKit
 
-/// The workout in progress: a snapshot of the program, set by set. The elapsed time comes from
-/// the stored start timestamp, the rest timer sits above the bar, and the whole state is saved on
-/// every change so the workout survives the app being closed.
+/// The workout in progress («Таблица подходов»): the header with the clock, a strip of all the
+/// exercises, one exercise at a time as a table of sets, and the way to the next. The elapsed time
+/// comes from the stored start timestamp and the whole state is saved on every change, so the
+/// workout survives the app being closed. Leaving the screen keeps it running.
 struct WorkoutActiveView: View {
+  /// A workout younger than this can be dropped with one tap on «Отменить».
+  private static let quickCancelWindow: TimeInterval = 120
+
+  private static let haptic = UIImpactFeedbackGenerator(style: .light)
+
   @Environment(RitmStore.self) private var store
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   let go: (WorkoutScreen) -> Void
-  @State private var swapping: WorkoutSwapTarget?
+  let finished: (WorkoutRecord) -> Void
+  @State private var current = 0
+  @State private var forward = true
+  @State private var selection: WorkoutSetSelection?
+  @State private var sheet: Sheet?
   @State private var confirmingFinish = false
   @State private var confirmingCancel = false
+
+  private enum Sheet: String, Identifiable {
+    case menu, exercises
+    var id: String { rawValue }
+  }
 
   private var workouts: WorkoutStore { store.workouts }
 
   var body: some View {
     WorkoutPage(
-      title: store.text("Тренировка", "Workout"),
-      action: {
-        WorkoutHeaderButton(symbol: "chevron.left", label: store.text("К программам", "To programs")) {
-          go(.home)
-        }
-      },
-      bar: { WorkoutRestBar() },
-      content: {
-        if let session = workouts.session { content(session) }
-      }
+      header: { if let session = workouts.session { header(session) } },
+      content: { if let session = workouts.session { content(session) } }
     )
     .toolbar {
       ToolbarItemGroup(placement: .keyboard) {
@@ -36,10 +44,15 @@ struct WorkoutActiveView: View {
         }
       }
     }
-    .sheet(item: $swapping) { target in swapPicker(target.id) }
-    .confirmationDialog(
-      store.text("Завершить тренировку?", "Finish the workout?"), isPresented: $confirmingFinish,
-      titleVisibility: .visible
+    .onAppear { current = firstOpen(workouts.session) }
+    .sheet(item: $sheet) { sheet in
+      switch sheet {
+      case .menu: menuSheet
+      case .exercises: exercisesSheet
+      }
+    }
+    .alert(
+      store.text("Завершить тренировку?", "Finish the workout?"), isPresented: $confirmingFinish
     ) {
       Button(store.text("Завершить", "Finish")) { finish() }
       Button(store.text("Продолжить тренировку", "Keep going"), role: .cancel) {}
@@ -50,75 +63,200 @@ struct WorkoutActiveView: View {
           "Невыполненных подходов: \(left). В историю попадут только отмеченные.",
           "Sets not done: \(left). Only ticked sets go to the history."))
     }
-    .confirmationDialog(
-      store.text("Отменить тренировку?", "Cancel the workout?"), isPresented: $confirmingCancel,
-      titleVisibility: .visible
+    .alert(
+      store.text("Отменить тренировку?", "Cancel the workout?"), isPresented: $confirmingCancel
     ) {
       Button(store.text("Отменить тренировку", "Cancel workout"), role: .destructive) {
         workouts.cancelWorkout()
         store.toasts.show(store.text("Тренировка отменена", "Workout cancelled"))
       }
-      Button(store.text("Продолжить тренировку", "Keep going"), role: .cancel) {}
+      Button(store.text("Продолжить", "Keep going"), role: .cancel) {}
     } message: {
-      Text(
-        store.text(
-          "Введённые значения будут потеряны, в историю ничего не попадёт.",
-          "What you entered will be lost and nothing goes to the history."))
+      Text(store.text("Тренировка не сохранится", "The workout will not be saved"))
     }
   }
+
+  // MARK: Header
+
+  private func header(_ session: WorkoutSession) -> some View {
+    VStack(spacing: 6) {
+      HStack(spacing: 10) {
+        WorkoutRoundButton(
+          symbol: "chevron.left", label: store.text("К программам, тренировка продолжается", "Back, the workout keeps running")
+        ) { go(.home) }
+        VStack(spacing: 0) {
+          Text(session.programName).ritmFont(16, weight: .bold, tracking: -0.03)
+            .foregroundStyle(RitmTheme.text).lineLimit(1)
+          clock(session)
+        }
+        .frame(maxWidth: .infinity)
+        WorkoutRoundButton(symbol: "ellipsis", label: store.text("Меню тренировки", "Workout menu")) {
+          sheet = .menu
+        }
+      }
+      .padding(.bottom, 4)
+      segments(session)
+    }
+    .padding(.bottom, 10)
+  }
+
+  /// «mm:ss · Отменить»: the quick cancel lives only for the first two minutes.
+  private func clock(_ session: WorkoutSession) -> some View {
+    TimelineView(.periodic(from: session.startedAt, by: 1)) { context in
+      HStack(spacing: 4) {
+        Text(WorkoutClock.elapsed(from: session.startedAt, now: context.date)).monospacedDigit()
+        if context.date.timeIntervalSince(session.startedAt) < Self.quickCancelWindow {
+          Text("·")
+          Button(store.text("Отменить", "Cancel")) { confirmingCancel = true }
+            .ritmFont(12.5, weight: .bold).foregroundStyle(RitmTheme.accentColor)
+            .underline()
+            .frame(minHeight: 44)
+        }
+      }
+      .ritmFont(12.5).foregroundStyle(RitmTheme.muted)
+    }
+    .frame(height: 20)
+  }
+
+  /// `.w-seg`: one bar per exercise, filled by its done sets; tap to jump.
+  private func segments(_ session: WorkoutSession) -> some View {
+    HStack(spacing: 5) {
+      ForEach(Array(session.items.enumerated()), id: \.element.id) { index, item in
+        let share = item.sets.isEmpty ? 0 : Double(item.doneCount) / Double(item.sets.count)
+        Button {
+          show(index)
+        } label: {
+          Capsule().fill(RitmTheme.ringTrack)
+            .frame(height: 6)
+            .overlay(alignment: .leading) {
+              Capsule()
+                .fill(share >= 1 ? AnyShapeStyle(WorkoutColors.income) : AnyShapeStyle(WorkoutPalette.progressGradient))
+                .scaleEffect(x: max(share, 0.0001), anchor: .leading)
+                .animation(reduceMotion ? nil : RitmMotion.easeOut(0.4), value: share)
+            }
+            .overlay {
+              if index == current { Capsule().strokeBorder(RitmTheme.accentColor, lineWidth: 1.5).padding(-1.5) }
+            }
+            .scaleEffect(y: index == current ? 1.5 : 1)
+            .frame(maxWidth: .infinity, minHeight: 22)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(store.text("Упражнение \(index + 1)", "Exercise \(index + 1)"))
+        .accessibilityValue("\(item.doneCount) / \(item.sets.count)")
+      }
+    }
+    .padding(.horizontal, 4)
+  }
+
+  // MARK: Content
 
   private func content(_ session: WorkoutSession) -> some View {
-    VStack(alignment: .leading, spacing: 12) {
-      stats(session).ritmPageReveal(index: 0)
-      ForEach(Array(session.items.enumerated()), id: \.element.id) { index, item in
-        WorkoutExerciseCard(itemID: item.id, replace: { swapping = WorkoutSwapTarget(id: item.id) })
-          .ritmPageReveal(index: min(index + 1, 7))
+    let index = min(current, max(0, session.items.count - 1))
+    let all = session.items.allSatisfy { $0.sets.allSatisfy(\.done) }
+    return VStack(spacing: 0) {
+      if session.items.indices.contains(index) {
+        WorkoutExerciseCard(
+          itemID: session.items[index].id, selection: $selection, ticked: { ticked($0, session: session) }
+        )
+        .id(session.items[index].id)
+        .transition(
+          reduceMotion
+            ? .opacity
+            : .asymmetric(
+              insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
+              removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity)))
+        .simultaneousGesture(swipe(count: session.items.count))
       }
-      VStack(spacing: 10) {
-        Button { tryFinish(session) } label: {
-          Text(store.text("Завершить тренировку", "Finish workout")).workoutButtonFont()
+      nav(session, index: index)
+      Button {
+        tryFinish(session)
+      } label: {
+        Text(store.text("Завершить тренировку", "Finish workout"))
+          .ritmFont(14.5, weight: .bold)
+          .foregroundStyle(all ? RitmTheme.ctaInk : RitmTheme.accentColor)
+          .frame(maxWidth: .infinity, minHeight: 50)
+          .ritmGlass(in: Capsule(), prominent: all, interactive: true)
+          .contentShape(Capsule())
+      }
+      .buttonStyle(RitmGlassButtonStyle())
+      .padding(.top, 12)
+    }
+    .clipped()
+  }
+
+  private func nav(_ session: WorkoutSession, index: Int) -> some View {
+    HStack(spacing: 10) {
+      WorkoutRoundButton(symbol: "chevron.left", label: store.text("Предыдущее упражнение", "Previous exercise"), size: 46) {
+        show(index - 1)
+      }
+      .disabled(index == 0).opacity(index == 0 ? 0.35 : 1)
+      Button {
+        sheet = .exercises
+      } label: {
+        HStack(spacing: 8) {
+          RitmSymbol("list.bullet").font(.system(size: 18)).foregroundStyle(RitmTheme.accentColor)
+          Text(store.text("Упражнения · \(index + 1) из \(session.items.count)", "Exercises · \(index + 1) of \(session.items.count)"))
+            .ritmFont(14, weight: .semibold).foregroundStyle(RitmTheme.text).lineLimit(1)
         }
-        .buttonStyle(RitmPrimaryButtonStyle(minHeight: 48))
-        Button(store.text("Отменить тренировку", "Cancel workout")) { confirmingCancel = true }
-          .buttonStyle(WorkoutDangerButtonStyle())
+        .frame(maxWidth: .infinity, minHeight: 46)
+        .ritmGlass(in: Capsule(), interactive: true)
+        .contentShape(Capsule())
       }
-      .padding(.top, 4)
+      .buttonStyle(RitmGlassButtonStyle())
+      WorkoutRoundButton(symbol: "chevron.right", label: store.text("Следующее упражнение", "Next exercise"), size: 46) {
+        show(index + 1)
+      }
+      .disabled(index >= session.items.count - 1).opacity(index >= session.items.count - 1 ? 0.35 : 1)
+    }
+    .padding(.top, 12)
+  }
+
+  /// A horizontal swipe changes the exercise; a vertical one still scrolls the page.
+  private func swipe(count: Int) -> some Gesture {
+    DragGesture(minimumDistance: 24).onEnded { value in
+      let dx = value.translation.width
+      guard abs(dx) > 60, abs(dx) > abs(value.translation.height) * 1.5 else { return }
+      show(dx < 0 ? current + 1 : current - 1)
     }
   }
 
-  private func stats(_ session: WorkoutSession) -> some View {
-    RitmCard(padding: 14) {
-      // `.wk-sr`: three columns weighted 1.3 : 1 : .8, 8 pt apart.
-      WorkoutWeightedRow(weights: [1.3, 1, 0.8], spacing: 8) {
-        stat(store.text("Программа", "Program")) {
-          Text(session.programName).ritmFont(15, weight: .bold, tracking: -0.03)
-            .foregroundStyle(RitmTheme.text).fixedSize(horizontal: false, vertical: true)
-        }
-        stat(store.text("Выполнено", "Done")) {
-          HStack(spacing: 0) {
-            RitmCountText(session.doneSets) { "\($0)" }.fontWeight(.bold)
-            Text(store.text(" из ", " of ") + "\(session.totalSets)")
-          }
-          .ritmFont(14).foregroundStyle(RitmTheme.text)
-        }
-        stat(store.text("Время", "Time")) {
-          TimelineView(.periodic(from: session.startedAt, by: 1)) { context in
-            Text(WorkoutClock.elapsed(from: session.startedAt, now: context.date))
-              .ritmFont(15, weight: .bold, tracking: -0.03).monospacedDigit()
-              .foregroundStyle(RitmTheme.text)
-          }
-        }
-      }
-    }
+  // MARK: Actions
+
+  private func show(_ index: Int) {
+    guard let count = workouts.session?.items.count, (0..<count).contains(index), index != current else { return }
+    forward = index > current
+    selection = nil
+    UIApplication.shared.sendAction(
+      #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    withAnimation(reduceMotion ? RitmMotion.reducedFade : RitmMotion.easeOut(0.38)) { current = index }
   }
 
-  private func stat<Value: View>(_ title: String, @ViewBuilder value: () -> Value) -> some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text(title).ritmFont(11).foregroundStyle(RitmTheme.muted)
-      value()
+  private func firstOpen(_ session: WorkoutSession?) -> Int {
+    session?.items.firstIndex { $0.sets.contains { !$0.done } } ?? 0
+  }
+
+  private func ticked(_ result: WorkoutSessionItem.TickResult, session: WorkoutSession) {
+    switch result {
+    case .done:
+      Self.haptic.impactOccurred()
+      // The last set of an exercise moves on to the next one after a beat, so the tick and the
+      // progress bar are seen first.
+      let at = current
+      if let item = workouts.session?.items[safe: at], item.sets.allSatisfy(\.done) {
+        Task { @MainActor in
+          try? await Task.sleep(for: .milliseconds(350))
+          let allDone = workouts.session?.items[safe: at]?.sets.allSatisfy(\.done) == true
+          if current == at, allDone { show(at + 1) }
+        }
+      }
+    case .needsWeight:
+      store.toasts.show(store.text("Укажите вес, затем отметьте подход", "Enter the weight, then tick the set"))
+    case .needsReps:
+      store.toasts.show(store.text("Укажите повторы, затем отметьте подход", "Enter the reps, then tick the set"))
+    case .undone, .missing:
+      break
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .accessibilityElement(children: .combine)
   }
 
   private func tryFinish(_ session: WorkoutSession) {
@@ -133,441 +271,110 @@ struct WorkoutActiveView: View {
   }
 
   private func finish() {
-    if workouts.finishWorkout() {
-      store.toasts.show(store.text("Тренировка сохранена в историю", "Workout saved to the history"))
+    sheet = nil
+    guard let record = workouts.finishWorkout() else { return }
+    finished(record)
+    go(.summary)
+  }
+
+  // MARK: Sheets
+
+  private var menuSheet: some View {
+    VStack(spacing: 4) {
+      menuRow(symbol: "checkmark", title: store.text("Завершить тренировку", "Finish workout"), danger: false) {
+        sheet = nil
+        if let session = workouts.session { tryFinish(session) }
+      }
+      menuRow(symbol: "trash", title: store.text("Отменить тренировку", "Cancel workout"), danger: true) {
+        sheet = nil
+        confirmingCancel = true
+      }
+      Button { sheet = nil } label: {
+        Text(store.text("Закрыть", "Close")).ritmFont(16, weight: .semibold)
+          .foregroundStyle(RitmTheme.accentColor)
+          .frame(maxWidth: .infinity, minHeight: 56)
+          .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+      }
+      .buttonStyle(RitmPressStyle())
+      .padding(.top, 6)
     }
+    .padding(.horizontal, 16).padding(.top, 20)
+    .frame(maxHeight: .infinity, alignment: .top)
+    .background(RitmTheme.background)
+    .presentationDetents([.height(250)])
+    .ritmSheetGrabber()
   }
 
-  @ViewBuilder private func swapPicker(_ itemID: String) -> some View {
-    let used = Set(workouts.session?.items.map(\.exerciseID) ?? [])
-    WorkoutExercisePicker(
-      title: store.text("Заменить упражнение", "Replace exercise"), used: used,
-      usedNote: store.text("уже в тренировке", "already in the workout"),
-      createLabel: store.text("Создать и заменить", "Create and replace")
-    ) { exercise in
-      workouts.replaceExercise(item: itemID, with: exercise)
-      store.toasts.show(store.text("Упражнение заменено: «\(exercise.name)»", "Exercise replaced: “\(exercise.name)”"))
+  private func menuRow(symbol: String, title: String, danger: Bool, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      HStack(spacing: 12) {
+        RitmSymbol(symbol).font(.system(size: 21))
+        Text(title).ritmFont(16, weight: .semibold)
+        Spacer(minLength: 0)
+      }
+      .foregroundStyle(danger ? RitmTheme.danger : RitmTheme.text)
+      .padding(.horizontal, 14).frame(minHeight: 56)
+      .contentShape(Rectangle())
     }
-  }
-}
-
-/// A row whose children share the width by weight (CSS `fr` columns), top aligned.
-private struct WorkoutWeightedRow: Layout {
-  let weights: [CGFloat]
-  let spacing: CGFloat
-
-  private func widths(_ total: CGFloat, count: Int) -> [CGFloat] {
-    let used = Array(weights.prefix(count))
-    let free = max(0, total - spacing * CGFloat(max(0, count - 1)))
-    let sum = used.reduce(0, +)
-    return used.map { sum > 0 ? free * $0 / sum : 0 }
+    .buttonStyle(RitmPressStyle())
   }
 
-  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-    let total = proposal.width ?? 320
-    let columns = widths(total, count: subviews.count)
-    var height: CGFloat = 0
-    for (index, subview) in subviews.enumerated() where index < columns.count {
-      height = max(height, subview.sizeThatFits(ProposedViewSize(width: columns[index], height: nil)).height)
-    }
-    return CGSize(width: total, height: height)
-  }
-
-  func placeSubviews(
-    in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
-  ) {
-    let columns = widths(bounds.width, count: subviews.count)
-    var x = bounds.minX
-    for (index, subview) in subviews.enumerated() where index < columns.count {
-      subview.place(
-        at: CGPoint(x: x, y: bounds.minY), anchor: .topLeading,
-        proposal: ProposedViewSize(width: columns[index], height: nil))
-      x += columns[index] + spacing
-    }
-  }
-}
-
-/// The exercise of the workout being replaced; `Identifiable` so a sheet can be tied to it.
-private struct WorkoutSwapTarget: Identifiable {
-  let id: String
-}
-
-// MARK: - Exercise card
-
-private struct WorkoutExerciseCard: View {
-  @Environment(RitmStore.self) private var store
-  let itemID: String
-  let replace: () -> Void
-
-  var body: some View {
-    if let item = store.workouts.item(itemID) {
+  /// `.xl`: every exercise with its progress; tap to open it.
+  private var exercisesSheet: some View {
+    ScrollView {
       VStack(alignment: .leading, spacing: 4) {
-        header(item)
-        columnTitles
-        ForEach(Array(item.sets.enumerated()), id: \.element.id) { index, set in
-          WorkoutSetRow(itemID: itemID, setID: set.id, index: index)
-            .transition(.opacity.combined(with: .move(edge: .top)))
-        }
-        Button {
-          withAnimation(RitmMotion.easeOut(0.25)) { store.workouts.addSet(item: itemID) }
-        } label: {
-          Label { Text(store.text("Подход", "Set")) } icon: { RitmSymbol("plus") }
-            .ritmFont(12.5, weight: .bold).foregroundStyle(RitmTheme.accentColor)
-            .frame(minHeight: 44).padding(.horizontal, 12).contentShape(Rectangle())
-        }
-        .buttonStyle(RitmPressStyle())
-        .disabled(item.sets.count >= WorkoutSessionItem.maxSets)
-        .accessibilityLabel(store.text("Добавить подход", "Add a set"))
-      }
-      .padding(.horizontal, 10).padding(.top, 12).padding(.bottom, 8)
-      .background { RitmPanelBackground(radius: 23) }
-    }
-  }
-
-  private func header(_ item: WorkoutSessionItem) -> some View {
-    HStack(spacing: 8) {
-      VStack(alignment: .leading, spacing: 0) {
-        Text(item.name).ritmFont(16, weight: .semibold, tracking: -0.035).foregroundStyle(RitmTheme.text)
-          .fixedSize(horizontal: false, vertical: true)
+        Text(store.text("Упражнения", "Exercises")).ritmFont(19, weight: .bold, tracking: -0.03)
+          .foregroundStyle(RitmTheme.text).padding(.horizontal, 4).padding(.bottom, 6)
           .accessibilityAddTraits(.isHeader)
-        Text(lastTime(item)).ritmFont(12).foregroundStyle(RitmTheme.muted)
-      }
-      Spacer(minLength: 4)
-      WorkoutIconButton(
-        symbol: "arrow.left.arrow.right",
-        label: store.text("Заменить упражнение «\(item.name)»", "Replace exercise “\(item.name)”"),
-        action: replace)
-    }
-    .padding(.leading, 4).padding(.bottom, 4)
-  }
-
-  private func lastTime(_ item: WorkoutSessionItem) -> String {
-    guard let previous = item.previous else {
-      return store.text("Раньше не выполнялось", "Not done before")
-    }
-    return store.text("Последний раз: ", "Last time: ")
-      + WorkoutText.date(previous.date, language: store.language)
-  }
-
-  private var columnTitles: some View {
-    WorkoutSetColumns(
-      number: { Text("№").frame(maxWidth: .infinity, alignment: .leading) },
-      previous: { Text(store.text("Прошлый раз", "Last time")) },
-      weight: { Text(store.text("кг", "kg")) }, reps: { Text(store.text("повт.", "reps")) },
-      tick: { Color.clear }, remove: { Color.clear })
-    .ritmFont(10.5).foregroundStyle(RitmTheme.muted)
-    .frame(minHeight: 20)
-    .accessibilityHidden(true)
-  }
-}
-
-/// The six columns of a set row: number, last time, weight, reps, tick, remove.
-private struct WorkoutSetColumns<Number: View, Previous: View, Weight: View, Reps: View, Tick: View, Remove: View>: View {
-  @ScaledMetric(relativeTo: .body) private var weightWidth: CGFloat = 58
-  @ScaledMetric(relativeTo: .body) private var repsWidth: CGFloat = 50
-  let number: Number
-  let previous: Previous
-  let weight: Weight
-  let reps: Reps
-  let tick: Tick
-  let remove: Remove
-
-  init(
-    @ViewBuilder number: () -> Number, @ViewBuilder previous: () -> Previous,
-    @ViewBuilder weight: () -> Weight, @ViewBuilder reps: () -> Reps,
-    @ViewBuilder tick: () -> Tick, @ViewBuilder remove: () -> Remove
-  ) {
-    self.number = number()
-    self.previous = previous()
-    self.weight = weight()
-    self.reps = reps()
-    self.tick = tick()
-    self.remove = remove()
-  }
-
-  var body: some View {
-    HStack(spacing: 4) {
-      number.frame(width: 20)
-      previous.frame(maxWidth: .infinity, alignment: .leading)
-      weight.frame(width: weightWidth)
-      reps.frame(width: repsWidth)
-      tick.frame(width: 44)
-      remove.frame(width: 40)
-    }
-  }
-}
-
-// MARK: - Set row
-
-private struct WorkoutSetRow: View {
-  @Environment(RitmStore.self) private var store
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  let itemID: String
-  let setID: String
-  let index: Int
-
-  private var workouts: WorkoutStore { store.workouts }
-
-  var body: some View {
-    if let item = workouts.item(itemID), let set = workouts.set(item: itemID, set: setID) {
-      let previous = item.previous?.set(at: index)
-      WorkoutSetColumns(
-        number: {
-          Text("\(index + 1)").ritmFont(12).monospacedDigit().foregroundStyle(RitmTheme.muted)
-        },
-        previous: { previousColumn(previous, set: set) },
-        weight: {
-          field(
-            placeholder: previous.map { WorkoutFormat.weight($0.weight, comma: store.language == .ru) }
-              ?? store.text("кг", "kg"),
-            text: Binding(
-              get: { workouts.set(item: itemID, set: setID)?.weight ?? "" },
-              set: { workouts.typeWeight($0, item: itemID, set: setID) }),
-            keyboard: .decimalPad, done: set.done,
-            invalid: !WorkoutNumber.isBlank(set.weight) && WorkoutNumber.normalizedWeight(set.weight) == nil,
-            label: store.text("Вес в килограммах, подход \(index + 1)", "Weight in kilograms, set \(index + 1)"))
-        },
-        reps: {
-          field(
-            placeholder: previous.map { String($0.reps) } ?? store.text("повт.", "reps"),
-            text: Binding(
-              get: { workouts.set(item: itemID, set: setID)?.reps ?? "" },
-              set: { workouts.typeReps($0, item: itemID, set: setID) }),
-            keyboard: .numberPad, done: set.done,
-            invalid: !WorkoutNumber.isBlank(set.reps) && WorkoutNumber.reps(set.reps) == nil,
-            label: store.text("Повторы, подход \(index + 1)", "Reps, set \(index + 1)"))
-        },
-        tick: { tick(set) }, remove: { remove(item, set) })
-      .frame(minHeight: 52)
-    }
-  }
-
-  private func previousColumn(_ previous: WorkoutResultSet?, set: WorkoutSet) -> some View {
-    let russian = store.language == .ru
-    let delta = WorkoutDelta.make(set: set, previous: previous).map {
-      WorkoutFormat.delta(
-        $0, comma: russian, kg: russian ? "кг" : "kg", reps: russian ? "повт." : "reps",
-        same: store.text("= как в прошлый раз", "= same as last time"))
-    }
-    return VStack(alignment: .leading, spacing: 0) {
-      Text(previous.map { "\(WorkoutFormat.weight($0.weight, comma: russian)) × \($0.reps)" } ?? "—")
-        .ritmFont(11.5).monospacedDigit().foregroundStyle(RitmTheme.muted)
-      if let delta {
-        Text(delta).ritmFont(10.5, weight: .bold).foregroundStyle(WorkoutColors.income)
-          .minimumScaleFactor(0.75)
-          .transition(.opacity)
-      }
-    }
-    .lineLimit(1)
-    .animation(reduceMotion ? nil : RitmMotion.easeOut(0.2), value: delta)
-    .accessibilityElement(children: .combine)
-    .accessibilityLabel(
-      (previous.map {
-        store.text("Прошлый раз: ", "Last time: ") + "\(WorkoutFormat.weight($0.weight, comma: russian)) × \($0.reps)"
-      } ?? store.text("Прошлый раз: нет", "Last time: none")) + (delta.map { ", " + $0 } ?? ""))
-  }
-
-  private func field(
-    placeholder: String, text: Binding<String>, keyboard: UIKeyboardType, done: Bool, invalid: Bool,
-    label: String
-  ) -> some View {
-    TextField(
-      text: text,
-      prompt: Text(placeholder).foregroundStyle(RitmTheme.muted.opacity(0.55)).fontWeight(.medium)
-    ) { Text(label) }
-      .keyboardType(keyboard)
-      .multilineTextAlignment(.center)
-      .autocorrectionDisabled()
-      .ritmFont(15, weight: .semibold)
-      .monospacedDigit()
-      .foregroundStyle(invalid ? RitmTheme.danger : done ? RitmTheme.muted : RitmTheme.text)
-      .disabled(done)
-      .frame(minHeight: 44)
-      .background(done ? RitmTheme.soft : RitmTheme.field, in: RoundedRectangle(cornerRadius: 12, style: .circular))
-      .overlay {
-        RoundedRectangle(cornerRadius: 12, style: .circular)
-          .strokeBorder(invalid ? RitmTheme.danger : done ? Color.clear : RitmTheme.line, lineWidth: 1)
-      }
-      .accessibilityLabel(label)
-  }
-
-  private func tick(_ set: WorkoutSet) -> some View {
-    Button {
-      toggle()
-    } label: {
-      RitmSymbol("checkmark")
-        .font(.system(size: 19, weight: .semibold))
-        .foregroundStyle(set.done ? RitmTheme.ctaInk : Color.clear)
-        .frame(width: 44, height: 44)
-        .background {
-          Circle().fill(set.done ? AnyShapeStyle(RitmTheme.ctaGradient) : AnyShapeStyle(RitmTheme.field))
-        }
-        .overlay { Circle().strokeBorder(set.done ? Color.clear : RitmTheme.line, lineWidth: 1.5) }
-        .contentShape(Circle())
-        .animation(reduceMotion ? nil : RitmMotion.easeOut(0.2), value: set.done)
-    }
-    .buttonStyle(RitmPressStyle(scale: 0.92))
-    .accessibilityLabel(store.text("Подход \(index + 1) выполнен", "Set \(index + 1) done"))
-    .accessibilityValue(set.done ? store.text("да", "yes") : store.text("нет", "no"))
-    .accessibilityAddTraits(.isToggle)
-  }
-
-  @ViewBuilder private func remove(_ item: WorkoutSessionItem, _ set: WorkoutSet) -> some View {
-    if set.done {
-      Color.clear
-    } else {
-      Button {
-        withAnimation(reduceMotion ? nil : RitmMotion.easeOut(0.2)) {
-          workouts.removeSet(item: itemID, set: setID)
-        }
-      } label: {
-        RitmSymbol("xmark").font(.system(size: 15, weight: .medium))
-          .foregroundStyle(RitmTheme.muted)
-          .frame(width: 40, height: 44).contentShape(Rectangle())
-      }
-      .buttonStyle(RitmPressStyle(scale: 0.92))
-      .disabled(item.sets.count <= 1).opacity(item.sets.count <= 1 ? 0.3 : 1)
-      .accessibilityLabel(store.text("Удалить подход \(index + 1)", "Delete set \(index + 1)"))
-    }
-  }
-
-  private func toggle() {
-    switch workouts.toggleSet(item: itemID, set: setID) {
-    case .done:
-      UIImpactFeedbackGenerator(style: .light).impactOccurred()
-    case .needsWeight:
-      store.toasts.show(store.text("Укажите вес, затем отметьте подход", "Enter the weight, then tick the set"))
-    case .needsReps:
-      store.toasts.show(store.text("Укажите повторы, затем отметьте подход", "Enter the reps, then tick the set"))
-    case .undone, .missing:
-      break
-    }
-  }
-}
-
-// MARK: - Rest timer
-
-/// Ticks four times a second while a rest runs and for the 3.5 s of glow after it ends, then
-/// stops: an idle timer or a finished one costs no frames.
-private struct WorkoutRestSchedule: TimelineSchedule {
-  let end: Date?
-
-  func entries(from start: Date, mode: Mode) -> some Sequence<Date> {
-    let last = end.map { max(start, $0).addingTimeInterval(3.5) } ?? start
-    return sequence(first: start) { date in
-      let next = date.addingTimeInterval(0.25)
-      return next <= last ? next : nil
-    }
-  }
-}
-
-/// The rest timer pinned above the bar. It shows `endDate - now`, never a negative number, and
-/// at zero only a soft glow appears (steady under Reduce Motion). No sound, no notification.
-private struct WorkoutRestBar: View {
-  @Environment(RitmStore.self) private var store
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-  private var workouts: WorkoutStore { store.workouts }
-
-  var body: some View {
-    let rest = workouts.rest
-    TimelineView(WorkoutRestSchedule(end: rest.endDate)) { context in
-      bar(rest: rest, now: context.date)
-    }
-    .padding(.horizontal, 16)
-    .padding(.bottom, 8)
-    .padding(.top, 4)
-    .frame(maxWidth: 700)
-    .frame(maxWidth: .infinity)
-  }
-
-  private func bar(rest: RestTimer, now: Date) -> some View {
-    let phase = rest.phase(now: now)
-    let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
-    return VStack(spacing: 6) {
-      HStack(spacing: 8) {
-        VStack(alignment: .leading, spacing: 0) {
-          Text(label(phase)).ritmFont(11).foregroundStyle(RitmTheme.muted)
-          Text(WorkoutClock.rest(remaining: rest.remaining(now: now)))
-            .ritmFont(28, weight: .bold, tracking: -0.04).monospacedDigit()
-            .foregroundStyle(phase == .finished ? RitmTheme.accentColor : RitmTheme.text)
-        }
-        .accessibilityElement(children: .combine)
-        Spacer(minLength: 4)
-        RitmGlassGroup(spacing: 6) {
-          HStack(spacing: 6) {
-            Button {
-              workouts.toggleRest()
-            } label: {
-              RitmSymbol(phase == .running ? "pause.fill" : "play.fill")
-                .font(.system(size: 19)).foregroundStyle(RitmTheme.ctaInk)
-                .frame(width: 44, height: 44)
-                .ritmGlass(in: Circle(), prominent: true, interactive: true)
-                .contentShape(Circle())
+        ForEach(Array((workouts.session?.items ?? []).enumerated()), id: \.element.id) { index, item in
+          let full = item.doneCount == item.sets.count
+          Button {
+            sheet = nil
+            show(index)
+          } label: {
+            HStack(spacing: 12) {
+              Group {
+                if full {
+                  RitmSymbol("checkmark").font(.system(size: 16, weight: .bold))
+                } else {
+                  Text("\(index + 1)").ritmFont(13, weight: .bold)
+                }
+              }
+              .foregroundStyle(full ? WorkoutColors.income : RitmTheme.muted)
+              .frame(width: 32, height: 32)
+              .background(full ? WorkoutPalette.incomeSoft : WorkoutPalette.inset, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+              VStack(alignment: .leading, spacing: 0) {
+                Text(item.name).ritmFont(14.5, weight: .semibold, tracking: -0.02).foregroundStyle(RitmTheme.text)
+                Text(store.text("\(item.doneCount) из \(item.sets.count) подходов", "\(item.doneCount) of \(item.sets.count) sets"))
+                  .ritmFont(11.5).foregroundStyle(RitmTheme.muted)
+              }
+              .frame(maxWidth: .infinity, alignment: .leading)
+              if index == current {
+                Text(store.text("Сейчас", "Now")).ritmFont(12, weight: .bold).foregroundStyle(RitmTheme.accentColor)
+              } else {
+                RitmSymbol("chevron.right").font(.system(size: 16)).foregroundStyle(RitmTheme.muted)
+              }
             }
-            .buttonStyle(RitmGlassButtonStyle())
-            .accessibilityLabel(
-              phase == .running ? store.text("Пауза", "Pause") : store.text("Запустить отдых", "Start rest"))
-            Button {
-              workouts.resetRest()
-            } label: {
-              RitmSymbol("arrow.counterclockwise")
-                .font(.system(size: 17, weight: .medium)).foregroundStyle(RitmTheme.accentColor)
-                .frame(width: 44, height: 44)
-                .ritmGlass(in: Circle(), interactive: true)
-                .contentShape(Circle())
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .background {
+              if index == current {
+                RoundedRectangle(cornerRadius: 16, style: .continuous).fill(RitmTheme.soft)
+                  .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(RitmTheme.accentColor, lineWidth: 1.5) }
+              }
             }
-            .buttonStyle(RitmGlassButtonStyle())
-            .accessibilityLabel(store.text("Сбросить таймер", "Reset timer"))
-            Button {
-              workouts.extendRest()
-            } label: {
-              Text(store.text("+15\u{00A0}с", "+15\u{00A0}s"))
-                .ritmFont(12.5, weight: .bold).foregroundStyle(RitmTheme.accentColor)
-                .padding(.horizontal, 8).frame(minWidth: 44, minHeight: 44)
-                .ritmGlass(in: Capsule(), interactive: true)
-                .contentShape(Capsule())
-            }
-            .buttonStyle(RitmGlassButtonStyle())
-            .accessibilityLabel(store.text("Добавить 15 секунд", "Add 15 seconds"))
+            .contentShape(Rectangle())
           }
+          .buttonStyle(RitmPressStyle())
         }
       }
-      RitmSegmentedControl(
-        label: store.text("Время отдыха", "Rest time"), values: RestTimer.presets,
-        title: { store.text("\(Int($0))\u{00A0}с", "\(Int($0))\u{00A0}s") },
-        selection: Binding(get: { workouts.rest.preset }, set: { workouts.setRestPreset($0) }),
-        fontSize: 12
-      )
-      .padding(.trailing, 4)
+      .padding(.horizontal, 16).padding(.top, 22).padding(.bottom, 24)
     }
-    .padding(.leading, 14).padding(.trailing, 10).padding(.top, 8).padding(.bottom, 6)
-    .background(RitmTheme.glassDense.opacity(0.55), in: shape)
-    .ritmGlass(in: shape)
-    .overlay {
-      if phase == .finished {
-        shape.strokeBorder(RitmTheme.accentColor, lineWidth: 2)
-          .opacity(glow(rest: rest, now: now))
-          .allowsHitTesting(false)
-      }
-    }
+    .background(RitmTheme.background)
+    .presentationDetents([.medium, .large])
+    .ritmSheetGrabber()
   }
+}
 
-  private func label(_ phase: RestTimer.Phase) -> String {
-    switch phase {
-    case .idle: store.text("Отдых", "Rest")
-    case .running: store.text("Идёт отдых", "Resting")
-    case .paused: store.text("Пауза", "Paused")
-    case .finished: store.text("Отдых окончен", "Rest is over")
-    }
-  }
-
-  /// Three soft pulses after the rest ends, then a steady glow; steady from the start under
-  /// Reduce Motion.
-  private func glow(rest: RestTimer, now: Date) -> Double {
-    guard !reduceMotion, let end = rest.endDate else { return 0.85 }
-    let since = now.timeIntervalSince(end)
-    guard since < 3.3 else { return 0.85 }
-    return 0.4 + 0.6 * abs(sin(since * .pi / 1.1))
-  }
+private extension Array {
+  subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
 }

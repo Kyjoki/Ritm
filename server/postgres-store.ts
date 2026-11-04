@@ -56,7 +56,7 @@ import {
 } from './habits.ts';
 import { localDate } from './store.ts';
 import type { SessionMeta, SessionRecord } from './runtime-state.ts';
-import { assertWorkoutDelete, assertWorkoutPut } from './workouts.ts';
+import { WORKOUT_TABLES, assertWorkoutDelete, assertWorkoutPut } from './workouts.ts';
 
 const { Pool } = pg;
 type Connection = Pick<PgPool | PoolClient, 'query'>;
@@ -364,7 +364,7 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
     });
   }
   private workoutTable(kind: WorkoutKind) {
-    return kind === 'programs' ? 'workout_programs' : 'workout_sessions';
+    return WORKOUT_TABLES[kind];
   }
   private workoutFrom(row: Record<string, unknown>): WorkoutDoc {
     return {
@@ -383,6 +383,8 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
     return {
       programs: await this.workoutDocs(this.pool, 'programs'),
       sessions: await this.workoutDocs(this.pool, 'sessions'),
+      records: await this.workoutDocs(this.pool, 'records'),
+      settings: await this.workoutDocs(this.pool, 'settings'),
     };
   }
   private async lockedWorkout(

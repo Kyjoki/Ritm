@@ -15,6 +15,8 @@ import UIKit
 /// Files (each carries a `version`, and decoding tolerates missing or damaged parts):
 /// - `programs.json`: programs and the owner's own exercises;
 /// - `history.json`: completed workouts, newest first;
+/// - `records.json`: the owner's own record corrections (see `WorkoutRecords`);
+/// - `settings.json`: the habit a finished workout ticks;
 /// - `session.json`: the unfinished workout and its rest timer, written on every change
 ///   (debounced) so a killed app resumes it.
 /// Writes are atomic. A file that cannot be read at all is moved aside, never overwritten.
@@ -23,12 +25,16 @@ final class WorkoutStore {
   enum StartResult { case started, alreadyActive, empty }
 
   enum File: String, CaseIterable {
-    case programs, history, session
+    case programs, history, records, settings, session
     var name: String { rawValue + ".json" }
   }
 
   private(set) var library: WorkoutLibrary
   private(set) var history: WorkoutHistory
+  private(set) var bests: WorkoutBests
+  private(set) var settings: WorkoutSettings
+  /// The records the cards show, kept in step with the history and the owner's corrections.
+  private(set) var recordCards: [WorkoutRecordCard] = []
   private(set) var session: WorkoutSession?
   private(set) var rest: RestTimer
   /// True while the last attempt to write a file failed.
@@ -37,6 +43,8 @@ final class WorkoutStore {
   @ObservationIgnored let alerts = WorkoutAlerts()
   /// Called with each completed workout, only after it is saved in the journal (never on cancel).
   @ObservationIgnored var onWorkoutFinished: ((WorkoutRecord) -> Void)?
+  /// Called with the records a finished workout just beat, so the UI can say so.
+  @ObservationIgnored var onNewRecords: (([WorkoutRecordBeat]) -> Void)?
   /// Called after programs or finished workouts changed on this device (not for changes that
   /// arrived from the server), so the background sync can send them.
   @ObservationIgnored var onSyncableChange: (() -> Void)?
@@ -46,16 +54,20 @@ final class WorkoutStore {
   @ObservationIgnored private var saveTasks: [File: Task<Void, Never>] = [:]
   @ObservationIgnored private var observer: NSObjectProtocol?  // lives as long as the store
 
-  private static let saveDelay: Duration = .milliseconds(300)
+  /// A tick only marks the file dirty; it is written a second after the last change.
+  private static let saveDelay: Duration = .seconds(1)
 
   init(directory: URL = WorkoutStore.defaultDirectory()) {
     self.directory = directory
     try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     library = Self.load(WorkoutLibrary.self, .programs, in: directory) ?? WorkoutLibrary()
     history = Self.load(WorkoutHistory.self, .history, in: directory) ?? WorkoutHistory()
+    bests = Self.load(WorkoutBests.self, .records, in: directory) ?? WorkoutBests()
+    settings = Self.load(WorkoutSettings.self, .settings, in: directory) ?? WorkoutSettings()
     let active = Self.load(WorkoutActiveState.self, .session, in: directory)
     session = active?.session
     rest = active?.rest ?? RestTimer()
+    recordCards = WorkoutRecords.resolve(history: history, bests: bests)
     observer = NotificationCenter.default.addObserver(
       forName: UIApplication.willResignActiveNotification, object: nil, queue: .main
     ) { [weak self] _ in
@@ -132,8 +144,14 @@ final class WorkoutStore {
     mutateLibrary { $0.moveItem(in: programID, from: from, to: to) }
   }
 
-  func createExercise(named name: String) -> WorkoutExercise? {
-    mutateLibrary { $0.createExercise(named: name) }
+  func createExercise(named name: String, muscle: WorkoutMuscle? = nil) -> WorkoutExercise? {
+    mutateLibrary { $0.createExercise(named: name, muscle: muscle) }
+  }
+
+  /// «Сохранить» in the editor: writes the draft as program `id` (new or existing).
+  @discardableResult
+  func saveProgram(_ draft: WorkoutProgramDraft, as id: String) -> Bool {
+    mutateLibrary { $0.save(draft, as: id) }
   }
 
   @discardableResult
@@ -177,7 +195,12 @@ final class WorkoutStore {
     var result = WorkoutSessionItem.TickResult.missing
     mutateSession(syncing: false) { $0.update(itemID) { result = $0.toggle(setID: setID) } }
     if result == .done {
-      rest.restart(now: now)
+      // The last set of the workout needs no rest after it.
+      if session?.items.allSatisfy({ $0.sets.allSatisfy(\.done) }) == true {
+        rest.reset()
+      } else {
+        rest.restart(now: now, seconds: TimeInterval(item(itemID)?.restSeconds ?? 0))
+      }
       scheduleSave(.session)
     }
     syncAlerts(now: now)
@@ -199,11 +222,18 @@ final class WorkoutStore {
     }
   }
 
-  /// Saves the ticked sets to the history and ends the workout. `false` when nothing was ticked.
+  /// Saves the ticked sets to the history and ends the workout. `nil` when nothing was ticked.
+  /// A lift that beats a record is stored as the new record.
   @discardableResult
-  func finishWorkout(now: Date = Date()) -> Bool {
-    guard let current = session, let record = current.finished(at: now) else { return false }
+  func finishWorkout(now: Date = Date()) -> WorkoutRecord? {
+    guard let current = session, let record = current.finished(at: now) else { return nil }
+    let update = WorkoutRecords.updates(finished: record, before: recordCards, bests: bests)
     history = WorkoutHistory(records: [record] + history.records)
+    if update.bests != bests {
+      bests = update.bests
+      scheduleSave(.records)
+    }
+    refreshRecords()
     session = nil
     rest.reset()
     scheduleSave(.history)
@@ -211,7 +241,42 @@ final class WorkoutStore {
     flush()
     syncAlerts(now: now)
     onWorkoutFinished?(record)  // after the journal is on disk; may export to Apple Health
-    return true
+    if !update.beats.isEmpty { onNewRecords?(update.beats) }
+    return record
+  }
+
+  // MARK: - Records and settings
+
+  private func refreshRecords() {
+    recordCards = WorkoutRecords.resolve(history: history, bests: bests)
+  }
+
+  /// A record set or corrected by hand (one per exercise).
+  func saveRecord(exerciseID: String, name: String, weight: Double, reps: Int, date: Date) {
+    guard weight > 0, reps > 0 else { return }
+    bests.upsert(WorkoutBest(exerciseID: exerciseID, name: name, weight: weight, reps: reps, date: date))
+    refreshRecords()
+    scheduleSave(.records)
+  }
+
+  /// Removes a record for good: the history cannot bring it back until a heavier lift.
+  func deleteRecord(exerciseID: String, name: String, now: Date = Date()) {
+    bests.remove(exerciseID: exerciseID, name: name, now: now)
+    refreshRecords()
+    scheduleSave(.records)
+  }
+
+  func setLinkedHabit(_ habitID: String?) {
+    guard settings.linkedHabitID != habitID else { return }
+    settings.linkedHabitID = habitID
+    scheduleSave(.settings)
+  }
+
+  /// Remembers that today's workout has ticked the habit.
+  func markHabitTicked(day: String) {
+    guard settings.lastTickedDay != day else { return }
+    settings.lastTickedDay = day
+    scheduleSave(.settings)
   }
 
   func cancelWorkout() {
@@ -269,12 +334,14 @@ final class WorkoutStore {
 
   /// Programs and finished workouts as server documents (the active workout is never synced).
   func syncDocuments() -> [WorkoutDocKind: [String: JSONValue]] {
-    WorkoutSyncCodec.documents(library: library, history: history)
+    WorkoutSyncCodec.documents(
+      library: library, history: history, bests: bests, settings: settings)
   }
 
   /// Applies what the server sent. Not reported back to the sync as a local change.
   func applySyncChanges(_ changes: [WorkoutDocKind: [String: JSONValue?]]) {
-    let next = WorkoutSyncCodec.apply(changes, library: library, history: history)
+    let next = WorkoutSyncCodec.apply(
+      changes, library: library, history: history, bests: bests, settings: settings)
     if next.library != library {
       library = next.library
       scheduleSave(.programs, notifySync: false)
@@ -283,6 +350,15 @@ final class WorkoutStore {
       history = next.history
       scheduleSave(.history, notifySync: false)
     }
+    if next.bests != bests {
+      bests = next.bests
+      scheduleSave(.records, notifySync: false)
+    }
+    if next.settings != settings {
+      settings = next.settings
+      scheduleSave(.settings, notifySync: false)
+    }
+    refreshRecords()
   }
 
   var syncDirectory: URL { directory }
@@ -314,33 +390,74 @@ final class WorkoutStore {
     }
   }
 
-  /// Writes what is still waiting (all files, or one). Called when the app is about to leave the
-  /// foreground and after steps that must not be lost.
+  /// Hands what is still waiting (all files, or one) to the disk writer. Called when the app is
+  /// about to leave the foreground and after steps that must not be lost. The values are copied
+  /// here (cheap, they are value types); encoding and the file write happen off the main actor,
+  /// in submission order, under a background-task assertion so a suspend cannot cut them short.
   func flush(_ only: File? = nil) {
     for file in File.allCases where dirty.contains(file) && (only == nil || only == file) {
       saveTasks[file]?.cancel()
       saveTasks[file] = nil
-      write(file)
+      dirty.remove(file)
+      submit(file)
     }
   }
 
-  private func write(_ file: File) {
+  private func submit(_ file: File) {
+    let payload: WorkoutDiskPayload
+    switch file {
+    case .programs: payload = .library(library)
+    case .history: payload = .history(history)
+    case .records: payload = .bests(bests)
+    case .settings: payload = .settings(settings)
+    case .session: payload = .active(WorkoutActiveState(session: session, rest: rest))
+    }
+    let url = directory.appendingPathComponent(file.name)
+    let folder = directory
+    var assertion = UIBackgroundTaskIdentifier.invalid
+    assertion = UIApplication.shared.beginBackgroundTask(withName: "ritm.workouts.save") {
+      UIApplication.shared.endBackgroundTask(assertion)
+    }
+    let previous = writeTail
+    writeTail = Task { [weak self] in
+      await previous?.value
+      let ok = await Self.writer.write(payload, to: url, in: folder)
+      self?.saveFailed = !ok
+      UIApplication.shared.endBackgroundTask(assertion)
+    }
+  }
+
+  @ObservationIgnored private static let writer = WorkoutDiskWriter()
+  @ObservationIgnored private var writeTail: Task<Void, Never>?
+}
+
+private enum WorkoutDiskPayload: Sendable {
+  case library(WorkoutLibrary)
+  case history(WorkoutHistory)
+  case bests(WorkoutBests)
+  case settings(WorkoutSettings)
+  case active(WorkoutActiveState)
+}
+
+/// Encodes and writes the files away from the main actor: a tick must not wait for the disk.
+private actor WorkoutDiskWriter {
+  func write(_ payload: WorkoutDiskPayload, to url: URL, in folder: URL) -> Bool {
     do {
       let encoder = WorkoutCoding.encoder()
       let data: Data
-      switch file {
-      case .programs: data = try encoder.encode(library)
-      case .history: data = try encoder.encode(history)
-      case .session: data = try encoder.encode(WorkoutActiveState(session: session, rest: rest))
+      switch payload {
+      case .library(let value): data = try encoder.encode(value)
+      case .history(let value): data = try encoder.encode(value)
+      case .bests(let value): data = try encoder.encode(value)
+      case .settings(let value): data = try encoder.encode(value)
+      case .active(let value): data = try encoder.encode(value)
       }
-      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
       try data.write(
-        to: directory.appendingPathComponent(file.name),
-        options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-      dirty.remove(file)
-      saveFailed = false
+        to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+      return true
     } catch {
-      saveFailed = true
+      return false
     }
   }
 }

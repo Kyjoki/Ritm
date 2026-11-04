@@ -304,7 +304,7 @@ export interface TelegramStatus {
   };
 }
 
-export type WorkoutKind = 'programs' | 'sessions';
+export type WorkoutKind = 'programs' | 'sessions' | 'records' | 'settings';
 export interface WorkoutDoc {
   id: string;
   updatedAt: string;
@@ -313,4 +313,6 @@ export interface WorkoutDoc {
 export interface WorkoutsSnapshot {
   programs: WorkoutDoc[];
   sessions: WorkoutDoc[];
+  records: WorkoutDoc[];
+  settings: WorkoutDoc[];
 }

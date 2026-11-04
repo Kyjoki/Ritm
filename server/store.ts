@@ -22,7 +22,7 @@ import type {
   WorkoutsSnapshot,
 } from '../shared/types.ts';
 import { AppError, conflict, missing } from './errors.ts';
-import { assertWorkoutDelete, assertWorkoutPut } from './workouts.ts';
+import { WORKOUT_TABLES, assertWorkoutDelete, assertWorkoutPut } from './workouts.ts';
 import {
   financeEntryInputSchema,
   habitInputSchema,
@@ -112,6 +112,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS finance_entries (id TEXT PRIMARY KEY, json TEXT NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS workout_programs (id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL, created_at TEXT NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS workout_sessions (id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL, created_at TEXT NOT NULL) STRICT;
+      CREATE TABLE IF NOT EXISTS workout_records (id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL, created_at TEXT NOT NULL) STRICT;
+      CREATE TABLE IF NOT EXISTS workout_settings (id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL, created_at TEXT NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, json TEXT NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS chat_requests (
         id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, conversation_id TEXT,
@@ -306,7 +308,7 @@ export class Store {
     });
   }
   private workoutTable(kind: WorkoutKind) {
-    return kind === 'programs' ? 'workout_programs' : 'workout_sessions';
+    return WORKOUT_TABLES[kind];
   }
   private workoutFrom(row: Record<string, unknown>): WorkoutDoc {
     return {
@@ -330,7 +332,12 @@ export class Store {
     return row ? this.workoutFrom(row) : undefined;
   }
   workouts(): WorkoutsSnapshot {
-    return { programs: this.workoutDocs('programs'), sessions: this.workoutDocs('sessions') };
+    return {
+      programs: this.workoutDocs('programs'),
+      sessions: this.workoutDocs('sessions'),
+      records: this.workoutDocs('records'),
+      settings: this.workoutDocs('settings'),
+    };
   }
   putWorkout(
     kind: WorkoutKind,

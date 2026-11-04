@@ -42,7 +42,7 @@ final class PaymentScheduleStore {
   /// Forgets everything and removes the file (sign-out, server switch).
   func reset() {
     book = PaymentBook()
-    if let url { try? FileManager.default.removeItem(at: url) }
+    if let url { Self.diskQueue.async { try? FileManager.default.removeItem(at: url) } }
   }
 
   private func set(_ next: PaymentBook) {
@@ -53,8 +53,13 @@ final class PaymentScheduleStore {
 
   private func save() {
     guard let url, let data = try? PaymentBookFile.encode(book) else { return }
-    try? data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
+    // The file write runs off the main actor; one serial queue keeps the writes in order.
+    Self.diskQueue.async {
+      try? data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
+    }
   }
+
+  private static let diskQueue = DispatchQueue(label: "ritm.payments.disk", qos: .utility)
 
   private static func defaultDirectory() -> URL? {
     guard

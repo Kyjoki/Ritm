@@ -1,319 +1,175 @@
 import RitmCore
 import SwiftUI
 
-/// The programs list: compact rows (tap to start, ⠿ to reorder, pencil to edit), the workout in
-/// progress, and the latest finished workouts.
+/// What the record sheet is editing: an existing record or a new one.
+struct WorkoutRecordTarget: Identifiable, Equatable {
+  let card: WorkoutRecordCard?
+  var id: String { card?.exerciseID ?? "new" }
+}
+
+/// «Тренировки»: the week at a glance, the programs, the records and the latest workouts.
 struct WorkoutHomeView: View {
   @Environment(RitmStore.self) private var store
   let go: (WorkoutScreen) -> Void
+  let start: (String) -> Void
+  @State private var showingSettings = false
+  @State private var recordTarget: WorkoutRecordTarget?
   @State private var opened: WorkoutRecord?
 
   private var workouts: WorkoutStore { store.workouts }
   private var russian: Bool { store.language == .ru }
 
+  /// The habit that finished workouts tick, when it still exists and is not archived.
+  private var linkedHabit: Habit? {
+    guard let id = workouts.settings.linkedHabitID else { return nil }
+    return store.habits.first { $0.id == id && $0.archived != true }
+  }
+
   var body: some View {
     WorkoutPage(
-      title: store.text("Тренировки", "Workouts"),
-      action: {
-        WorkoutHeaderButton(
-          symbol: "clock.arrow.circlepath", label: store.text("История тренировок", "Workout history")
-        ) { go(.history) }
+      header: {
+        RitmPageHeading(title: store.text("Тренировки", "Workouts"), gap: 12) {
+          WorkoutRoundButton(
+            symbol: "slider.horizontal.3",
+            label: store.text("Настройки тренировок", "Workout settings")
+          ) { showingSettings = true }
+        }
       },
       content: {
-        VStack(alignment: .leading, spacing: 12) {
-          if let session = workouts.session { activeCard(session).ritmPageReveal(index: 0) }
-          programs.ritmPageReveal(index: 1)
-          recent.ritmPageReveal(index: 2)
+        VStack(alignment: .leading, spacing: 0) {
+          if let session = workouts.session {
+            WorkoutResumeBanner(session: session) { go(.active) }
+              .padding(.bottom, 10).ritmPageReveal(index: 0)
+          }
+          habitChip.padding(.bottom, 8).ritmPageReveal(index: 1)
+          hero.ritmPageReveal(index: 2)
+          WorkoutSectionHeader(title: store.text("Программы", "Programs"))
+          WorkoutProgramsRow(
+            programs: workouts.library.programs, russian: russian,
+            open: { go(.program($0)) }, start: start, add: addProgram
+          )
+          .ritmPageReveal(index: 3)
+          WorkoutSectionHeader(title: store.text("Рекорды", "Records"))
+          WorkoutRecordsRow(
+            cards: workouts.recordCards,
+            edit: { recordTarget = WorkoutRecordTarget(card: $0) },
+            add: { recordTarget = WorkoutRecordTarget(card: nil) }
+          )
+          .ritmPageReveal(index: 4)
+          history.ritmPageReveal(index: 5)
         }
       }
     )
-    .sheet(item: $opened) { WorkoutRecordSheet(record: $0) }
+    .sheet(isPresented: $showingSettings) { WorkoutSettingsSheet() }
+    .sheet(item: $recordTarget) { WorkoutRecordSheet(target: $0) }
+    .sheet(item: $opened) { WorkoutSessionSheet(record: $0) }
   }
 
-  // MARK: Active workout
+  // MARK: Pieces
 
-  private func activeCard(_ session: WorkoutSession) -> some View {
-    RitmCard(padding: 14) {
-      HStack(spacing: 12) {
-        VStack(alignment: .leading, spacing: 4) {
-          Text(store.text("Идёт тренировка", "Workout in progress"))
-            .ritmFont(11, weight: .bold).foregroundStyle(RitmTheme.accentColor)
-            .padding(.horizontal, 10).padding(.vertical, 4)
-            .background(RitmTheme.soft, in: Capsule())
-            .overlay { Capsule().strokeBorder(RitmTheme.line, lineWidth: 1) }
-          Text(session.programName).ritmFont(16, weight: .semibold, tracking: -0.03)
-            .foregroundStyle(RitmTheme.text).lineLimit(2)
-          HStack(spacing: 0) {
-            Text(store.text("Выполнено подходов: ", "Sets done: "))
-            RitmCountText(session.doneSets) { "\($0)" }.fontWeight(.bold)
-            Text(store.text(" из ", " of ") + "\(session.totalSets)")
-          }
-          .ritmText(.body).foregroundStyle(RitmTheme.muted)
-        }
-        Spacer(minLength: 8)
-        Button { go(.active) } label: {
-          Text(store.text("Продолжить", "Resume")).workoutButtonFont()
-        }
-        .buttonStyle(RitmPrimaryButtonStyle(minHeight: 48))
-        .fixedSize()
+  private var habitChip: some View {
+    Button {
+      showingSettings = true
+    } label: {
+      HStack(spacing: 6) {
+        RitmSymbol("link").font(.system(size: 13))
+        Text(
+          linkedHabit.map { $0.title + " · " + store.text("привычка", "habit") }
+            ?? store.text("Без привычки", "No habit")
+        )
+        .lineLimit(1)
       }
+      .ritmFont(12, weight: .bold).foregroundStyle(RitmTheme.accentColor)
+      .padding(.horizontal, 12).frame(height: 28)
+      .background(RitmTheme.soft, in: Capsule())
+      .overlay { Capsule().strokeBorder(WorkoutPalette.stroke, lineWidth: 1) }
+      .frame(minHeight: 44)
+      .contentShape(Capsule())
     }
-    .overlay {
-      RoundedRectangle(cornerRadius: 23, style: .circular).strokeBorder(RitmTheme.accentColor, lineWidth: 1)
-        .allowsHitTesting(false)
-    }
+    .buttonStyle(RitmPressStyle())
+    .padding(.vertical, -8)
+    .accessibilityLabel(store.text("Связь с привычкой", "Habit link"))
   }
 
-  // MARK: Programs
+  private var hero: some View {
+    // A linked habit that has not loaded yet shows no numbers; the 4-a-week goal is only for
+    // when no habit is linked at all.
+    let week =
+      workouts.settings.linkedHabitID != nil && linkedHabit == nil
+      ? WorkoutStats.pendingWeek(today: store.today)
+      : WorkoutStats.week(
+        habit: linkedHabit, history: workouts.history, today: store.today, timeZone: store.timeZone)
+    let trend = WorkoutStats.volumeTrend(
+      workouts.history, today: store.today, timeZone: store.timeZone)
+    let streak = WorkoutStats.streakWeeks(
+      workouts.history, today: store.today, timeZone: store.timeZone)
+    return WorkoutHeroCard(week: week, volume: trend.volume, percent: trend.percent, streak: streak)
+  }
 
-  @ViewBuilder private var programs: some View {
-    let list = workouts.library.programs
-    VStack(alignment: .leading, spacing: 8) {
-      WorkoutSectionLabel(title: store.text("Программы", "Programs"))
-      if list.isEmpty {
-        WorkoutEmptyText(text: store.text("Программ пока нет. Добавьте первую.", "No programs yet. Add the first one."))
-      } else {
-        WorkoutReorderList(
-          items: list, spacing: 8, cornerRadius: 20, handleSize: 20,
-          onMove: { workouts.moveProgram(from: $0, to: $1) }
-        ) { program, handle in
-          let index = list.firstIndex { $0.id == program.id } ?? 0
-          WorkoutProgramRow(
-            program: program, handle: handle,
-            start: { start(program) }, edit: { go(.editor(program.id)) },
-            move: { delta in
-              let target = index + delta
-              guard list.indices.contains(target) else { return }
-              withAnimation(RitmMotion.easeOut(0.22)) { workouts.moveProgram(from: index, to: target) }
-            })
+  @ViewBuilder private var history: some View {
+    let records = Array(workouts.history.records.prefix(4))
+    WorkoutSectionHeader(
+      title: store.text("История", "History"), link: store.text("Вся история", "All history")
+    ) { go(.history) }
+    if records.isEmpty {
+      WorkoutEmptyText(text: store.text("Пока нет завершённых тренировок.", "No finished workouts yet."))
+    } else {
+      VStack(spacing: 6) {
+        ForEach(records) { record in
+          WorkoutHistoryRow(record: record) { opened = record }
         }
       }
-      Button {
-        addProgram()
-      } label: {
-        Label { Text(store.text("Добавить программу", "Add program")) } icon: { RitmSymbol("plus") }
-          .workoutButtonFont()
-          .frame(maxWidth: .infinity)
-      }
-      .buttonStyle(RitmSecondaryButtonStyle(minHeight: 48))
     }
   }
 
   private func addProgram() {
-    let number = workouts.library.programs.count + 1
-    let id = workouts.addProgram(name: store.text("Программа \(number)", "Program \(number)"))
-    go(.editor(id))
-  }
-
-  private func start(_ program: WorkoutProgram) {
-    switch workouts.startWorkout(programID: program.id, language: store.language) {
-    case .started: go(.active)
-    case .alreadyActive:
-      store.toasts.show(
-        store.text(
-          "Сначала завершите или отмените текущую тренировку",
-          "Finish or cancel the current workout first"))
-    case .empty:
-      store.toasts.show(
-        store.text(
-          "Добавьте в программу хотя бы одно упражнение", "Add at least one exercise to the program"))
-    }
-  }
-
-  // MARK: Latest workouts
-
-  @ViewBuilder private var recent: some View {
-    let records = Array(workouts.history.records.prefix(3))
-    VStack(alignment: .leading, spacing: 8) {
-      WorkoutSectionLabel(
-        title: store.text("Последние тренировки", "Latest workouts"),
-        link: store.text("Вся история", "All history")
-      ) { go(.history) }
-      if records.isEmpty {
-        WorkoutEmptyText(text: store.text("Пока нет завершённых тренировок.", "No finished workouts yet."))
-      }
-      ForEach(records) { record in
-        WorkoutHistoryRow(record: record) { opened = record }
-      }
-    }
+    go(.editor(id: WorkoutID.make(), isNew: true))
   }
 }
 
-/// One program in the list. The whole middle is the start button; the handle only reorders.
-private struct WorkoutProgramRow: View {
+// MARK: - Banner
+
+/// `.a2-cont`: «Продолжить тренировку», the running workout as a lit capsule.
+private struct WorkoutResumeBanner: View {
   @Environment(RitmStore.self) private var store
-  let program: WorkoutProgram
-  let handle: WorkoutDragHandle
-  let start: () -> Void
-  let edit: () -> Void
-  let move: (Int) -> Void
-
-  private var badge: String {
-    program.name.first(where: { $0.isLetter || $0.isNumber }).map { String($0).uppercased() } ?? "•"
-  }
-
-  private var summary: String {
-    let russian = store.language == .ru
-    let names = program.items
-      .map { store.workouts.exerciseName($0.exerciseID, language: store.language) }
-      .joined(separator: ", ")
-    let counts =
-      russian
-      ? "\(program.items.count) упр. · \(program.totalSets) подх."
-      : "\(program.items.count) ex. · \(program.totalSets) sets"
-    return names.isEmpty ? counts : counts + " · " + names
-  }
+  let session: WorkoutSession
+  let action: () -> Void
 
   var body: some View {
-    HStack(spacing: 2) {
-      handle.frame(width: 30)
-      Button(action: start) {
-        HStack(spacing: 10) {
-          Text(badge)
-            .ritmFont(16, weight: .bold)
-            .foregroundStyle(RitmTheme.accentColor)
-            .frame(width: 38, height: 38)
-            .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 12, style: .circular))
-          VStack(alignment: .leading, spacing: 0) {
-            Text(program.name.isEmpty ? store.text("Без названия", "Untitled") : program.name)
-              .ritmFont(14.5, weight: .semibold, tracking: -0.03).foregroundStyle(RitmTheme.text).lineLimit(1)
-            Text(summary).ritmFont(11.5).foregroundStyle(RitmTheme.muted).lineLimit(1)
+    Button(action: action) {
+      HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 1) {
+          Text(store.text("Продолжить тренировку", "Resume workout").uppercased())
+            .ritmFont(11, weight: .bold, tracking: 0.06).opacity(0.75)
+          Text(session.programName).ritmFont(15.5, weight: .bold, tracking: -0.03).lineLimit(1)
+          HStack(spacing: 0) {
+            Text(
+              store.text(
+                "\(session.doneSets) из \(session.totalSets) подходов · ",
+                "\(session.doneSets) of \(session.totalSets) sets · "))
+            TimelineView(.periodic(from: session.startedAt, by: 1)) { context in
+              Text(WorkoutClock.elapsed(from: session.startedAt, now: context.date)).monospacedDigit()
+            }
           }
-          Spacer(minLength: 4)
-          RitmSymbol("play.fill").font(.system(size: 14)).foregroundStyle(RitmTheme.accentColor)
+          .ritmFont(12).opacity(0.85)
         }
-        .padding(.leading, 2).padding(.trailing, 6)
-        .frame(minHeight: 52)
-        .contentShape(Rectangle())
+        .frame(maxWidth: .infinity, alignment: .leading)
+        RitmSymbol("play.fill").font(.system(size: 18))
+          .frame(width: 44, height: 44)
+          .background(Color.white.opacity(0.26), in: Circle())
       }
-      .buttonStyle(RitmPressStyle())
-      .accessibilityLabel(store.text("Начать тренировку «\(program.name)»", "Start workout “\(program.name)”"))
-      WorkoutIconButton(
-        symbol: "pencil", label: store.text("Изменить программу «\(program.name)»", "Edit program “\(program.name)”"),
-        size: 16, action: edit)
-    }
-    .padding(.leading, 6).padding(.trailing, 4).padding(.vertical, 4)
-    .frame(minHeight: 60)
-    .background { RitmPanelBackground(radius: 20) }
-    .accessibilityElement(children: .contain)
-    .accessibilityAction(named: store.text("Вверх", "Move up")) { move(-1) }
-    .accessibilityAction(named: store.text("Вниз", "Move down")) { move(1) }
-  }
-}
-
-/// A finished workout in a list: date, program, and the total weight counting up.
-struct WorkoutHistoryRow: View {
-  @Environment(RitmStore.self) private var store
-  let record: WorkoutRecord
-  let open: () -> Void
-
-  var body: some View {
-    let russian = store.language == .ru
-    Button(action: open) {
-      HStack(spacing: 8) {
-        VStack(alignment: .leading, spacing: 2) {
-          Text(WorkoutText.date(record.endedAt, language: store.language))
-            .ritmFont(13.5, weight: .bold).foregroundStyle(RitmTheme.text)
-          Text(
-            "\(record.programName) · "
-              + WorkoutText.exercises(record.exercises.count, russian: russian)
-          )
-          .ritmFont(11.5).foregroundStyle(RitmTheme.muted).lineLimit(1)
-        }
-        Spacer(minLength: 4)
-        RitmCountText(record.volume) { WorkoutText.kilograms($0, russian: russian) }
-          .ritmFont(13, weight: .bold).foregroundStyle(RitmTheme.text)
-        RitmSymbol("chevron.right").font(.system(size: 13, weight: .semibold))
-          .foregroundStyle(RitmTheme.muted)
-          .frame(width: 16)
-          .accessibilityHidden(true)
+      .foregroundStyle(RitmTheme.ctaInk)
+      .padding(.vertical, 12).padding(.leading, 14).padding(.trailing, 12)
+      .background {
+        RoundedRectangle(cornerRadius: 22, style: .continuous).fill(RitmTheme.ctaGradient)
+          .shadow(color: RitmGlassTokens.ctaGlow, radius: 9, y: 8)
       }
-      .padding(.horizontal, 12).padding(.vertical, 8)
-      .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-      .background { RitmPanelBackground(radius: 18) }
+      .overlay {
+        RoundedRectangle(cornerRadius: 22, style: .continuous)
+          .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+      }
       .contentShape(Rectangle())
     }
     .buttonStyle(RitmPressStyle())
-  }
-}
-
-/// The history screen: every finished workout, newest first.
-struct WorkoutHistoryView: View {
-  @Environment(RitmStore.self) private var store
-  let go: (WorkoutScreen) -> Void
-  @State private var opened: WorkoutRecord?
-
-  var body: some View {
-    WorkoutPage(
-      title: store.text("История", "History"),
-      action: {
-        WorkoutHeaderButton(symbol: "chevron.left", label: store.text("К программам", "To programs")) {
-          go(.home)
-        }
-      },
-      content: {
-        let records = store.workouts.history.records
-        if records.isEmpty {
-          WorkoutEmptyText(text: store.text("Пока нет завершённых тренировок.", "No finished workouts yet."))
-            .ritmPageReveal(index: 0)
-        } else {
-          LazyVStack(spacing: 8) {
-            ForEach(Array(records.enumerated()), id: \.element.id) { index, record in
-              WorkoutHistoryRow(record: record) { opened = record }
-                .ritmPageReveal(index: min(index, 7))
-            }
-          }
-        }
-      }
-    )
-    .sheet(item: $opened) { WorkoutRecordSheet(record: $0) }
-  }
-}
-
-/// The details of one finished workout.
-struct WorkoutRecordSheet: View {
-  @Environment(RitmStore.self) private var store
-  @Environment(\.dismiss) private var dismiss
-  let record: WorkoutRecord
-
-  var body: some View {
-    let russian = store.language == .ru
-    ScrollView {
-      VStack(alignment: .leading, spacing: 16) {
-        HStack {
-          Text(WorkoutText.date(record.endedAt, language: store.language, year: true))
-            .ritmText(.sectionTitle).foregroundStyle(RitmTheme.text)
-            .accessibilityAddTraits(.isHeader)
-          Spacer()
-          Button(store.text("Закрыть", "Close")) { dismiss() }
-            .buttonStyle(RitmTextButtonStyle(size: 13))
-        }
-        Text(
-          "\(record.programName) · \(WorkoutText.duration(record.duration, russian: russian)) · "
-            + store.text("объём ", "volume ") + WorkoutText.kilograms(record.volume, russian: russian)
-        )
-        .ritmText(.body).foregroundStyle(RitmTheme.muted)
-        ForEach(record.exercises) { exercise in
-          VStack(alignment: .leading, spacing: 4) {
-            Text(exercise.name).ritmFont(14, weight: .semibold).foregroundStyle(RitmTheme.text)
-            ForEach(Array(exercise.sets.enumerated()), id: \.offset) { index, set in
-              HStack(spacing: 12) {
-                Text("\(index + 1)").foregroundStyle(RitmTheme.muted).frame(width: 18, alignment: .leading)
-                Text(
-                  "\(WorkoutFormat.weight(set.weight, comma: russian))\u{00A0}\(russian ? "кг" : "kg") × \(set.reps)"
-                )
-                Spacer()
-              }
-              .ritmFont(13).monospacedDigit().foregroundStyle(RitmTheme.text)
-              .frame(minHeight: 32)
-              Divider()
-            }
-          }
-        }
-      }
-      .padding(20)
-    }
-    .background(RitmTheme.background)
-    .presentationDetents([.medium, .large])
   }
 }

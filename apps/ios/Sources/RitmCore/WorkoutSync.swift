@@ -72,7 +72,10 @@ public enum JSONValue: Codable, Equatable, Sendable {
 // MARK: - Documents and the remote
 
 public enum WorkoutDocKind: String, Codable, Sendable, CaseIterable {
-  case programs, sessions
+  case programs, sessions, records, settings
+
+  /// `records` and `settings` exist only on a newer server: an older one does not return them.
+  public var isExtra: Bool { self == .records || self == .settings }
 }
 
 public struct WorkoutDoc: Codable, Equatable, Sendable {
@@ -89,10 +92,39 @@ public struct WorkoutDoc: Codable, Equatable, Sendable {
 public struct WorkoutServerSnapshot: Codable, Equatable, Sendable {
   public let programs: [WorkoutDoc]
   public let sessions: [WorkoutDoc]
-  public init(programs: [WorkoutDoc], sessions: [WorkoutDoc]) {
+  /// `nil` when the server has no such list (an older server): nothing to push or merge then.
+  public let records: [WorkoutDoc]?
+  public let settings: [WorkoutDoc]?
+
+  public init(
+    programs: [WorkoutDoc], sessions: [WorkoutDoc], records: [WorkoutDoc]? = nil,
+    settings: [WorkoutDoc]? = nil
+  ) {
     self.programs = programs
     self.sessions = sessions
+    self.records = records
+    self.settings = settings
   }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    programs = try c.decode([WorkoutDoc].self, forKey: .programs)
+    sessions = try c.decode([WorkoutDoc].self, forKey: .sessions)
+    records = try c.decodeIfPresent([WorkoutDoc].self, forKey: .records)
+    settings = try c.decodeIfPresent([WorkoutDoc].self, forKey: .settings)
+  }
+
+  public func docs(for kind: WorkoutDocKind) -> [WorkoutDoc]? {
+    switch kind {
+    case .programs: programs
+    case .sessions: sessions
+    case .records: records
+    case .settings: settings
+    }
+  }
+
+  /// The server returned both extra lists, so it takes records and settings.
+  public var supportsExtras: Bool { records != nil && settings != nil }
 }
 
 public protocol WorkoutSyncRemote: Sendable {
@@ -143,14 +175,47 @@ public struct WorkoutSyncState: Codable, Equatable, Sendable {
   public var serverKey: String
   public var programs: [String: WorkoutSyncEntry] = [:]
   public var sessions: [String: WorkoutSyncEntry] = [:]
+  public var records: [String: WorkoutSyncEntry] = [:]
+  public var settings: [String: WorkoutSyncEntry] = [:]
+  /// Whether the server accepts `records` and `settings`; learned from each GET. While it does
+  /// not, those two kinds stay on this iPhone and are neither pushed nor counted as pending.
+  public var extrasSupported = false
 
   public init(serverKey: String) { self.serverKey = serverKey }
 
+  /// Reads state saved before records and settings existed.
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    serverKey = try c.decode(String.self, forKey: .serverKey)
+    programs = try c.decodeIfPresent([String: WorkoutSyncEntry].self, forKey: .programs) ?? [:]
+    sessions = try c.decodeIfPresent([String: WorkoutSyncEntry].self, forKey: .sessions) ?? [:]
+    records = try c.decodeIfPresent([String: WorkoutSyncEntry].self, forKey: .records) ?? [:]
+    settings = try c.decodeIfPresent([String: WorkoutSyncEntry].self, forKey: .settings) ?? [:]
+    extrasSupported = try c.decodeIfPresent(Bool.self, forKey: .extrasSupported) ?? false
+  }
+
   public subscript(kind: WorkoutDocKind) -> [String: WorkoutSyncEntry] {
-    get { kind == .programs ? programs : sessions }
-    set {
-      if kind == .programs { programs = newValue } else { sessions = newValue }
+    get {
+      switch kind {
+      case .programs: programs
+      case .sessions: sessions
+      case .records: records
+      case .settings: settings
+      }
     }
+    set {
+      switch kind {
+      case .programs: programs = newValue
+      case .sessions: sessions = newValue
+      case .records: records = newValue
+      case .settings: settings = newValue
+      }
+    }
+  }
+
+  /// The kinds this server takes.
+  public var activeKinds: [WorkoutDocKind] {
+    WorkoutDocKind.allCases.filter { !$0.isExtra || extrasSupported }
   }
 
   /// Live (not deleted) content by id: what the local files should hold.
@@ -159,7 +224,7 @@ public struct WorkoutSyncState: Codable, Equatable, Sendable {
   }
 
   public var hasPending: Bool {
-    WorkoutDocKind.allCases.contains { kind in self[kind].values.contains { $0.dirty } }
+    activeKinds.contains { kind in self[kind].values.contains { $0.dirty } }
   }
 
   /// Takes the local files as they are now: edits become dirty, new docs are added, vanished
@@ -202,8 +267,9 @@ public struct WorkoutSyncState: Codable, Equatable, Sendable {
   /// new server docs are added; dirty docs and tombstones are never overwritten (this device
   /// wins); clean docs missing on the server were deleted elsewhere and are removed.
   public mutating func merge(server: WorkoutServerSnapshot) {
+    extrasSupported = server.supportsExtras
     for kind in WorkoutDocKind.allCases {
-      let docs = kind == .programs ? server.programs : server.sessions
+      guard let docs = server.docs(for: kind) else { continue }
       var entries = self[kind]
       var seen = Set<String>()
       for doc in docs {
@@ -279,14 +345,14 @@ public enum WorkoutSyncEngine {
     var failure: (any Error)?
     // Probe first: a server without the routes (not deployed yet) must stay untouched and quiet.
     do {
-      _ = try await remote.fetchWorkouts()
+      state.extrasSupported = try await remote.fetchWorkouts().supportsExtras
     } catch let error as APIError where WorkoutSyncEngine.isUnsupported(error) {
       return WorkoutSyncOutcome(state: state, failure: nil, unsupported: true)
     } catch {
       return WorkoutSyncOutcome(state: state, failure: error)
     }
     do {
-      for kind in WorkoutDocKind.allCases {
+      for kind in state.activeKinds {
         for id in state[kind].keys.sorted() {
           guard let entry = state[kind][id], entry.dirty else { continue }
           do {

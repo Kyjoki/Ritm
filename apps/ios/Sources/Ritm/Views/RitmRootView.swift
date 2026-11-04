@@ -653,11 +653,7 @@ struct SyncStatusView: View {
 
   /// Times use AM/PM in both languages (AGENTS.md).
   private func clock(_ date: Date) -> String {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = TimeZone(identifier: store.timeZone)
-    formatter.dateFormat = "h:mm a"
-    return formatter.string(from: date)
+    FormatterCache.shared.clock(date, zone: store.timeZone)
   }
 
   var body: some View {

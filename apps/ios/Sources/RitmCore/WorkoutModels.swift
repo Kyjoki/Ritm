@@ -59,55 +59,96 @@ public enum WorkoutCoding {
 public struct WorkoutExercise: Codable, Equatable, Hashable, Identifiable, Sendable {
   public let id: String
   public var name: String
+  /// The muscle group of an exercise the owner created; built-in ones get it from the catalog.
+  public var muscle: WorkoutMuscle?
 
-  public init(id: String, name: String) {
+  public init(id: String, name: String, muscle: WorkoutMuscle? = nil) {
     self.id = id
     self.name = name
+    self.muscle = muscle
+  }
+
+  private enum CodingKeys: String, CodingKey { case id, name, muscle }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    self.init(
+      id: try c.decode(String.self, forKey: .id), name: c.workoutValue(.name, ""),
+      muscle: try? c.decodeIfPresent(WorkoutMuscle.self, forKey: .muscle))
   }
 }
 
 public struct WorkoutProgramItem: Codable, Equatable, Identifiable, Sendable {
   public static let setRange = 1...10
+  public static let repsRange = 1...99
+  public static let restRange = 15...900
+  public static let restStep = 15
+  public static let defaultReps = 10
+  /// What a new exercise rests between sets.
+  public static let defaultRest = 180
 
   public let id: String
   public var exerciseID: String
   public var sets: Int
+  public var reps: Int
+  /// Rest after a set of this exercise, in seconds.
+  public var restSeconds: Int
 
-  public init(id: String, exerciseID: String, sets: Int) {
+  public init(
+    id: String, exerciseID: String, sets: Int, reps: Int = WorkoutProgramItem.defaultReps,
+    restSeconds: Int = WorkoutProgramItem.defaultRest
+  ) {
     self.id = id
     self.exerciseID = exerciseID
-    self.sets = min(max(sets, Self.setRange.lowerBound), Self.setRange.upperBound)
+    self.sets = Self.clamp(sets, Self.setRange)
+    self.reps = Self.clamp(reps, Self.repsRange)
+    self.restSeconds = Self.clamp(restSeconds, Self.restRange)
   }
 
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     self.init(
       id: c.workoutValue(.id, WorkoutID.make()), exerciseID: try c.decode(String.self, forKey: .exerciseID),
-      sets: c.workoutValue(.sets, 3))
+      sets: c.workoutValue(.sets, 3), reps: c.workoutValue(.reps, Self.defaultReps),
+      restSeconds: c.workoutValue(.restSeconds, Self.defaultRest))
+  }
+
+  private static func clamp(_ value: Int, _ range: ClosedRange<Int>) -> Int {
+    min(max(value, range.lowerBound), range.upperBound)
   }
 }
 
 public struct WorkoutProgram: Codable, Equatable, Identifiable, Sendable {
   public static let nameLimit = 40
+  /// How many colours a program card can have (the gradient palette of the cards).
+  public static let colorCount = 6
 
   public let id: String
   public var name: String
   public var items: [WorkoutProgramItem]
+  /// Index of the card gradient, `0..<colorCount`.
+  public var colorIndex: Int
 
-  public init(id: String, name: String, items: [WorkoutProgramItem] = []) {
+  public init(id: String, name: String, items: [WorkoutProgramItem] = [], colorIndex: Int = 0) {
     self.id = id
     self.name = name
     self.items = items
+    self.colorIndex = min(max(colorIndex, 0), Self.colorCount - 1)
   }
+
+  private enum CodingKeys: String, CodingKey { case id, name, items, colorIndex }
 
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     self.init(
       id: try c.decode(String.self, forKey: .id), name: c.workoutValue(.name, ""),
-      items: c.workoutLossy(WorkoutProgramItem.self, .items))
+      items: c.workoutLossy(WorkoutProgramItem.self, .items),
+      colorIndex: c.workoutValue(.colorIndex, 0))
   }
 
   public var totalSets: Int { items.reduce(0) { $0 + $1.sets } }
+  /// «≈ 35 мин»: about four minutes a set and three to get started.
+  public var estimatedMinutes: Int { totalSets * 4 + 3 }
 }
 
 /// Programs and the owner's own exercises: the file `programs.json`.
@@ -301,10 +342,12 @@ public struct WorkoutSessionItem: Codable, Equatable, Identifiable, Sendable {
   /// The weight typed in the leading set; new sets start with it.
   public var sharedWeight: String
   public var sets: [WorkoutSet]
+  /// The rest after a set, copied from the program when the workout starts.
+  public var restSeconds: Int
 
   public init(
     id: String, exerciseID: String, name: String, previous: WorkoutPrevious?,
-    sharedWeight: String = "", sets: [WorkoutSet]
+    sharedWeight: String = "", sets: [WorkoutSet], restSeconds: Int = WorkoutProgramItem.defaultRest
   ) {
     self.id = id
     self.exerciseID = exerciseID
@@ -312,6 +355,7 @@ public struct WorkoutSessionItem: Codable, Equatable, Identifiable, Sendable {
     self.previous = previous
     self.sharedWeight = sharedWeight
     self.sets = sets
+    self.restSeconds = restSeconds
   }
 
   public init(from decoder: Decoder) throws {
@@ -319,7 +363,8 @@ public struct WorkoutSessionItem: Codable, Equatable, Identifiable, Sendable {
     self.init(
       id: try c.decode(String.self, forKey: .id), exerciseID: try c.decode(String.self, forKey: .exerciseID),
       name: c.workoutValue(.name, ""), previous: try? c.decodeIfPresent(WorkoutPrevious.self, forKey: .previous),
-      sharedWeight: c.workoutValue(.sharedWeight, ""), sets: c.workoutLossy(WorkoutSet.self, .sets))
+      sharedWeight: c.workoutValue(.sharedWeight, ""), sets: c.workoutLossy(WorkoutSet.self, .sets),
+      restSeconds: c.workoutValue(.restSeconds, WorkoutProgramItem.defaultRest))
   }
 
   public var doneCount: Int { sets.filter(\.done).count }

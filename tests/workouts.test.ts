@@ -87,7 +87,7 @@ test('workouts require a session', async (t) => {
 test('workout documents are created, updated, listed and deleted with optimistic versions', async (t) => {
   const { call, cookie, put } = await harness(t);
   const empty = (await (await call('/api/workouts', 'GET', cookie)).json()) as WorkoutsSnapshot;
-  assert.deepEqual(empty, { programs: [], sessions: [] });
+  assert.deepEqual(empty, { programs: [], sessions: [], records: [], settings: [] });
 
   const created = await put('/api/workouts/programs/prog_1', {
     name: 'Push',
@@ -183,6 +183,50 @@ test('workout counts are capped per collection', (t) => {
   store.putWorkout('sessions', 'first', {}, null);
 });
 
+test('records and settings kinds follow the same contract and limits', async (t) => {
+  const { call, cookie, put } = await harness(t);
+  for (const kind of ['records', 'settings']) {
+    const created = (await (await put(`/api/workouts/${kind}/x1`, { v: 1 })).json()) as WorkoutDoc;
+    assert.equal((await put(`/api/workouts/${kind}/x1`, {})).status, 409);
+    const next = (await (
+      await put(`/api/workouts/${kind}/x1`, { v: 2 }, created.updatedAt)
+    ).json()) as WorkoutDoc;
+    assert.deepEqual(next.data, { v: 2 });
+    assert.equal(
+      (await put(`/api/workouts/${kind}/big`, { b: 'x'.repeat(65 * 1024) })).status,
+      400,
+    );
+    const snapshot = (await (
+      await call('/api/workouts', 'GET', cookie)
+    ).json()) as WorkoutsSnapshot;
+    assert.deepEqual(snapshot[kind as 'records' | 'settings'], [next]);
+    assert.equal(
+      (await call(del(`/api/workouts/${kind}/x1`, next.updatedAt), 'DELETE', cookie)).status,
+      204,
+    );
+  }
+  assert.equal((await put('/api/workouts/unknown/x1', {})).status, 400);
+});
+
+test('records and settings counts are capped', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'ritm-workouts-cap2-'));
+  const store = new Store(directory, false);
+  t.after(() => {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  for (const [kind, limit] of [
+    ['records', 500],
+    ['settings', 10],
+  ] as const) {
+    for (let index = 0; index < limit; index += 1) store.putWorkout(kind, `d${index}`, {}, null);
+    assert.throws(
+      () => store.putWorkout(kind, 'extra', {}, null),
+      (error: { code?: string }) => error.code === 'WORKOUT_LIMIT',
+    );
+  }
+});
+
 test('pg-mem: PostgreSQL store follows the same workout contract', async (t) => {
   const db = newDb({ autoCreateForeignKeyIndices: true, noAstCoverageCheck: true });
   db.public.registerFunction({
@@ -197,7 +241,9 @@ test('pg-mem: PostgreSQL store follows the same workout contract', async (t) => 
   t.after(async () => {
     await pool.end();
   });
-  assert.ok((await migrate(pool)).includes('003-workouts.sql'));
+  const applied = await migrate(pool);
+  assert.ok(applied.includes('003-workouts.sql'));
+  assert.ok(applied.includes('005-workout-records-settings.sql'));
   let now = Date.parse('2026-10-13T06:00:00Z');
   const store = new PostgresStore(pool, { now: () => now });
   const created = await store.putWorkout('sessions', 's1', { reps: [5, 5] }, null);
@@ -217,5 +263,10 @@ test('pg-mem: PostgreSQL store follows the same workout contract', async (t) => 
   assert.deepEqual(await ids(), ['s2', 's1']);
   await store.deleteWorkout('sessions', 's1', updated.updatedAt);
   assert.deepEqual(await ids(), ['s2']);
+  const record = await store.putWorkout('records', 'r1', { kg: 100 }, null);
+  await store.putWorkout('settings', 'main', { habitId: 'h1' }, null);
+  const snapshot = await store.workouts();
+  assert.deepEqual(snapshot.records, [record]);
+  assert.equal(snapshot.settings.length, 1);
   await assert.rejects(store.deleteWorkout('sessions', 's1', updated.updatedAt), /не найдена/);
 });

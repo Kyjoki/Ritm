@@ -1,75 +1,86 @@
 import RitmCore
 import SwiftUI
 
-/// Choose an exercise from the catalog or create the owner's own. Used by the program editor
-/// (add, replace) and by an active workout (replace). Exercises in `used` are shown dimmed.
+/// `.sheet.tall`: pick an exercise by search and muscle group, or create the owner's own from
+/// the search text. Exercises in `used` are shown dimmed.
 struct WorkoutExercisePicker: View {
   @Environment(RitmStore.self) private var store
   @Environment(\.dismiss) private var dismiss
   let title: String
   let used: Set<String>
   let usedNote: String
-  let createLabel: String
   let onPick: (WorkoutExercise) -> Void
   @State private var query = ""
-  @State private var newName = ""
-  @State private var error: String?
+  @State private var muscle: WorkoutMuscle?
 
   private var exercises: [WorkoutExercise] {
-    let all = store.workouts.allExercises(language: store.language)
-    let key = query.trimmingCharacters(in: .whitespaces).lowercased()
-    return key.isEmpty ? all : all.filter { $0.name.lowercased().contains(key) }
+    WorkoutCatalog.search(
+      query, muscle: muscle, custom: store.workouts.library.customExercises, language: store.language)
   }
 
+  private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces) }
+
   var body: some View {
-    VStack(spacing: 0) {
-      HStack {
-        Text(title).ritmText(.sectionTitle).foregroundStyle(RitmTheme.text)
-          .accessibilityAddTraits(.isHeader)
-        Spacer()
-        Button(store.text("Закрыть", "Close")) { dismiss() }
-          .buttonStyle(RitmTextButtonStyle(size: 13))
+    VStack(alignment: .leading, spacing: 0) {
+      Text(title).ritmFont(19, weight: .bold, tracking: -0.03).foregroundStyle(RitmTheme.text)
+        .padding(.horizontal, 4).padding(.bottom, 10)
+        .accessibilityAddTraits(.isHeader)
+      HStack(spacing: 10) {
+        RitmSymbol("magnifyingglass").font(.system(size: 18)).foregroundStyle(RitmTheme.muted)
+        TextField(store.text("Поиск", "Search"), text: $query)
+          .ritmFont(15.5).foregroundStyle(RitmTheme.text)
+          .submitLabel(.search).autocorrectionDisabled()
       }
-      .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 8)
+      .padding(.horizontal, 14).frame(height: 46)
+      .background(RitmTheme.field, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+      .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(RitmTheme.line, lineWidth: 1) }
+      chips
       ScrollView {
-        VStack(alignment: .leading, spacing: 14) {
-          field(store.text("Найти упражнение", "Search exercises"), text: $query, search: true)
-          LazyVStack(spacing: 0) {
-            ForEach(exercises) { exercise in row(exercise) }
-          }
-          VStack(alignment: .leading, spacing: 8) {
-            Text(store.text("Своё упражнение", "Your own exercise"))
-              .ritmFont(12, weight: .medium).foregroundStyle(RitmTheme.muted)
-            field(
-              store.text("Например, Тяга гантели в наклоне", "For example, One-arm dumbbell row"),
-              text: $newName, search: false)
-            Button(action: create) { Text(createLabel).workoutButtonFont() }
-              .buttonStyle(RitmPrimaryButtonStyle(minHeight: 48))
-            if let error {
-              Text(error).ritmText(.body).foregroundStyle(RitmTheme.danger)
-                .accessibilityAddTraits(.updatesFrequently)
-            }
-          }
-          .padding(.top, 8)
+        LazyVStack(spacing: 0) {
+          ForEach(exercises) { exercise in row(exercise) }
+          if exercises.isEmpty { empty }
         }
-        .padding(.horizontal, 20).padding(.bottom, 24)
       }
       .scrollDismissesKeyboard(.interactively)
     }
+    .padding(.horizontal, 16).padding(.top, 22)
     .background(RitmTheme.background)
     .presentationDetents([.large])
+    .ritmSheetGrabber()
   }
 
-  private func field(_ placeholder: String, text: Binding<String>, search: Bool) -> some View {
-    TextField(placeholder, text: text)
-      .ritmFont(14)
-      .foregroundStyle(RitmTheme.text)
-      .submitLabel(search ? .search : .done)
-      .autocorrectionDisabled()
-      .padding(.horizontal, 12)
-      .frame(minHeight: 46)
-      .background(RitmTheme.field, in: RoundedRectangle(cornerRadius: 12, style: .circular))
-      .overlay { RoundedRectangle(cornerRadius: 12, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1) }
+  /// `.gchips`: «Все» and the muscle groups.
+  private var chips: some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+      HStack(spacing: 6) {
+        chip(store.text("Все", "All"), selected: muscle == nil) { muscle = nil }
+        ForEach(WorkoutMuscle.allCases, id: \.self) { group in
+          chip(group.title(language: store.language), selected: muscle == group) { muscle = group }
+        }
+      }
+      .padding(.vertical, 12)
+    }
+  }
+
+  private func chip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      Text(title).ritmFont(13, weight: .semibold)
+        .foregroundStyle(selected ? RitmTheme.ctaInk : RitmTheme.muted)
+        .padding(.horizontal, 14).frame(height: 32)
+        .background {
+          if selected {
+            Capsule().fill(RitmTheme.ctaGradient)
+          } else {
+            Capsule().fill(WorkoutPalette.inset)
+              .overlay { Capsule().strokeBorder(WorkoutPalette.stroke, lineWidth: 1) }
+          }
+        }
+        .frame(minHeight: 44)
+        .contentShape(Capsule())
+    }
+    .buttonStyle(RitmPressStyle())
+    .padding(.vertical, -6)
+    .accessibilityAddTraits(selected ? .isSelected : [])
   }
 
   private func row(_ exercise: WorkoutExercise) -> some View {
@@ -78,28 +89,44 @@ struct WorkoutExercisePicker: View {
       onPick(exercise)
       dismiss()
     } label: {
-      HStack(spacing: 8) {
-        Text(exercise.name).ritmFont(14, weight: .semibold).foregroundStyle(RitmTheme.text)
+      HStack(spacing: 10) {
+        Text(exercise.name).ritmFont(15, weight: .medium).foregroundStyle(RitmTheme.text)
           .multilineTextAlignment(.leading)
         Spacer(minLength: 8)
-        if taken { Text(usedNote).ritmFont(11).foregroundStyle(RitmTheme.muted) }
+        if taken {
+          Text(usedNote).ritmFont(11).foregroundStyle(RitmTheme.muted)
+        } else if let group = exercise.muscle {
+          WorkoutMuscleChip(muscle: group)
+        }
       }
-      .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+      .padding(.horizontal, 6)
+      .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
       .contentShape(Rectangle())
-      .overlay(alignment: .top) { Rectangle().fill(RitmTheme.line).frame(height: 1) }
+      .overlay(alignment: .bottom) { Rectangle().fill(RitmTheme.line).frame(height: 1) }
       .opacity(taken ? 0.5 : 1)
     }
     .buttonStyle(.plain)
     .disabled(taken)
   }
 
-  private func create() {
-    guard let exercise = store.workouts.createExercise(named: newName) else {
-      error = store.text("Введите название, минимум 2 символа.", "Enter a name of at least 2 characters.")
-      return
+  @ViewBuilder private var empty: some View {
+    VStack(spacing: 12) {
+      Text(store.text("Ничего не найдено", "Nothing found")).ritmFont(14).foregroundStyle(RitmTheme.muted)
+      if trimmedQuery.count >= 2 {
+        Button(action: create) {
+          Text(store.text("Создать «\(trimmedQuery)»", "Create “\(trimmedQuery)”"))
+            .ritmFont(13.5, weight: .bold)
+        }
+        .buttonStyle(RitmSecondaryButtonStyle(minHeight: 48))
+      }
     }
+    .frame(maxWidth: .infinity).padding(.vertical, 40)
+  }
+
+  private func create() {
+    guard let exercise = store.workouts.createExercise(named: trimmedQuery, muscle: muscle) else { return }
     guard !used.contains(exercise.id) else {
-      error = store.text("Это упражнение уже есть.", "This exercise is already there.")
+      store.toasts.show(store.text("Это упражнение уже есть.", "This exercise is already there."))
       return
     }
     onPick(exercise)
