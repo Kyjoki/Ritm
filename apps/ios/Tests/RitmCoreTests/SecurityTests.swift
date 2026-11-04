@@ -55,7 +55,7 @@ final class SecurityTests: XCTestCase {
   func testCookieLongerThanAbsoluteCapIsRejected() async throws {
     let client = try APIClient(
       transport: StubTransport([
-        StubReply(json: sessionJSON, headers: ["Set-Cookie": cookie(maxAge: 180 * 86_400 + 1)])
+        StubReply(json: sessionJSON, headers: ["Set-Cookie": cookie(maxAge: 3650 * 86_400 + 1)])
       ]))
     do {
       _ = try await client.login(login: "o", password: "p")

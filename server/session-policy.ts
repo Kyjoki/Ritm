@@ -7,7 +7,9 @@ export const MAX_DEVICE_NAME = 60;
 
 export const sessionPolicy: Record<SessionClient, { slidingMs: number; absoluteMs: number }> = {
   web: { slidingMs: 12 * HOUR, absoluteMs: 7 * DAY },
-  ios: { slidingMs: 30 * DAY, absoluteMs: 180 * DAY },
+  // The owner's iPhone stays signed in while it is used at least once a year; it ends only by
+  // signing out or «Выйти на всех других устройствах».
+  ios: { slidingMs: 365 * DAY, absoluteMs: 3650 * DAY },
 };
 
 /** Sliding expiry never exceeds the absolute limit. */

@@ -101,8 +101,8 @@ public actor APIClient {
   /// The default server; the app may configure another one (see ServerAddress).
   public static let productionURL = ServerAddress.production.url
   private static let cookieName = "__Host-ritm_session"
-  /// The longest cookie the app accepts: the server's absolute device-session cap (180 days).
-  static let sessionLifetime: TimeInterval = 180 * 24 * 60 * 60
+  /// The longest cookie the app accepts: the server's absolute device-session cap (3650 days).
+  static let sessionLifetime: TimeInterval = 3650 * 24 * 60 * 60
   public nonisolated let baseURL: URL
   private let transport: any HTTPTransport
   private var credential: SessionCredential?

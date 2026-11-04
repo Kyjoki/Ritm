@@ -6,7 +6,8 @@
       "claude/ritm-native-ios-parity": false,
       "claude/ritm-health-live-activity": false,
       "claude/ritm-workouts-sync": false,
-      "claude/ritm-security": false
+      "claude/ritm-security": false,
+      "claude/ritm-session-keep": false
     }
   },
   "framework": "vite",
@@ -20,7 +21,7 @@
   ],
   "headers": [
     {
-      "source": "/:path*",
+      "source": "/(.*)",
       "headers": [
         { "key": "X-Content-Type-Options", "value": "nosniff" },
         { "key": "Referrer-Policy", "value": "same-origin" },

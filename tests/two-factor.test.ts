@@ -122,7 +122,7 @@ test('device names are bounded, cleaned and derived from the User-Agent', () => 
   );
   assert.equal(deviceNameFromUserAgent(undefined), 'Неизвестное устройство');
   assert.deepEqual(sessionPolicy.web, { slidingMs: 12 * HOUR, absoluteMs: 7 * DAY });
-  assert.deepEqual(sessionPolicy.ios, { slidingMs: 30 * DAY, absoluteMs: 180 * DAY });
+  assert.deepEqual(sessionPolicy.ios, { slidingMs: 365 * DAY, absoluteMs: 3650 * DAY });
 });
 
 async function fixture(t: TestContext, mockDate = false) {
@@ -330,23 +330,19 @@ test('web sessions slide for 12 hours inside a 7 day absolute limit', async (t) 
   assert.equal((await call('/api/security', 'GET', active)).status, 401, 'absolute limit');
 });
 
-test('iOS sessions slide for 30 days inside a 180 day absolute limit', async (t) => {
+test('iOS sessions slide for a year and end only after a year without use', async (t) => {
   const { call, signedIn } = await fixture(t, true);
   const idle = await signedIn({ client: 'ios' });
   const active = await signedIn({ client: 'ios' });
-  t.mock.timers.setTime(start + 29 * DAY);
+  t.mock.timers.setTime(start + 364 * DAY);
   assert.equal((await call('/api/security', 'GET', idle)).status, 200);
   assert.equal((await call('/api/security', 'GET', active)).status, 200);
-  t.mock.timers.setTime(start + 29 * DAY + 30 * DAY + 60_000);
-  assert.equal((await call('/api/security', 'GET', idle)).status, 401, 'idle for over 30 days');
-  for (let step = 2; step <= 6; step++) {
-    t.mock.timers.setTime(start + step * 29 * DAY);
-    assert.equal((await call('/api/security', 'GET', active)).status, 200);
+  t.mock.timers.setTime(start + 364 * DAY + 365 * DAY + 60_000);
+  assert.equal((await call('/api/security', 'GET', idle)).status, 401, 'idle for over a year');
+  for (let step = 2; step <= 9; step++) {
+    t.mock.timers.setTime(start + step * 364 * DAY);
+    assert.equal((await call('/api/security', 'GET', active)).status, 200, 'used yearly');
   }
-  t.mock.timers.setTime(start + 180 * DAY - 60_000);
-  assert.equal((await call('/api/security', 'GET', active)).status, 200);
-  t.mock.timers.setTime(start + 180 * DAY + 60_000);
-  assert.equal((await call('/api/security', 'GET', active)).status, 401, 'absolute limit');
 });
 
 test('repeated wrong passwords slow the account down but a pause lets the owner back in', async (t) => {
