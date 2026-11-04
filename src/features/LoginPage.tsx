@@ -10,15 +10,19 @@ import {
   LoaderCircle,
   LockKeyhole,
   Moon,
+  ShieldCheck,
   Sparkles,
   Sun,
   UserRound,
 } from 'lucide-react';
+import { ApiError } from '../lib/api';
 import '../styles/login.css';
 
 export interface LoginCredentials {
   login: string;
   password: string;
+  totp?: string;
+  recoveryCode?: string;
 }
 interface Props {
   onSubmit: (credentials: LoginCredentials) => Promise<void>;
@@ -34,6 +38,8 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [capsLock, setCapsLock] = useState(false);
+  const [secondFactor, setSecondFactor] = useState<'none' | 'totp' | 'recovery'>('none'),
+    [code, setCode] = useState('');
   const [documentVisible, setDocumentVisible] = useState(
     () => document.visibilityState === 'visible',
   );
@@ -63,9 +69,22 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
     }
     setBusy(true);
     try {
-      await onSubmit({ login: login.trim(), password });
+      const trimmed = code.trim();
+      await onSubmit({
+        login: login.trim(),
+        password,
+        ...(secondFactor === 'totp' && trimmed ? { totp: trimmed } : {}),
+        ...(secondFactor === 'recovery' && trimmed ? { recoveryCode: trimmed } : {}),
+      });
       setPassword('');
+      setCode('');
     } catch (failure) {
+      if (failure instanceof ApiError && failure.code === 'TOTP_REQUIRED') {
+        // The password was right; ask for the code without showing an error.
+        setSecondFactor('totp');
+        setCode('');
+        return;
+      }
       setError(
         failure instanceof Error ? t(failure.message) : t('Не удалось войти. Попробуй ещё раз.'),
       );
@@ -224,6 +243,48 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
                     {visible ? <EyeOff size={18} /> : <Eye size={18} />}
                   </button>
                 </div>
+                {secondFactor !== 'none' ? (
+                  <>
+                    <label className="signin-field" htmlFor="ritm-code">
+                      {secondFactor === 'totp' ? t('Код из приложения') : t('Код восстановления')}
+                    </label>
+                    <div className="signin-input-wrap">
+                      <ShieldCheck size={18} aria-hidden="true" />
+                      <input
+                        id="ritm-code"
+                        name="one-time-code"
+                        autoComplete="one-time-code"
+                        inputMode={secondFactor === 'totp' ? 'numeric' : 'text'}
+                        autoCapitalize="none"
+                        spellCheck={false}
+                        autoFocus
+                        value={code}
+                        onChange={(e) => {
+                          setCode(e.target.value);
+                          setError('');
+                        }}
+                        required
+                        maxLength={secondFactor === 'totp' ? 8 : 40}
+                        placeholder={secondFactor === 'totp' ? '123456' : 'XXXXX-XXXXX'}
+                        aria-invalid={Boolean(error)}
+                        aria-describedby={error ? 'signin-error' : undefined}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="signin-code-switch"
+                      onClick={() => {
+                        setSecondFactor(secondFactor === 'totp' ? 'recovery' : 'totp');
+                        setCode('');
+                        setError('');
+                      }}
+                    >
+                      {secondFactor === 'totp'
+                        ? t('Код восстановления')
+                        : t('Использовать код из приложения')}
+                    </button>
+                  </>
+                ) : null}
                 {capsLock ? (
                   <p className="signin-caps" id="signin-caps" role="status">
                     {t('Включён Caps Lock')}
@@ -237,7 +298,9 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
                 <button
                   className="signin-submit"
                   type="submit"
-                  disabled={!login.trim() || !password || busy}
+                  disabled={
+                    !login.trim() || !password || (secondFactor !== 'none' && !code.trim()) || busy
+                  }
                 >
                   {busy ? (
                     <>

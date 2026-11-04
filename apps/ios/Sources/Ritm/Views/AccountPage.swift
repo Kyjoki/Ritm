@@ -97,7 +97,8 @@ struct AccountView: View {
                 connectionsCard.ritmPageReveal(index: 4)
                 HealthSettingsCard().ritmPageReveal(index: 5)
                 WalletSettingsCard().ritmPageReveal(index: 6)
-                ServerAddressCard().ritmPageReveal(index: 7)
+                SecurityCard().ritmPageReveal(index: 7)
+                ServerAddressCard().ritmPageReveal(index: 8)
               }
               .opacity(saving ? 0.6 : 1)
               .disabled(saving)
@@ -127,6 +128,7 @@ struct AccountView: View {
         .refreshable {
           await store.refresh()
           await loadIntegrations()
+          await store.security.load(using: store)
         }
         .task(id: scrollTrigger) { await awaitNotificationsScroll() }
         .onChange(of: scrollTick) { _, _ in
@@ -139,12 +141,18 @@ struct AccountView: View {
     .toolbar(.hidden, for: .navigationBar)
     .onAppear { mergeSettings(store.bootstrap?.settings) }
     .task(id: navigation.section) {
-      if navigation.section == .settings { await loadIntegrations() }
+      if navigation.section == .settings {
+        await loadIntegrations()
+        await store.security.load(using: store)
+      }
     }
     .onChange(of: store.bootstrap?.settings) { _, settings in mergeSettings(settings) }
     .onChange(of: store.isSignedIn) { _, signedIn in
       // Signing out forgets what this page held, so the next account starts from its own settings.
-      guard !signedIn else { return }
+      guard !signedIn else {
+        Task { await store.security.load(using: store) }
+        return
+      }
       baseline = nil
       draft = AccountSettings()
       google = nil

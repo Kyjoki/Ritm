@@ -14,6 +14,10 @@ public struct APIError: Error, Sendable, Equatable, LocalizedError {
   public var errorDescription: String? { message }
   public var isConflict: Bool { status == 409 }
   public var requiresAuthentication: Bool { status == 401 && code == "AUTH_REQUIRED" }
+  /// The login was right but the account asks for a second factor.
+  public var requiresSecondFactor: Bool { status == 401 && code == "TOTP_REQUIRED" }
+  /// The one-time or recovery code was wrong or already used.
+  public var isSecondFactorInvalid: Bool { status == 401 && code == "TOTP_INVALID" }
 
   public init(
     message: String, status: Int = 0, code: String? = nil, retryAfterSeconds: Int? = nil,
@@ -97,7 +101,8 @@ public actor APIClient {
   /// The default server; the app may configure another one (see ServerAddress).
   public static let productionURL = ServerAddress.production.url
   private static let cookieName = "__Host-ritm_session"
-  private static let sessionLifetime: TimeInterval = 8 * 60 * 60
+  /// The longest cookie the app accepts: the server's absolute device-session cap (180 days).
+  static let sessionLifetime: TimeInterval = 180 * 24 * 60 * 60
   public nonisolated let baseURL: URL
   private let transport: any HTTPTransport
   private var credential: SessionCredential?
@@ -167,13 +172,21 @@ public actor APIClient {
     return result
   }
 
+  /// Signs in as the iOS app, which gets a long-lived revocable device session. `totp` and
+  /// `recoveryCode` answer a `TOTP_REQUIRED` reply; they are sent once and never stored.
   @discardableResult
-  public func login(login: String, password: String) async throws -> Session {
+  public func login(
+    login: String, password: String, totp: String? = nil, recoveryCode: String? = nil,
+    deviceName: String? = nil
+  ) async throws -> Session {
     clearCredential()
     let operationGeneration = generation
     let result: Session = try await request(
       path: ["login"], method: "POST",
-      body: encoded(LoginInput(login: login, password: password)))
+      body: encoded(
+        LoginInput(
+          login: login, password: password, totp: totp, recoveryCode: recoveryCode,
+          client: "ios", deviceName: deviceName.flatMap(DeviceLabel.sanitized))))
     guard generation == operationGeneration else { throw CancellationError() }
     guard result.authenticated, !result.requiresLogin || sessionCredential() != nil else {
       clearCredential()
@@ -398,6 +411,20 @@ public actor APIClient {
 }
 
 extension APIClient {
+  /// 404 on servers that predate the security endpoints; the caller hides the card then.
+  public func security() async throws -> SecurityOverview { try await request(path: ["security"]) }
+
+  public func revokeSession(id: String) async throws {
+    guard SecuritySession.isValidID(id) else { throw invalidInput() }
+    let _: EmptyReply = try await request(
+      path: ["security", "sessions", id], method: "DELETE")
+  }
+
+  public func revokeOtherSessions() async throws {
+    let _: EmptyReply = try await request(
+      path: ["security", "sessions", "revoke-others"], method: "POST")
+  }
+
   public func updateTask(id: String, task: TaskInput) async throws -> RitmTask {
     try await request(path: ["tasks", try validatedID(id)], method: "PATCH", body: encoded(task))
   }
@@ -654,6 +681,10 @@ extension APIClient {
 private struct LoginInput: Encodable {
   let login: String
   let password: String
+  let totp: String?
+  let recoveryCode: String?
+  let client: String
+  let deviceName: String?
 }
 private struct TaskCompletionInput: Encodable {
   let completed: Bool

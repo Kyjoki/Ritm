@@ -12,15 +12,34 @@ import { join } from 'node:path';
 import { isIP } from 'node:net';
 import { SignJWT, jwtVerify } from 'jose';
 import type { NextFunction, Request, Response } from 'express';
-import { AppError } from './errors.ts';
-import type { RuntimeState } from './runtime-state.ts';
+import { AppError, missing } from './errors.ts';
+import type { RuntimeState, SessionClient } from './runtime-state.ts';
+import { SecretStore } from './secrets.ts';
+import { TwoFactor, type TwoFactorInput } from './two-factor.ts';
+import { LoginThrottle } from './login-throttle.ts';
+import {
+  TOUCH_INTERVAL_MS,
+  cleanDeviceName,
+  deviceNameFromUserAgent,
+  sessionPolicy,
+  slidingExpiry,
+} from './session-policy.ts';
 
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 const loopback = (address: string | undefined) =>
   Boolean(
     address && ['127.0.0.1', '::1', '[::1]', '::ffff:127.0.0.1', 'localhost'].includes(address),
   );
-const sessionLifetime = 8 * 60 * 60_000;
+const sessionId = /^[a-f0-9]{64}$/;
+const isoSeconds = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
+export interface LoginInput {
+  login: string;
+  password: string;
+  totp?: string;
+  recoveryCode?: string;
+  client?: SessionClient;
+  deviceName?: string;
+}
 const maxPasswordChecks = 4;
 
 export class Security {
@@ -35,10 +54,13 @@ export class Security {
   private loginName: string;
   private cookieName: string;
   private passwordChecks = 0;
+  readonly twoFactor: TwoFactor;
+  private throttle: LoginThrottle;
   constructor(
     private env: NodeJS.ProcessEnv,
     private state: RuntimeState,
     dataDir: string,
+    secrets?: SecretStore,
   ) {
     const password = env.APP_PASSWORD;
     const host = env.HOST || '127.0.0.1';
@@ -103,6 +125,12 @@ export class Security {
       this.deploymentHost = env.VERCEL_URL.toLowerCase();
       this.origins.add('https://' + this.deploymentHost);
     }
+    this.twoFactor = new TwoFactor(
+      secrets ?? new SecretStore(dataDir, env, state, Boolean(env.DATABASE_URL)),
+      state,
+      this.sessionKey,
+    );
+    this.throttle = new LoginThrottle(state);
     this.secureCookie = this.publicOrigin?.startsWith('https://') ?? false;
     this.cookieName = this.secureCookie ? '__Host-ritm_session' : 'ritm_session';
   }
@@ -146,7 +174,6 @@ export class Security {
         issuer: 'ritm',
         audience: 'ritm-owner',
         requiredClaims: ['jti', 'exp', 'iat', 'sub'],
-        maxTokenAge: '8h',
       });
       if (
         payload.sub !== 'owner' ||
@@ -158,7 +185,34 @@ export class Security {
     } catch {
       return null;
     }
-    return (await this.state.hasSession(id)) ? id : null;
+    const record = await this.state.getSession(id);
+    if (!record) return null;
+    const now = Date.now();
+    if (now >= record.absoluteExpiresAt) return null;
+    // Sliding expiry is renewed at most once per five minutes to bound database writes.
+    if (now - record.lastSeenAt >= TOUCH_INTERVAL_MS)
+      await this.state.touchSession(
+        id,
+        now,
+        slidingExpiry(record.client, now, record.absoluteExpiresAt),
+      );
+    return id;
+  }
+  private get sessionPrefix() {
+    return this.credentialVersion + ':';
+  }
+  /** Same address rule as the per-client rate limit: only the Vercel header is trusted. */
+  private clientAddress(req: Request) {
+    const forwarded =
+      this.env.VERCEL === '1' ? req.get('x-vercel-forwarded-for')?.trim() : undefined;
+    return forwarded && isIP(forwarded) ? forwarded : (req.socket.remoteAddress ?? 'unknown');
+  }
+  /** Keyed hash for security logs; the raw address is never written. */
+  hashClient(req: Request) {
+    return createHmac('sha256', this.sessionKey)
+      .update('ritm:log:ip:' + this.clientAddress(req))
+      .digest('hex')
+      .slice(0, 16);
   }
   async hasOwnerSession(hash: string) {
     if (!this.passwordHash) return hash === digest('local:' + this.credentialVersion);
@@ -234,10 +288,7 @@ export class Security {
       // Vercel supplies this header; ordinary servers never trust it. Lists,
       // malformed addresses and absent headers fall back to the socket peer.
       // https://vercel.com/docs/headers/request-headers#x-vercel-forwarded-for
-      const forwarded =
-        this.env.VERCEL === '1' ? req.get('x-vercel-forwarded-for')?.trim() : undefined;
-      const address =
-        forwarded && isIP(forwarded) ? forwarded : (req.socket.remoteAddress ?? 'unknown');
+      const address = this.clientAddress(req);
       bucket = createHmac('sha256', this.sessionKey)
         .update('ritm:' + key + ':client:' + address)
         .digest('hex');
@@ -257,20 +308,45 @@ export class Security {
       );
     }
   }
-  async login(req: Request, res: Response, login: string, password: string) {
+  private async passwordMatches(password: string) {
+    if (!this.passwordHash) return true;
+    const input = await this.checkPassword(password);
+    return timingSafeEqual(input, this.passwordHash);
+  }
+  /** Failed password or second-factor attempts spend the account-wide budget. */
+  private async countFailure<T>(action: () => Promise<T>) {
+    try {
+      return await action();
+    } catch (error) {
+      if (error instanceof AppError && ['TOTP_INVALID', 'INVALID_PASSWORD'].includes(error.code))
+        await this.throttle.recordFailure();
+      throw error;
+    }
+  }
+  async login(req: Request, res: Response, credentials: LoginInput | string, secret?: string) {
+    const input: LoginInput =
+      typeof credentials === 'string'
+        ? { login: credentials, password: secret ?? '' }
+        : credentials;
     await this.limit(req, 'login', 10, 15 * 60_000);
-    const inputHash = this.passwordHash ? await this.checkPassword(password) : null;
-    const passwordMatches =
-      !this.passwordHash || Boolean(inputHash && timingSafeEqual(inputHash, this.passwordHash));
+    await this.throttle.assertOpen();
+    const passwordOk = await this.passwordMatches(input.password);
     const loginMatches = timingSafeEqual(
-      Buffer.from(digest(login.trim().toLocaleLowerCase('en-US')), 'hex'),
+      Buffer.from(digest(input.login.trim().toLocaleLowerCase('en-US')), 'hex'),
       Buffer.from(digest(this.loginName), 'hex'),
     );
-    if (this.passwordHash && (!passwordMatches || !loginMatches))
-      throw new AppError(401, 'INVALID_PASSWORD', 'Неверный логин или пароль.');
     if (this.passwordHash) {
-      const id = randomUUID(),
-        expiry = Date.now() + sessionLifetime;
+      await this.countFailure(async () => {
+        if (!passwordOk || !loginMatches)
+          throw new AppError(401, 'INVALID_PASSWORD', 'Неверный логин или пароль.');
+        await this.twoFactor.verify({ code: input.totp, recoveryCode: input.recoveryCode });
+      });
+      await this.throttle.recordSuccess();
+      const client: SessionClient = input.client ?? 'web';
+      const now = Date.now(),
+        policy = sessionPolicy[client],
+        absolute = now + policy.absoluteMs;
+      const id = randomUUID();
       const token = await new SignJWT({ version: this.credentialVersion })
         .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
         .setSubject('owner')
@@ -278,18 +354,99 @@ export class Security {
         .setAudience('ritm-owner')
         .setJti(id)
         .setIssuedAt()
-        .setExpirationTime(Math.floor(expiry / 1000))
+        .setExpirationTime(Math.floor(absolute / 1000))
         .sign(this.sessionKey);
-      await this.state.createSession(this.credentialVersion + ':' + digest(id), expiry);
+      await this.state.createSession(
+        this.sessionPrefix + digest(id),
+        slidingExpiry(client, now, absolute),
+        {
+          client,
+          deviceName:
+            cleanDeviceName(input.deviceName) || deviceNameFromUserAgent(req.get('user-agent')),
+          createdAt: now,
+          lastSeenAt: now,
+          absoluteExpiresAt: absolute,
+        },
+      );
       res.cookie(this.cookieName, token, {
         httpOnly: true,
         sameSite: 'strict',
         secure: this.secureCookie,
-        maxAge: sessionLifetime,
+        maxAge: policy.absoluteMs,
         path: '/',
       });
     }
     return { authenticated: true, requiresLogin: Boolean(this.passwordHash) };
+  }
+  private requirePasswordMode() {
+    if (!this.passwordHash)
+      throw new AppError(
+        409,
+        'PASSWORD_REQUIRED',
+        'Защита аккаунта доступна, когда для приложения задан пароль.',
+      );
+  }
+  private clearSessionCookie(res: Response) {
+    res.clearCookie(this.cookieName, {
+      httpOnly: true,
+      sameSite: 'strict',
+      secure: this.secureCookie,
+      path: '/',
+    });
+  }
+  async overview(req: Request) {
+    const current = await this.ownerSession(req);
+    const records = this.passwordHash ? await this.state.listSessions(this.sessionPrefix) : [];
+    return {
+      ...(await this.twoFactor.status()),
+      sessions: records.map((record) => ({
+        id: record.hash.slice(this.sessionPrefix.length),
+        client: record.client,
+        deviceName: record.deviceName || 'Неизвестное устройство',
+        createdAt: isoSeconds(
+          record.createdAt ||
+            Math.max(0, record.expiresAt - sessionPolicy[record.client].slidingMs),
+        ),
+        lastSeenAt: isoSeconds(record.lastSeenAt || record.createdAt || record.expiresAt),
+        current: record.hash === current,
+      })),
+    };
+  }
+  async revokeSession(req: Request, res: Response, id: string) {
+    this.requirePasswordMode();
+    if (!sessionId.test(id)) throw missing('Сессия');
+    const hash = this.sessionPrefix + id;
+    const current = await this.ownerSession(req);
+    if (!(await this.state.hasSession(hash))) throw missing('Сессия');
+    await this.state.deleteSession(hash);
+    if (hash === current) this.clearSessionCookie(res);
+  }
+  async revokeOtherSessions(req: Request) {
+    this.requirePasswordMode();
+    const current = await this.ownerSession(req);
+    if (current) await this.state.deleteOtherSessions(this.sessionPrefix, current);
+  }
+  async startTotp() {
+    this.requirePasswordMode();
+    return this.twoFactor.setup(this.loginName);
+  }
+  async confirmTotp(code: string) {
+    this.requirePasswordMode();
+    return { recoveryCodes: await this.countFailure(() => this.twoFactor.confirm(code)) };
+  }
+  async regenerateRecoveryCodes(code: string) {
+    this.requirePasswordMode();
+    return { recoveryCodes: await this.countFailure(() => this.twoFactor.regenerate(code)) };
+  }
+  async disableTotp(password: string, input: TwoFactorInput) {
+    this.requirePasswordMode();
+    await this.countFailure(async () => {
+      if (!(await this.passwordMatches(password)))
+        throw new AppError(401, 'INVALID_PASSWORD', 'Неверный пароль.');
+      await this.twoFactor.verify(input);
+    });
+    await this.twoFactor.disable();
+    return { totpEnabled: false };
   }
   async logout(req: Request, res: Response) {
     const hash = await this.ownerSession(req);

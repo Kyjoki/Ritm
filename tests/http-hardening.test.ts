@@ -129,7 +129,10 @@ test('production headers and audit records do not reflect attacker text or crede
   assert.notEqual(id, 'attacker-controlled-id');
   assert.match(response.headers.get('content-security-policy')!, /object-src 'none'/);
   assert.match(response.headers.get('content-security-policy')!, /frame-ancestors 'none'/);
-  assert.equal(response.headers.get('strict-transport-security'), 'max-age=31536000');
+  assert.equal(
+    response.headers.get('strict-transport-security'),
+    'max-age=31536000; includeSubDomains',
+  );
   assert.equal(response.headers.get('cross-origin-resource-policy'), 'same-origin');
   assert.equal(h.records.length, 1);
   assert.equal(h.records[0].requestId, id);

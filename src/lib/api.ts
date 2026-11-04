@@ -23,6 +23,23 @@ import { getLanguage, translate } from './i18n';
 import type { TelegramStatus } from '../../shared/types';
 const tr = (source: string) => translate(getLanguage(), source);
 
+export interface DeviceSession {
+  id: string;
+  client: 'web' | 'ios';
+  deviceName: string;
+  createdAt: string;
+  lastSeenAt: string;
+  current: boolean;
+}
+export interface SecurityOverview {
+  totpEnabled: boolean;
+  recoveryCodesLeft: number;
+  sessions: DeviceSession[];
+}
+export interface LoginSecondFactor {
+  totp?: string;
+  recoveryCode?: string;
+}
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -80,6 +97,7 @@ async function request<T>(
         : undefined,
     );
   }
+  if (response.status === 204) return undefined as T;
   if (data === null || typeof data !== 'object')
     throw new ApiError(
       tr('Сервер вернул некорректный ответ. Обновите страницу или проверьте настройку сервера.'),
@@ -90,7 +108,23 @@ async function request<T>(
 }
 export const api = {
   session: () => request<{ authenticated: boolean; requiresLogin: boolean }>('/session'),
-  login: (login: string, password: string) => request('/login', 'POST', { login, password }),
+  login: (login: string, password: string, factor: LoginSecondFactor = {}) =>
+    request('/login', 'POST', { login, password, client: 'web', ...factor }),
+  security: () => request<SecurityOverview>('/security'),
+  setupTotp: () => request<{ secret: string; otpauthUrl: string }>('/security/totp/setup', 'POST'),
+  confirmTotp: (code: string) =>
+    request<{ recoveryCodes: string[] }>('/security/totp/confirm', 'POST', { code }),
+  disableTotp: (password: string, factor: LoginSecondFactor & { code?: string }) =>
+    request<{ totpEnabled: false }>('/security/totp/disable', 'POST', {
+      password,
+      code: factor.totp ?? factor.code,
+      recoveryCode: factor.recoveryCode,
+    }),
+  regenerateRecoveryCodes: (code: string) =>
+    request<{ recoveryCodes: string[] }>('/security/recovery-codes', 'POST', { code }),
+  revokeSession: (id: string) =>
+    request<void>(`/security/sessions/${encodeURIComponent(id)}`, 'DELETE'),
+  revokeOtherSessions: () => request<void>('/security/sessions/revoke-others', 'POST'),
   logout: () => request('/logout', 'POST'),
   bootstrap: () => request<Bootstrap>('/bootstrap'),
   habits: (signal?: AbortSignal) =>

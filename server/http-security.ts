@@ -47,6 +47,8 @@ export interface SecurityRecord {
   event: SecurityEvent;
   requestId: string;
   status: number;
+  ipHash?: string;
+  route?: string;
 }
 export type SecurityLogger = (record: SecurityRecord) => void;
 
@@ -72,6 +74,8 @@ export function createSecurityAudit(logger: SecurityLogger, now = () => Date.now
         event,
         requestId: res.locals.requestId,
         status,
+        ...(typeof res.locals.ipHash === 'string' ? { ipHash: res.locals.ipHash } : {}),
+        ...(typeof res.locals.routeFamily === 'string' ? { route: res.locals.routeFamily } : {}),
       });
       // TypeScript void callbacks may still be async. Observe a rejected
       // exporter Promise without making request protection depend on it.

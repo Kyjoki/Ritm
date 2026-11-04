@@ -148,7 +148,7 @@ final class APIClientTests: XCTestCase {
       cookie + "; Domain=ritm-eta-hazel.vercel.app",
       cookie.replacingOccurrences(of: "Path=/", with: "Path=/api"),
       cookie.replacingOccurrences(of: "SameSite=Strict", with: "SameSite=Lax"),
-      cookie.replacingOccurrences(of: "Max-Age=28800", with: "Max-Age=28801"),
+      cookie.replacingOccurrences(of: "Max-Age=28800", with: "Max-Age=15552001"),
     ]
     for value in denied {
       let client = try APIClient(

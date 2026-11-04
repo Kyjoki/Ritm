@@ -104,6 +104,45 @@ export interface AppOptions {
   securityLogger?: SecurityLogger;
 }
 
+const contentSecurityPolicy =
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; upgrade-insecure-requests";
+const hstsValue = 'max-age=31536000; includeSubDomains';
+const spaced = (value: string) => value.replace(/\s+/g, '');
+const totpCode = z
+  .string()
+  .max(16)
+  .transform(spaced)
+  .pipe(z.string().regex(/^\d{6}$/));
+const recoveryCodeText = z.string().trim().min(8).max(40);
+const codeBody = z.object({ code: totpCode }).strict();
+const loginSchema = z
+  .object({
+    login: z.string().trim().min(1).max(100),
+    password: z.string().max(512),
+    totp: totpCode.optional(),
+    recoveryCode: recoveryCodeText.optional(),
+    client: z.enum(['web', 'ios']).optional(),
+    deviceName: z.string().max(200).optional(),
+  })
+  .strict();
+const disableSchema = z
+  .object({
+    password: z.string().max(512),
+    code: totpCode.optional(),
+    recoveryCode: recoveryCodeText.optional(),
+  })
+  .strict();
+const disableArguments = (body: z.infer<typeof disableSchema>) =>
+  [body.password, { code: body.code, recoveryCode: body.recoveryCode }] as const;
+/** Coarse route family for logs, so identifiers inside paths are never recorded. */
+function routeFamily(url: string) {
+  const parts = url.split('?')[0].split('/').filter(Boolean);
+  if (parts[0] !== 'api') return 'static';
+  return parts[1] === 'integrations' || parts[1] === 'security'
+    ? parts.slice(1, 3).join('/')
+    : (parts[1] ?? 'api');
+}
+
 export function createApp(options: AppOptions = {}) {
   const env = options.env ?? process.env;
   const shared = Boolean(env.DATABASE_URL) || options.repository instanceof PostgresStore;
@@ -135,9 +174,10 @@ export function createApp(options: AppOptions = {}) {
       ? new SqliteRuntimeState(dataDir)
       : undefined;
   const state: RuntimeState = options.runtimeState ?? postgres ?? repositoryState ?? localState!;
+  const secrets = new SecretStore(dataDir, env, state, shared);
   let security: Security;
   try {
-    security = new Security(env, state, dataDir);
+    security = new Security(env, state, dataDir, secrets);
   } catch (error) {
     localState?.close();
     void postgres?.close();
@@ -146,7 +186,6 @@ export function createApp(options: AppOptions = {}) {
   // Constructors never migrate/query PostgreSQL. Migrations are explicit.
   const store: WorkspaceRepository =
     options.repository ?? postgres ?? new Store(dataDir, options.seed ?? env.SEED_DEMO !== 'false');
-  const secrets = new SecretStore(dataDir, env, state, shared);
   const google =
     options.googleService ??
     createGoogleCalendarService({
@@ -180,6 +219,12 @@ export function createApp(options: AppOptions = {}) {
   app.disable('x-powered-by');
   app.set('trust proxy', false);
   app.use(requestIdentity);
+  app.use((req, res, next) => {
+    // Only a keyed hash of the address and a coarse route family ever reach security logs.
+    res.locals.ipHash = security.hashClient(req);
+    res.locals.routeFamily = routeFamily(req.originalUrl);
+    next();
+  });
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
@@ -189,12 +234,9 @@ export function createApp(options: AppOptions = {}) {
     res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
     if (env.NODE_ENV === 'production' || env.VERCEL === '1')
-      res.setHeader(
-        'Content-Security-Policy',
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
-      );
+      res.setHeader('Content-Security-Policy', contentSecurityPolicy);
     if (env.APP_ORIGIN?.startsWith('https://'))
-      res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+      res.setHeader('Strict-Transport-Security', hstsValue);
     next();
   });
   app.use('/api', (_req, res, next) => {
@@ -284,11 +326,8 @@ export function createApp(options: AppOptions = {}) {
     res.json(await security.session(req));
   });
   app.post('/api/login', async (req, res) => {
-    const { login, password } = z
-      .object({ login: z.string().trim().min(1).max(100), password: z.string().max(512) })
-      .strict()
-      .parse(req.body);
-    const session = await security.login(req, res, login, password);
+    const input = loginSchema.parse(req.body);
+    const session = await security.login(req, res, input);
     audit(res, 'login_success', 200);
     res.json(session);
   });
@@ -340,6 +379,37 @@ export function createApp(options: AppOptions = {}) {
     } catch (error) {
       next(error);
     }
+  });
+  app.get('/api/security', async (req, res) => {
+    res.json(await security.overview(req));
+  });
+  app.post('/api/security/totp/setup', async (req, res) => {
+    await security.limit(req, 'security-setup', 10, 60_000);
+    res.json(await security.startTotp());
+  });
+  app.post('/api/security/totp/confirm', async (req, res) => {
+    await security.limit(req, 'security-code', 10, 60_000);
+    const { code } = codeBody.parse(req.body);
+    res.json(await security.confirmTotp(code));
+  });
+  app.post('/api/security/totp/disable', async (req, res) => {
+    await security.limit(req, 'security-code', 10, 60_000);
+    res.json(await security.disableTotp(...disableArguments(disableSchema.parse(req.body))));
+  });
+  app.post('/api/security/recovery-codes', async (req, res) => {
+    await security.limit(req, 'security-code', 10, 60_000);
+    const { code } = codeBody.parse(req.body);
+    res.json(await security.regenerateRecoveryCodes(code));
+  });
+  app.post('/api/security/sessions/revoke-others', async (req, res) => {
+    await security.limit(req, 'security-sessions', 10, 60_000);
+    await security.revokeOtherSessions(req);
+    res.status(204).end();
+  });
+  app.delete('/api/security/sessions/:id', async (req, res) => {
+    await security.limit(req, 'security-sessions', 20, 60_000);
+    await security.revokeSession(req, res, String(req.params.id));
+    res.status(204).end();
   });
   app.get('/api/bootstrap', async (_req, res) => {
     res.json(await store.bootstrap(await secrets.status()));
@@ -886,17 +956,19 @@ export function createApp(options: AppOptions = {}) {
               ? 'Проверьте имя, почту, часовой пояс и время рабочего дня.'
               : path === '/api/login'
                 ? 'Введите логин и пароль приложения.'
-                : path.startsWith('/api/workouts')
-                  ? 'Проверьте данные тренировки: объект JSON до 64 КБ и корректный идентификатор.'
-                  : path.startsWith('/api/finance')
-                    ? 'Проверьте сумму, валюту, дату и описание финансовой записи.'
-                    : path.startsWith('/api/habits')
-                      ? 'Проверьте название привычки и выбранную дату.'
-                      : path === '/api/chat'
-                        ? 'Введите сообщение длиной до 6000 символов.'
-                        : path.startsWith('/api/proposals/')
-                          ? 'Не удалось выбрать изменения. Обновите диалог и повторите.'
-                          : 'Проверьте заполненные поля: название, дату, время и длительность.';
+                : path.startsWith('/api/security')
+                  ? 'Проверьте введённые данные: код состоит из 6 цифр, пароль не пустой.'
+                  : path.startsWith('/api/workouts')
+                    ? 'Проверьте данные тренировки: объект JSON до 64 КБ и корректный идентификатор.'
+                    : path.startsWith('/api/finance')
+                      ? 'Проверьте сумму, валюту, дату и описание финансовой записи.'
+                      : path.startsWith('/api/habits')
+                        ? 'Проверьте название привычки и выбранную дату.'
+                        : path === '/api/chat'
+                          ? 'Введите сообщение длиной до 6000 символов.'
+                          : path.startsWith('/api/proposals/')
+                            ? 'Не удалось выбрать изменения. Обновите диалог и повторите.'
+                            : 'Проверьте заполненные поля: название, дату, время и длительность.';
       res.status(400).json({
         error: localizeError(message, 'VALIDATION_ERROR', language),
         code: 'VALIDATION_ERROR',

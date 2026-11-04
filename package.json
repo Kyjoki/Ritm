@@ -26,6 +26,7 @@
     "jose": "6.2.12",
     "lucide-react": "1.55.0",
     "pg": "8.23.1",
+    "qrcode-generator": "1.4.4",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "tsx": "4.23.15",

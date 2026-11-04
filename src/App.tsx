@@ -687,8 +687,8 @@ export default function App() {
   if (!data)
     return (
       <LoginPage
-        onSubmit={async ({ login, password }) => {
-          await api.login(login, password);
+        onSubmit={async ({ login, password, totp, recoveryCode }) => {
+          await api.login(login, password, { totp, recoveryCode });
           await load();
         }}
       />

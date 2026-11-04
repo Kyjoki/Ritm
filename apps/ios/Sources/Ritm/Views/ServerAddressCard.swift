@@ -10,6 +10,8 @@ struct ServerAddressCard: View {
   @State private var message: String?
   @State private var failed = false
   @State private var confirmingReset = false
+  /// A checked, non-default server waiting for the owner's explicit go-ahead.
+  @State private var pendingAddress: ServerAddress?
   @FocusState private var focused: Bool
 
   private var busy: Bool { checking || store.isMutating || store.isLoading }
@@ -69,6 +71,22 @@ struct ServerAddressCard: View {
     }
     .onAppear { text = store.serverAddress.origin }
     .confirmationDialog(
+      store.text("Сменить сервер?", "Change the server?"),
+      isPresented: Binding(
+        get: { pendingAddress != nil }, set: { if !$0 { pendingAddress = nil } }),
+      titleVisibility: .visible, presenting: pendingAddress
+    ) { address in
+      Button(store.text("Сохранить и выйти", "Save and sign out"), role: .destructive) {
+        Task { await apply(address) }
+      }
+    } message: { address in
+      Text(
+        store.text(
+          "Вход и данные будут отправлены на этот сервер: \(address.origin). Продолжайте, только если это ваш сервер. Вы выйдете из аккаунта на этом iPhone.",
+          "Your sign-in and data will be sent to this server: \(address.origin). Continue only if it is your own server. You will be signed out on this iPhone."
+        ))
+    }
+    .confirmationDialog(
       store.text("Вернуть адрес по умолчанию?", "Restore the default address?"),
       isPresented: $confirmingReset, titleVisibility: .visible
     ) {
@@ -110,7 +128,12 @@ struct ServerAddressCard: View {
       show(error.localizedDescription, failed: true)
       return
     }
-    await apply(address)
+    // Only the default host is saved without a warning; the owner confirms any other one.
+    if address == .production {
+      await apply(address)
+    } else {
+      pendingAddress = address
+    }
   }
 
   private func reset() async {

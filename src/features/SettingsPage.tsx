@@ -26,6 +26,7 @@ import type {
   Settings,
 } from '../../shared/types';
 import { Dialog } from '../components/Dialog';
+import { SecurityCard } from '../components/SecurityCard';
 import { GoogleSetupDialog } from '../components/GoogleSetupDialog';
 import { TelegramConnection } from '../components/TelegramConnection';
 import { activateDialogViewport } from '../lib/dialog-viewport';
@@ -717,6 +718,7 @@ export function SettingsPage({
                 </p>
               ) : null}
             </section>
+            {onLogout ? <SecurityCard /> : null}
           </div>
         </fieldset>
         <div className="settings-save-bar">

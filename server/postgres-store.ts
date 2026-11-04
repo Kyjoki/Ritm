@@ -55,6 +55,7 @@ import {
   updateHabitProgress,
 } from './habits.ts';
 import { localDate } from './store.ts';
+import type { SessionMeta, SessionRecord } from './runtime-state.ts';
 import { assertWorkoutDelete, assertWorkoutPut } from './workouts.ts';
 
 const { Pool } = pg;
@@ -1085,14 +1086,36 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
     });
   }
 
-  async createSession(idHash: string, expiresAt: number) {
+  async createSession(idHash: string, expiresAt: number, meta?: SessionMeta) {
     await this.transaction(async (client) => {
-      await client.query('DELETE FROM ritm_sessions WHERE expires_at <= $1', [this.clock()]);
+      const now = this.clock();
+      await client.query('DELETE FROM ritm_sessions WHERE expires_at <= $1', [now]);
       await client.query(
-        'INSERT INTO ritm_sessions (id_hash, expires_at) VALUES ($1, $2) ON CONFLICT (id_hash) DO UPDATE SET expires_at = EXCLUDED.expires_at',
-        [idHash, expiresAt],
+        `INSERT INTO ritm_sessions (id_hash, expires_at, client, device_name, created_at, last_seen_at, absolute_expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (id_hash) DO UPDATE SET expires_at = EXCLUDED.expires_at`,
+        [
+          idHash,
+          expiresAt,
+          meta?.client ?? 'web',
+          meta?.deviceName ?? '',
+          meta?.createdAt ?? now,
+          meta?.lastSeenAt ?? now,
+          meta?.absoluteExpiresAt ?? expiresAt,
+        ],
       );
     });
+  }
+  private sessionRecord(row: Record<string, unknown>): SessionRecord {
+    return {
+      hash: String(row.id_hash),
+      expiresAt: Number(row.expires_at),
+      client: row.client === 'ios' ? 'ios' : 'web',
+      deviceName: String(row.device_name ?? ''),
+      createdAt: Number(row.created_at),
+      lastSeenAt: Number(row.last_seen_at),
+      absoluteExpiresAt: Number(row.absolute_expires_at) || Number(row.expires_at),
+    };
   }
   async hasSession(idHash: string) {
     const result = await this.pool.query(
@@ -1100,6 +1123,34 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
       [idHash, this.clock()],
     );
     return result.rows.length > 0;
+  }
+  async getSession(idHash: string) {
+    const result = await this.pool.query(
+      'SELECT * FROM ritm_sessions WHERE id_hash = $1 AND expires_at > $2',
+      [idHash, this.clock()],
+    );
+    return result.rows[0] ? this.sessionRecord(result.rows[0]) : null;
+  }
+  async listSessions(prefix: string) {
+    const result = await this.pool.query(
+      'SELECT * FROM ritm_sessions WHERE expires_at > $1 AND left(id_hash, $2) = $3 ORDER BY created_at DESC',
+      [this.clock(), prefix.length, prefix],
+    );
+    return result.rows.map((row) => this.sessionRecord(row));
+  }
+  async touchSession(idHash: string, lastSeenAt: number, expiresAt: number) {
+    await this.pool.query(
+      'UPDATE ritm_sessions SET last_seen_at = $2, expires_at = $3 WHERE id_hash = $1',
+      [idHash, lastSeenAt, expiresAt],
+    );
+  }
+  async deleteOtherSessions(prefix: string, keepHash: string) {
+    await this.transaction(async (client) => {
+      await client.query(
+        'DELETE FROM ritm_sessions WHERE left(id_hash, $1) = $2 AND id_hash <> $3',
+        [prefix.length, prefix, keepHash],
+      );
+    });
   }
   async deleteSession(idHash: string) {
     await this.transaction(async (client) => {

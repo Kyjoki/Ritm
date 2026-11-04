@@ -48,7 +48,7 @@ public struct ServerAddress: Equatable, Sendable, CustomStringConvertible {
 
   public var url: URL { URL(string: origin)! }
 
-  /// Keychain account: one session and saved login per server, never shared between servers.
+  /// Keychain account: one session per server, never shared between servers.
   public var account: String { host + (port.map { ":\($0)" } ?? "") }
 
   public var description: String { origin }

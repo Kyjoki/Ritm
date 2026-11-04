@@ -13,6 +13,10 @@ function fixture() {
     createSession: () => {},
     hasSession: () => false,
     deleteSession: () => {},
+    getSession: () => null,
+    listSessions: () => [],
+    touchSession: () => {},
+    deleteOtherSessions: () => {},
     consumeRateLimit: () => ({ allowed: true, retryAfterMs: 0 }),
     getServerSecret: (name) => records.get(name) ?? null,
     setServerSecret: (name, value) => {

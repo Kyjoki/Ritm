@@ -12,9 +12,15 @@ struct FinanceFocus: Equatable {
 @MainActor @Observable
 final class RitmStore {
   private(set) var isSignedIn = false
-  /// True once the first (silent) sign-in attempt is over, so the app does not ask for a login
-  /// while the saved one is still being tried.
+  /// True once the stored device session has been checked, so the app does not ask for a login
+  /// while it is still being restored.
   private(set) var startupFinished = false
+  /// The server accepted the password and wants a one-time or recovery code (LoginCard).
+  private(set) var secondFactorRequired = false
+  /// A sign-in problem that must stay visible next to the form (the banner clears itself).
+  private(set) var loginFailure: String?
+  /// Two-factor status and the signed-in devices (Settings → «Безопасность»).
+  let security = SecurityStore()
   private(set) var isLoading = false
   private(set) var isMutating = false
   /// The latest error for the banners. Transient: it clears itself after `errorLifetime`, but only
@@ -108,6 +114,8 @@ final class RitmStore {
     serverAddress = address
     client = try? APIClient(baseURL: address.url)
     vault = SessionVault(server: address)
+    // Earlier builds saved the password for silent re-sign-in; it is never kept any more.
+    SessionVault.purgeLegacySavedLogin()
     workouts.alerts.language = { [weak self] in self?.language ?? .ru }
     // A workout resumed after a relaunch: reuse its lock-screen card and pending notification.
     workouts.syncAlerts()
@@ -119,9 +127,9 @@ final class RitmStore {
     health.reconcileOnLaunch()
   }
 
-  /// Switches this device to another server and signs it out first. The session and the saved
-  /// login belong to one server (the Keychain account is the host), so the old ones are erased and
-  /// nothing from the previous server can reach the new one. The old session is not revoked over
+  /// Switches this device to another server and signs it out first. The session belongs to one
+  /// server (the Keychain account is the host), so the old one is erased and nothing from the
+  /// previous server can reach the new one. The app never signs in to the new server by itself. The old session is not revoked over
   /// the network, so an unreachable old server cannot block the switch; it expires on its own.
   @discardableResult
   func changeServer(to address: ServerAddress) async -> Bool {
@@ -134,10 +142,9 @@ final class RitmStore {
     wallet.reset()
     walletFolder.disconnect()
     payments.reset()
-    vault.forgetLogin()
+    cancelSecondFactor()
     await clearAccount()
     let newVault = SessionVault(server: address)
-    newVault.forgetLogin()
     try? newVault.delete()
     client = newClient
     vault = newVault
@@ -292,8 +299,7 @@ final class RitmStore {
     }
     do {
       if let credential = try vault.load() { try await client.restoreCredential(credential) }
-      var session = try await client.session()
-      if !session.authenticated, await signInAgain() { session = try await client.session() }
+      let session = try await client.session()
       guard session.authenticated else {
         await clearAccount()
         return
@@ -306,7 +312,9 @@ final class RitmStore {
     }
   }
 
-  func signIn(login: String, password: String) async {
+  func signIn(
+    login: String, password: String, totp: String? = nil, recoveryCode: String? = nil
+  ) async {
     guard !isMutating, !isLoading, let client else { return }
     let login = login.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !login.isEmpty, !password.isEmpty else {
@@ -315,10 +323,13 @@ final class RitmStore {
     }
     isMutating = true
     errorMessage = nil
+    loginFailure = nil
     generation += 1
     do {
       await client.setLanguage(language)
-      let session = try await client.login(login: login, password: password)
+      let session = try await client.login(
+        login: login, password: password, totp: totp, recoveryCode: recoveryCode,
+        deviceName: Self.deviceName)
       guard session.authenticated, session.requiresLogin,
         let credential = await client.sessionCredential()
       else {
@@ -329,8 +340,7 @@ final class RitmStore {
         return
       }
       try vault.save(credential)
-      // Remembered on this iPhone only, so the app signs in again by itself (see SessionVault).
-      try? vault.saveLogin(.init(login: login, password: password))
+      secondFactorRequired = false
       isSignedIn = true
       isOffline = false
       nextAllowedRead = .distantPast
@@ -338,7 +348,7 @@ final class RitmStore {
     } catch {
       await client.clearCredential()
       try? vault.delete()
-      await present(error)
+      await presentSignInFailure(error)
     }
     isMutating = false
     if isSignedIn {
@@ -347,6 +357,54 @@ final class RitmStore {
       schedulePolling()
     }
   }
+
+  /// Back to the login and password step.
+  func cancelSecondFactor() {
+    secondFactorRequired = false
+    loginFailure = nil
+  }
+
+  private func presentSignInFailure(_ error: Error) async {
+    guard let failure = error as? APIError else { return await present(error) }
+    if failure.requiresSecondFactor {
+      secondFactorRequired = true
+    } else if failure.isSecondFactorInvalid {
+      secondFactorRequired = true
+      loginFailure = text(
+        "Неверный код. Проверьте код и попробуйте ещё раз.",
+        "Wrong code. Check it and try again.")
+    } else if failure.status == 429 {
+      loginFailure = failure.retryAfterSeconds.map {
+        text(
+          "Слишком много попыток. Повторите через \(Self.waitText($0, ru: true)).",
+          "Too many attempts. Try again in \(Self.waitText($0, ru: false)).")
+      } ?? text("Слишком много попыток. Повторите позже.", "Too many attempts. Try again later.")
+    } else {
+      // Wrong password or login: start again from the first step.
+      if failure.status == 401 { secondFactorRequired = false }
+      await present(error)
+    }
+  }
+
+  private static func waitText(_ seconds: Int, ru: Bool) -> String {
+    if seconds < 60 { return ru ? "\(seconds) с" : "\(seconds) s" }
+    let minutes = (seconds + 59) / 60
+    return ru ? "\(minutes) мин" : "\(minutes) min"
+  }
+
+  /// «iPhone (iPhone14,5)»: the model only, no personal name.
+  private static var deviceName: String {
+    var info = utsname()
+    uname(&info)
+    let model = Mirror(reflecting: info.machine).children.reduce(into: "") { text, child in
+      if let byte = child.value as? Int8, byte > 0 { text.append(Character(UnicodeScalar(UInt8(byte)))) }
+    }
+    return DeviceLabel.make(model: model)
+  }
+
+  /// Security card actions go through the same client; a revoked session ends here like anywhere.
+  func securityClient() -> APIClient? { isSignedIn ? client : nil }
+  func reportSecurityFailure(_ error: Error) async { await present(error) }
 
   func refresh() async { await loadSnapshot() }
 
@@ -620,7 +678,6 @@ final class RitmStore {
     pollTask?.cancel()
     var revokeFailed = false
     do { try await client.logout() } catch { revokeFailed = true }
-    vault.forgetLogin()
     wallet.reset()
     walletFolder.disconnect()
     payments.reset()
@@ -702,39 +759,13 @@ final class RitmStore {
     }
   }
 
-  /// Signs in with the login saved on this iPhone. A rejected login is forgotten, so the sign-in
-  /// screen appears and the owner enters the new password once.
-  private func signInAgain() async -> Bool {
-    guard let client, let saved = vault.loadLogin() else { return false }
-    do {
-      let session = try await client.login(login: saved.login, password: saved.password)
-      guard session.authenticated, let credential = await client.sessionCredential() else {
-        return false
-      }
-      try vault.save(credential)
-      isSignedIn = true
-      isOffline = false
-      return true
-    } catch {
-      if let failure = error as? APIError, failure.status == 401 || failure.status == 403 {
-        vault.forgetLogin()
-      }
-      return false
-    }
-  }
-
   private func present(_ error: Error) async {
     if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
     lastFailure = error as? APIError
     if let failure = error as? APIError {
       if failure.requiresAuthentication {
-        // The 8-hour session ended: sign in again with the saved login. The action that hit
-        // it is not retried (writes never are); the next read or tap works.
-        if await signInAgain() {
-          errorMessage = nil
-          Task { await refresh() }
-          return
-        }
+        // The device session expired or was revoked. The action that hit it is not retried;
+        // Settings shows the sign-in form again.
         await clearAccount()
         errorMessage = text(
           "Сессия завершилась. Войдите снова.", "Your session has expired. Sign in again.")
@@ -797,6 +828,7 @@ final class RitmStore {
     uncertainWrite = false
     refreshRequested = false
     connectionErrorShown = false
+    security.reset()
     try? vault.delete()
     notifications.clear()
     await client?.clearCredential()

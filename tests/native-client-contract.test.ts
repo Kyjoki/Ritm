@@ -68,7 +68,7 @@ test('native JSON clients share data while sessions, origins and habit versions 
     assert.match(cookie, /; HttpOnly/);
     assert.match(cookie, /; Secure/);
     assert.match(cookie, /; SameSite=Strict/);
-    assert.match(cookie, /; Max-Age=28800/);
+    assert.match(cookie, /; Max-Age=604800/);
     assert.doesNotMatch(cookie, /; Domain=/i);
     return cookie.split(';')[0];
   };

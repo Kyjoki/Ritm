@@ -26,3 +26,9 @@ node_modules/
 # Local provider skills installed by the Vercel integration CLI.
 /.agents/
 /skills-lock.json
+
+# Stray root images and database dumps never belong in git.
+/*.jpg
+/*.png
+neon-backup*
+*.dump

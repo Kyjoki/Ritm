@@ -17,6 +17,7 @@ import type {
   WorkoutsSnapshot,
 } from '../shared/types.ts';
 import { AppError } from './errors.ts';
+import type { SessionMeta, SessionRecord } from './runtime-state.ts';
 
 /** UTF-8 bytes of the active task/history JSON sent to the client. */
 export const MAX_WORKSPACE_BYTES = 8 * 1024 * 1024;
@@ -170,9 +171,13 @@ export function assertTransferConnection(receipt: GoogleTransferReceipt, identit
 
 /** Shared by PostgreSQL and the local durable security state. */
 export interface RuntimeStateRepository {
-  createSession(idHash: string, expiresAt: number): Awaitable<void>;
+  createSession(idHash: string, expiresAt: number, meta?: SessionMeta): Awaitable<void>;
   hasSession(idHash: string): Awaitable<boolean>;
   deleteSession(idHash: string): Awaitable<void>;
+  getSession(idHash: string): Awaitable<SessionRecord | null>;
+  listSessions(prefix: string): Awaitable<SessionRecord[]>;
+  touchSession(idHash: string, lastSeenAt: number, expiresAt: number): Awaitable<void>;
+  deleteOtherSessions(prefix: string, keepHash: string): Awaitable<void>;
   consumeRateLimit(key: string, maximum: number, windowMs: number): Awaitable<RateLimitResult>;
   getServerSecret(name: string): Awaitable<string | null>;
   setServerSecret(name: string, ciphertext: string): Awaitable<void>;
