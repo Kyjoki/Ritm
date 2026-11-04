@@ -195,19 +195,61 @@ enum WalletFileReader {
       guard let renewed = try? folder.bookmarkData() else { return ReadResult(kind: .needsRepick) }
       result.renewedBookmark = renewed
     }
-    let file = folder.appendingPathComponent(WalletFileImport.fileName, isDirectory: false)
-    switch await availability(of: file, in: folder) {
-    case .missing: result.kind = .fileMissing
-    case .downloading: result.kind = .downloading
-    case .present:
-      result.modified = modificationDate(of: file)
-      if let lastModified, result.modified == lastModified {
-        result.kind = .unchanged
-      } else {
-        result.kind = load(file)
+    // Every purchases file counts: Shortcuts starts «purchases 2.txt» when it cannot reach the
+    // original, and both keep lines that were never imported. Duplicate lines are dropped later.
+    var present: [URL] = []
+    var waiting = false
+    for file in candidateFiles(in: folder) {
+      switch await availability(of: file, in: folder) {
+      case .missing: continue
+      case .downloading: waiting = true
+      case .present: present.append(file)
       }
     }
+    guard !present.isEmpty else {
+      result.kind = waiting ? .downloading : .fileMissing
+      return result
+    }
+    result.modified = present.compactMap(modificationDate(of:)).max()
+    if let lastModified, result.modified == lastModified {
+      result.kind = .unchanged
+      return result
+    }
+    var texts: [String] = []
+    var failure: ReadResult.Kind?
+    for file in present {
+      switch load(file) {
+      case .contents(let text): texts.append(text)
+      case .fileMissing: continue
+      case let other: failure = failure ?? other
+      }
+    }
+    if texts.isEmpty {
+      result.kind = failure ?? .fileMissing
+    } else {
+      result.kind = .contents(texts.joined(separator: "\n"))
+    }
     return result
+  }
+
+  /// The purchases files in the folder, including iCloud placeholders («.name.icloud») of files
+  /// that are not downloaded yet, oldest name first so the original comes before its copies.
+  private static func candidateFiles(in folder: URL) -> [URL] {
+    let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+    var seen = Set<String>()
+    var files: [URL] = []
+    for raw in names {
+      var name = raw
+      if name.hasPrefix("."), name.hasSuffix(".icloud") {
+        name = String(name.dropFirst().dropLast(".icloud".count))
+      }
+      guard WalletFileImport.isPurchasesFileName(name), seen.insert(name.lowercased()).inserted
+      else { continue }
+      files.append(folder.appendingPathComponent(name, isDirectory: false))
+    }
+    return files.sorted {
+      $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
+    }
   }
 
   // MARK: iCloud
@@ -218,7 +260,7 @@ enum WalletFileReader {
   private static func availability(of file: URL, in folder: URL) async -> Availability {
     if isDownloaded(file) { return .present }
     let placeholder = folder.appendingPathComponent(
-      "." + WalletFileImport.fileName + ".icloud", isDirectory: false)
+      "." + file.lastPathComponent + ".icloud", isDirectory: false)
     let exists = (try? file.checkResourceIsReachable()) ?? false
     let hasPlaceholder = (try? placeholder.checkResourceIsReachable()) ?? false
     guard exists || hasPlaceholder else { return .missing }

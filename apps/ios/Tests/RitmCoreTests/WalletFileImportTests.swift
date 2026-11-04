@@ -213,4 +213,29 @@ final class WalletFileImportTests: XCTestCase {
     XCTAssertEqual(again.receipt.duplicates, WalletInbox.capacity)
     XCTAssertEqual(again.receipt.overflow, 3)
   }
+
+  func testRecognisesTheCopiesShortcutsMakesOfThePurchasesFile() {
+    for name in ["purchases.txt", "Purchases.TXT", "purchases 2.txt", "purchases-1.txt", "purchases_3.txt",
+      "purchases.txt.txt", " purchases.txt", "purchases.txt "]
+    {
+      XCTAssertTrue(WalletFileImport.isPurchasesFileName(name), name)
+    }
+    for name in ["purchases.rtf", "old purchases.txt", "purchases.txt.icloud", "purchases", "notes.txt"] {
+      XCTAssertFalse(WalletFileImport.isPurchasesFileName(name), name)
+    }
+  }
+
+  /// The exact line the owner's «Транзакция» automation wrote on 2026-11-04 (Kaspi Gold, iOS 27).
+  func testReadsTheLineTheOwnersAutomationWrote() {
+    let line =
+      "ritm://add?amount=₸650,00&merchant=Ip Kudabaev&card=Kaspi Gold&date=2026-11-04T12:13:24+05:00&at=2026-11-04T12:13:24+05:00"
+    let result = WalletFileImport.parse(
+      text: line + "\n", today: "2026-11-04", receivedAt: "2026-11-04T12:30:00Z")
+    XCTAssertEqual(result.skipped, 0)
+    XCTAssertEqual(result.purchases.count, 1)
+    XCTAssertEqual(result.purchases.first?.amountMinor, 65_000)
+    XCTAssertEqual(result.purchases.first?.currency, .KZT)
+    XCTAssertEqual(result.purchases.first?.merchant, "Ip Kudabaev")
+    XCTAssertEqual(result.purchases.first?.date, "2026-11-04")
+  }
 }

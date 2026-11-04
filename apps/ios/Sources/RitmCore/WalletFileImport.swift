@@ -7,6 +7,14 @@ import Foundation
 
 public enum WalletFileImport {
   public static let fileName = "purchases.txt"
+
+  /// `purchases.txt` and the copies Files or Shortcuts make next to it when the original is not on
+  /// this iPhone (for example while iCloud is full): «purchases 2.txt», «purchases-1.txt»,
+  /// «purchases.txt.txt», « purchases.txt» with a leading space. Case does not matter.
+  public static func isPurchasesFileName(_ name: String) -> Bool {
+    name.range(of: #"^\s*purchases[ _-]*\d*(\.txt)+\s*$"#, options: [.regularExpression, .caseInsensitive])
+      != nil
+  }
   /// Only the newest lines count; the file is never rewritten, so it only grows.
   public static let maxLines = 500
   public static let maxLineLength = 1000
