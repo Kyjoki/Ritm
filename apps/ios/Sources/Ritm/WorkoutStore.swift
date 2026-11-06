@@ -24,6 +24,11 @@ import UIKit
 @MainActor @Observable
 final class WorkoutStore {
   enum StartResult { case started, alreadyActive, empty }
+  struct SystemInput: Equatable, Identifiable {
+    let id = UUID()
+    let target: WorkoutInputTarget
+  }
+  private(set) var systemInput: SystemInput?
 
   enum File: String, CaseIterable {
     case programs, history, records, settings, session
@@ -335,10 +340,13 @@ final class WorkoutStore {
   /// committed to disk before the background intent returns; no duplicate WorkoutStore exists.
   @discardableResult
   func performSystemAction(_ request: WorkoutActionRequest, now: Date = Date()) async -> Bool {
-    syncAlerts(now: now)
+    let state = alerts.prepareAction(session: session, rest: rest, now: now)
     let result = WorkoutActionPolicy.apply(request, displayed: alerts.activityState,
-      state: SharedWorkoutState(session: session, rest: rest), now: now)
-    guard result.outcome == .applied else { return false }
+      state: state, now: now)
+    guard result.outcome == .applied else {
+      syncAlerts(now: now)
+      return false
+    }
     session = result.state.session
     rest = result.state.rest
     scheduleSave(.session)
@@ -352,6 +360,19 @@ final class WorkoutStore {
   }
 
   // MARK: - Server sync
+
+  /// Navigation only: keep the current set unfinished until the owner enters valid values.
+  func requestSystemInput(_ request: WorkoutActionRequest) -> Bool {
+    let state = alerts.prepareAction(session: session, rest: rest)
+    guard let target = WorkoutActionPolicy.inputTarget(request, displayed: alerts.activityState,
+      state: state) else { return false }
+    systemInput = SystemInput(target: target)
+    return true
+  }
+
+  func consumeSystemInput(_ id: UUID) {
+    if systemInput?.id == id { systemInput = nil }
+  }
 
   /// Programs and finished workouts as server documents (the active workout is never synced).
   func syncDocuments() -> [WorkoutDocKind: [String: JSONValue]] {

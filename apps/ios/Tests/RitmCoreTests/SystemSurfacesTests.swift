@@ -230,16 +230,184 @@ final class SystemSurfacesTests: XCTestCase {
       startedAt: instant("2026-10-26T06:00:00Z"), items: [first, second]))
   }
 
-  private func card(_ state: SharedWorkoutState, now: Date, revision: String = UUID().uuidString)
+  private func card(_ state: SharedWorkoutState, now: Date, privacy: Bool = false,
+                    revision: String = UUID().uuidString)
     -> WorkoutActivityState {
     let session = state.session!
     let current = state.current
     return WorkoutActivityState(
-      content: LiveActivityContent.make(from: state, privacy: false, now: now)!,
+      content: LiveActivityContent.make(from: state, privacy: privacy, now: now)!,
       startedAt: session.startedAt, exerciseNumber: (current?.exercise ?? session.items.count - 1) + 1,
       exerciseTotal: session.items.count,
       setID: current.map { session.items[$0.exercise].sets[$0.set].id } ?? "finished",
-      revision: revision, language: .en)
+      revision: revision, language: .en, requiredInput: WorkoutActionPolicy.requiredInput(in: state))
+  }
+
+  func testMissingAndInvalidWeightsRequireInputAndCannotCompleteASet() {
+    for weight in ["", " ", ".", ",", "-1", "62.5.0", "10000", "10.001", "NaN"] {
+      var state = workoutState()
+      state.session?.items[0].sets[0].weight = weight
+      let now = state.session!.startedAt
+      let display = card(state, now: now)
+      XCTAssertEqual(display.requiredInput, .weight, weight)
+      let request = display.request(.confirmSet)
+      XCTAssertEqual(WorkoutActionPolicy.inputTarget(request, displayed: display, state: state)?.field,
+                     .weight, weight)
+      let rejected = WorkoutActionPolicy.apply(request, displayed: display, state: state, now: now)
+      XCTAssertEqual(rejected.outcome, .rejected(.needsWeight), weight)
+      XCTAssertEqual(rejected.state, state, weight)
+    }
+  }
+
+  func testWeightMustBeEnteredBeforeRepsAndNeitherMissingFieldTicksTheSet() {
+    var state = workoutState()
+    state.session?.items[0].sets[0].weight = ""
+    state.session?.items[0].sets[0].reps = ""
+    let now = state.session!.startedAt
+    let missingBoth = card(state, now: now)
+    XCTAssertEqual(missingBoth.requiredInput, .weight)
+    XCTAssertEqual(WorkoutActionPolicy.inputTarget(missingBoth.request(.editSet),
+      displayed: missingBoth, state: state)?.field, .weight)
+
+    state.session?.items[0].typeWeight("62,5", setID: "a")
+    for reps in ["", " ", "0", "-1", "1.5", "1000", "ten"] {
+      state.session?.items[0].sets[0].reps = reps
+      let missingReps = card(state, now: now)
+      XCTAssertEqual(missingReps.requiredInput, .reps, reps)
+      XCTAssertEqual(WorkoutActionPolicy.inputTarget(missingReps.request(.editSet),
+        displayed: missingReps, state: state)?.field, .reps, reps)
+      let rejected = WorkoutActionPolicy.apply(missingReps.request(.confirmSet),
+        displayed: missingReps, state: state, now: now)
+      XCTAssertEqual(rejected.outcome, .rejected(.needsReps), reps)
+      XCTAssertEqual(rejected.state, state, reps)
+    }
+    state.session?.items[0].typeReps("10", setID: "a")
+    let ready = card(state, now: now)
+    XCTAssertNil(ready.requiredInput)
+    XCTAssertNil(WorkoutActionPolicy.inputTarget(ready.request(.editSet), displayed: ready, state: state))
+    let accepted = WorkoutActionPolicy.apply(ready.request(.confirmSet),
+      displayed: ready, state: state, now: now)
+    XCTAssertEqual(accepted.outcome, .applied)
+    XCTAssertEqual(accepted.state.session?.doneSets, 1)
+  }
+
+  func testPrivacyHidesValidWeightsWithoutRequiringTheyBeEnteredAgain() {
+    for weight in ["0", "62.5", "62,5", " 62.5 ", "22,"] {
+      var state = workoutState()
+      state.session?.items[0].sets[0].weight = weight
+      let now = state.session!.startedAt
+      let hidden = card(state, now: now, privacy: true)
+      XCTAssertTrue(hidden.content.hidesWeights)
+      XCTAssertNil(hidden.content.plannedWeight, weight)
+      XCTAssertNil(hidden.requiredInput, weight)
+      XCTAssertNil(WorkoutActionPolicy.inputTarget(hidden.request(.editSet),
+        displayed: hidden, state: state), weight)
+      XCTAssertEqual(WorkoutActionPolicy.apply(hidden.request(.confirmSet),
+        displayed: hidden, state: state, now: now).outcome, .applied, weight)
+    }
+    var state = workoutState()
+    let now = state.session!.startedAt
+    state.session?.items[0].sets[0].weight = ""
+    XCTAssertEqual(card(state, now: now, privacy: true).requiredInput, .weight)
+    state.session?.items[0].sets[0].weight = "62.5"
+    state.session?.items[0].sets[0].reps = ""
+    XCTAssertEqual(card(state, now: now, privacy: true).requiredInput, .reps)
+  }
+
+  func testEditSetTargetsTheActualUnfinishedSetWithoutMutatingTheJournal() throws {
+    var state = workoutState()
+    state.session?.items[0].sets[0].done = true
+    state.session?.items[0].sets[0].weight = "" // A completed field must not steal focus.
+    state.session?.items[1].sets[0].weight = ""
+    state.version = 7
+    state.lastConfirmAt = state.session!.startedAt
+    let now = state.session!.startedAt.addingTimeInterval(120)
+    let before = try WorkoutCoding.encoder().encode(state.activeState)
+    let display = card(state, now: now)
+    let request = try XCTUnwrap(WorkoutActionRequest(url: display.actionURL(.editSet)))
+    let target = try XCTUnwrap(WorkoutActionPolicy.inputTarget(request, displayed: display, state: state))
+    XCTAssertEqual(target.workoutID, "workout")
+    XCTAssertEqual(target.itemID, "second")
+    XCTAssertEqual(target.setID, "b")
+    XCTAssertEqual(target.field, .weight)
+    let result = WorkoutActionPolicy.apply(request, displayed: display, state: state, now: now)
+    XCTAssertEqual(result.outcome, .ignoredNothingToDo)
+    XCTAssertEqual(result.state, state)
+    XCTAssertEqual(try WorkoutCoding.encoder().encode(result.state.activeState), before)
+  }
+
+  func testInputNavigationRejectsStaleForeignAndMismatchedSetCards() {
+    var state = workoutState()
+    state.session?.items[0].sets[0].weight = ""
+    state.session?.items[1].sets[0].weight = ""
+    let now = state.session!.startedAt
+    let display = card(state, now: now)
+    let request = display.request(.editSet)
+    let invalid = [
+      WorkoutActionRequest(workoutID: "workout", setID: "a", revision: UUID().uuidString, action: .editSet),
+      WorkoutActionRequest(workoutID: "foreign", setID: "a", revision: display.revision, action: .editSet),
+      WorkoutActionRequest(workoutID: "workout", setID: "b", revision: display.revision, action: .editSet),
+    ]
+    for changed in invalid {
+      XCTAssertNil(WorkoutActionPolicy.inputTarget(changed, displayed: display, state: state))
+      let rejected = WorkoutActionPolicy.apply(changed, displayed: display, state: state, now: now)
+      XCTAssertEqual(rejected.outcome, .ignoredStale)
+      XCTAssertEqual(rejected.state, state)
+    }
+    XCTAssertNil(WorkoutActionPolicy.inputTarget(request, displayed: nil, state: state))
+    XCTAssertNil(WorkoutActionPolicy.inputTarget(request, displayed: display, state: SharedWorkoutState()))
+    // Even if a card and its URL agree, the journal may already point at a different set.
+    var advanced = state
+    advanced.session?.items[0].sets[0].done = true
+    XCTAssertNil(WorkoutActionPolicy.inputTarget(request, displayed: display, state: advanced))
+    let session = state.session!
+    var foreign = state
+    foreign.session = WorkoutSession(id: "foreign", programID: session.programID,
+      programName: session.programName, startedAt: session.startedAt, items: session.items)
+    XCTAssertNil(WorkoutActionPolicy.inputTarget(request, displayed: display, state: foreign))
+    for action in [WorkoutSystemAction.extendRest, .skipRest, .finishWorkout] {
+      XCTAssertNil(WorkoutActionPolicy.inputTarget(display.request(action), displayed: display, state: state))
+    }
+  }
+
+  func testNoInputTargetRemainsWhenTheWorkoutIsFinished() {
+    var state = workoutState()
+    for exercise in state.session!.items.indices {
+      for set in state.session!.items[exercise].sets.indices {
+        state.session?.items[exercise].sets[set].done = true
+        state.session?.items[exercise].sets[set].weight = ""
+      }
+    }
+    let display = card(state, now: state.session!.startedAt)
+    XCTAssertNil(display.requiredInput)
+    XCTAssertNil(WorkoutActionPolicy.inputTarget(display.request(.editSet), displayed: display, state: state))
+  }
+
+  func testActivityStateAndLegacyDecoderKeepInputNavigationCompatible() throws {
+    var state = workoutState()
+    state.session?.items[0].sets[0].weight = ""
+    let display = card(state, now: state.session!.startedAt)
+    let encoded = try JSONEncoder().encode(display)
+    XCTAssertEqual(try JSONDecoder().decode(WorkoutActivityState.self, from: encoded), display)
+    var legacyJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    legacyJSON.removeValue(forKey: "requiredInput")
+    let legacy = try JSONDecoder().decode(WorkoutActivityState.self,
+      from: JSONSerialization.data(withJSONObject: legacyJSON))
+    XCTAssertNil(legacy.requiredInput)
+    XCTAssertEqual(legacy.content, display.content)
+    XCTAssertEqual(legacy.revision, display.revision)
+    // An installed older card's confirm URL still opens the missing field from the live journal.
+    let oldJSON = """
+      {"workoutID":"workout","setID":"a","revision":"\(display.revision)","action":"confirmSet"}
+      """
+    let oldRequest = try XCTUnwrap(WorkoutActionRequest(rawValue: Data(oldJSON.utf8).base64EncodedString()))
+    XCTAssertEqual(WorkoutActionRequest(url: oldRequest.url), oldRequest)
+    XCTAssertEqual(WorkoutActionPolicy.inputTarget(oldRequest, displayed: legacy, state: state)?.field, .weight)
+    state.session?.items[0].sets[0].weight = "62.5"
+    state.session?.items[0].sets[0].reps = ""
+    let missingReps = card(state, now: state.session!.startedAt)
+    XCTAssertEqual(try JSONDecoder().decode(WorkoutActivityState.self,
+      from: JSONEncoder().encode(missingReps)).requiredInput, .reps)
   }
 
   func testActionRequestRoundTripsAndRejectsMalformedOrAmbiguousLinks() throws {
@@ -248,6 +416,9 @@ final class SystemSurfacesTests: XCTestCase {
     let request = display.request(.confirmSet)
     XCTAssertEqual(WorkoutActionRequest(rawValue: request.rawValue), request)
     XCTAssertEqual(WorkoutActionRequest(url: request.url), request)
+    let editRequest = display.request(.editSet)
+    XCTAssertEqual(WorkoutActionRequest(rawValue: editRequest.rawValue), editRequest)
+    XCTAssertEqual(WorkoutActionRequest(url: display.actionURL(.editSet)), editRequest)
     XCTAssertNil(WorkoutActionRequest(rawValue: String(repeating: "a", count: 4_097)))
     XCTAssertNil(WorkoutActionRequest(rawValue: "not-base64"))
     XCTAssertNil(WorkoutActionRequest(url: URL(string: "https://workout-action?request=\(request.rawValue)")!))
@@ -406,6 +577,62 @@ final class SystemSurfacesTests: XCTestCase {
     let coldLaunchDefaults = try XCTUnwrap(UserDefaults(suiteName: suite))
     XCTAssertEqual(WorkoutSurfaceRevision.current(fingerprint: digest, defaults: coldLaunchDefaults), revision)
     XCTAssertEqual(firstDefaults.data(forKey: "ritm.workout.surface-revision.v1.digest"), digest)
+  }
+
+  /// The app uses SHA256; an opaque deterministic marker suffices to test revision identity
+  /// here without linking CryptoKit into the portable tests or storing the journal in defaults.
+  private func revisionMarker(_ material: Data) -> Data {
+    Data(LocalNotificationNamespace.key([String(decoding: material, as: UTF8.self)]).utf8)
+  }
+
+  @MainActor
+  func testWorkoutRevisionSurvivesTheActualJournalDiskRoundTrip() async throws {
+    let suite = "Ritm.SystemSurfacesTests." + UUID().uuidString
+    let firstDefaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { firstDefaults.removePersistentDomain(forName: suite) }
+    var original = workoutState().activeState
+    let start = instant("2026-10-26T06:00:00Z").addingTimeInterval(0.125)
+    original.session?.startedAt = start
+    original.rest.restart(now: start.addingTimeInterval(15.75), seconds: 90)
+    let written = try WorkoutCoding.encoder().encode(original)
+    let restored = try WorkoutCoding.decoder().decode(WorkoutActiveState.self, from: written)
+    // ISO8601 journal storage drops subsecond precision, so this is not an identity fixture.
+    XCTAssertNotEqual(original.session?.startedAt, restored.session?.startedAt)
+    XCTAssertNotEqual(original.rest.endDate, restored.rest.endDate)
+    let initialMaterial = try WorkoutSurfaceRevision.fingerprintMaterial(for: original)
+    let restoredMaterial = try WorkoutSurfaceRevision.fingerprintMaterial(for: restored)
+    XCTAssertEqual(initialMaterial, restoredMaterial)
+    let revision = WorkoutSurfaceRevision.current(
+      fingerprint: revisionMarker(initialMaterial), defaults: firstDefaults)
+    let coldDefaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    XCTAssertEqual(WorkoutSurfaceRevision.current(
+      fingerprint: revisionMarker(restoredMaterial), defaults: coldDefaults), revision)
+  }
+
+  @MainActor
+  func testJournalEditStillInvalidatesRevisionAndUndoCannotReviveIt() async throws {
+    let suite = "Ritm.SystemSurfacesTests." + UUID().uuidString
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let before = workoutState().activeState
+    let beforeMaterial = try WorkoutSurfaceRevision.fingerprintMaterial(for: before)
+    let original = WorkoutSurfaceRevision.current(fingerprint: revisionMarker(beforeMaterial), defaults: defaults)
+    var edited = before
+    edited.session?.items[0].sets[0].weight = "65"
+    let editedMaterial = try WorkoutSurfaceRevision.fingerprintMaterial(for: edited)
+    XCTAssertNotEqual(editedMaterial, beforeMaterial)
+    let changed = WorkoutSurfaceRevision.current(fingerprint: revisionMarker(editedMaterial), defaults: defaults)
+    XCTAssertNotEqual(changed, original)
+    let reloadedBefore = try WorkoutCoding.decoder().decode(WorkoutActiveState.self,
+      from: WorkoutCoding.encoder().encode(before))
+    let reverted = WorkoutSurfaceRevision.current(
+      fingerprint: revisionMarker(try WorkoutSurfaceRevision.fingerprintMaterial(for: reloadedBefore)),
+      defaults: defaults)
+    XCTAssertNotEqual(reverted, original)
+    XCTAssertNotEqual(reverted, changed)
+    var restChanged = reloadedBefore
+    restChanged.rest.start(now: instant("2026-10-26T06:10:00Z"))
+    XCTAssertNotEqual(try WorkoutSurfaceRevision.fingerprintMaterial(for: restChanged), beforeMaterial)
   }
 
   @MainActor

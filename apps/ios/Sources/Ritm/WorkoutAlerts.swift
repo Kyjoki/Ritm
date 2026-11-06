@@ -23,6 +23,17 @@ final class WorkoutAlerts {
   @ObservationIgnored private var previousRest = RestTimer()
 
   func sync(session: WorkoutSession?, rest: RestTimer, now: Date = Date()) {
+    let state = prepareAction(session: session, rest: rest, now: now)
+    let plan = RestNotificationPlanner.plan(
+      state: state, privacy: settings.hidesWeights, russian: language() == .ru, now: now)
+    notifications.apply(plan, enabled: settings.notifiesRestEnd)
+    liveActivity.sync(content: activityState, enabled: settings.showsLiveActivity)
+  }
+
+  /// Validate a lock-screen command against the current journal without publishing an
+  /// intermediate card or cancelling/recreating its notification before the command applies.
+  @discardableResult
+  func prepareAction(session: WorkoutSession?, rest: RestTimer, now: Date = Date()) -> SharedWorkoutState {
     lastSession = session
     lastRest = rest
     let state = SharedWorkoutState(session: session, rest: rest)
@@ -40,14 +51,9 @@ final class WorkoutAlerts {
       let setID = position.map { session.items[$0.exercise].sets[$0.set].id } ?? "finished"
       activityState = WorkoutActivityState(content: content, startedAt: session.startedAt,
         exerciseNumber: exercise + 1, exerciseTotal: session.items.count, setID: setID,
-        revision: revision, language: language())
+        revision: revision, language: language(), requiredInput: WorkoutActionPolicy.requiredInput(in: state))
     } else { activityState = nil }
-    let plan = RestNotificationPlanner.plan(
-      state: state, privacy: settings.hidesWeights, russian: language() == .ru, now: now)
-    notifications.apply(plan, enabled: settings.notifiesRestEnd)
-    liveActivity.sync(
-      content: activityState,
-      enabled: settings.showsLiveActivity)
+    return state
   }
 
   /// After a setting changed: the same workout, re-evaluated.
@@ -57,8 +63,9 @@ final class WorkoutAlerts {
   /// fingerprint contains no credentials and cannot restore the journal; only its UUID is
   /// sent to the lock screen. A mismatch (including an interrupted save) fails closed.
   private func persistedRevision(for value: WorkoutActiveState) -> String {
-    let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-    guard let bytes = try? encoder.encode(value) else { return UUID().uuidString }
+    guard let bytes = try? WorkoutSurfaceRevision.fingerprintMaterial(for: value) else {
+      return UUID().uuidString
+    }
     let digest = Data(SHA256.hash(data: bytes))
     return WorkoutSurfaceRevision.current(fingerprint: digest)
   }

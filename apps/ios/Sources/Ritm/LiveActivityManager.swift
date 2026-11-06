@@ -80,7 +80,8 @@ final class LiveActivityManager {
     var decision = LiveActivityLifecycle.decide(
       content: content?.content, existing: lastContent?.content, enabled: enabled && allowed)
     if decision == .none, enabled && allowed, let content, let lastContent,
-      content.revision != lastContent.revision || content.language != lastContent.language {
+      content.revision != lastContent.revision || content.language != lastContent.language
+        || content.requiredInput != lastContent.requiredInput {
       decision = .update(workoutID: content.workoutID)
     }
     if enabled && content != nil && !allowed {

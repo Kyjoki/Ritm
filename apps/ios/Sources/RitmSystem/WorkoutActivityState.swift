@@ -10,9 +10,12 @@ public struct WorkoutActivityState: Codable, Hashable, Sendable {
   public let setID: String
   public let revision: String
   public let language: Language
+  /// Readiness comes from the journal, even when load is hidden for privacy.
+  public let requiredInput: WorkoutInputField?
 
   public init(content: LiveActivityContent, startedAt: Date, exerciseNumber: Int,
-    exerciseTotal: Int, setID: String, revision: String, language: Language) {
+    exerciseTotal: Int, setID: String, revision: String, language: Language,
+    requiredInput: WorkoutInputField? = nil) {
     self.content = content
     self.startedAt = startedAt
     self.exerciseNumber = exerciseNumber
@@ -20,6 +23,7 @@ public struct WorkoutActivityState: Codable, Hashable, Sendable {
     self.setID = setID
     self.revision = revision
     self.language = language
+    self.requiredInput = requiredInput
   }
 
   public func request(_ action: WorkoutSystemAction) -> WorkoutActionRequest {
@@ -33,7 +37,19 @@ public struct WorkoutActivityState: Codable, Hashable, Sendable {
   public var workoutID: String { content.workoutID }
 }
 
-public enum WorkoutSystemAction: String, Codable, Sendable { case extendRest, skipRest, confirmSet, finishWorkout }
+public enum WorkoutSystemAction: String, Codable, Sendable {
+  case extendRest, skipRest, confirmSet, editSet, finishWorkout
+}
+
+public enum WorkoutInputField: String, Codable, Hashable, Sendable { case weight, reps }
+
+/// A validated navigation target, never a request to tick or change a set.
+public struct WorkoutInputTarget: Equatable, Sendable {
+  public let workoutID: String
+  public let itemID: String
+  public let setID: String
+  public let field: WorkoutInputField
+}
 
 /// A revision-bound command, never an unguarded toggle. Replayed and stale links are rejected.
 public struct WorkoutActionRequest: Codable, Equatable, Sendable {

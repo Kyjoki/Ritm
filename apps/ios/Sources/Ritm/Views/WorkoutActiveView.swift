@@ -45,6 +45,17 @@ struct WorkoutActiveView: View {
       }
     }
     .onAppear { current = firstOpen(workouts.session) }
+    .onChange(of: workouts.systemInput?.id, initial: true) { _, _ in
+      guard let request = workouts.systemInput, let session = workouts.session,
+        request.target.workoutID == session.id,
+        let index = session.items.firstIndex(where: { $0.id == request.target.itemID }) else { return }
+      sheet = nil
+      confirmingFinish = false
+      confirmingCancel = false
+      show(index)
+      selection = WorkoutSetSelection(itemID: request.target.itemID, setID: request.target.setID,
+        field: request.target.field == .weight ? .weight : .reps)
+    }
     .sheet(item: $sheet) { sheet in
       switch sheet {
       case .menu: menuSheet

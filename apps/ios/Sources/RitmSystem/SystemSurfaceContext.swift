@@ -1,4 +1,5 @@
 import Foundation
+import RitmCore
 
 /// These are opaque context markers, never login/session credentials. Persisting the marker
 /// permits a legitimate notification tap after cold launch; sign-out rotates it synchronously.
@@ -18,6 +19,13 @@ import Foundation
 /// The app passes a cryptographic digest of its durable workout; no journal or weights are
 /// duplicated here. An unchanged journal keeps its revision through a process restart.
 @MainActor public enum WorkoutSurfaceRevision {
+  /// Hash exactly the representation written to session.json. Its ISO8601 dates lose
+  /// subsecond precision; hashing default JSON dates would change an unchanged journal's
+  /// revision after a cold launch. WorkoutCoding also keeps dictionary keys deterministic.
+  public static func fingerprintMaterial(for state: WorkoutActiveState) throws -> Data {
+    try WorkoutCoding.encoder().encode(state)
+  }
+
   public static func current(fingerprint: Data, defaults: UserDefaults = .standard) -> String {
     let key = "ritm.workout.surface-revision.v1"
     if defaults.data(forKey: key + ".digest") == fingerprint,

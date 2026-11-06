@@ -184,6 +184,7 @@ private struct WorkoutSetColumns<Number: View, Previous: View, Weight: View, Rep
 private struct WorkoutSetRow: View {
   @Environment(RitmStore.self) private var store
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.scenePhase) private var scenePhase
   let itemID: String
   let set: WorkoutSet
   let index: Int
@@ -192,6 +193,7 @@ private struct WorkoutSetRow: View {
   @Binding var selection: WorkoutSetSelection?
   let ticked: (WorkoutSessionItem.TickResult) -> Void
   @FocusState private var focus: WorkoutSetField?
+  @State private var inputFocusWork: Task<Void, Never>?
 
   private var workouts: WorkoutStore { store.workouts }
 
@@ -224,11 +226,36 @@ private struct WorkoutSetRow: View {
     .onChange(of: focus) { _, field in
       if let field { selection = WorkoutSetSelection(itemID: itemID, setID: set.id, field: field) }
     }
+    .onChange(of: workouts.systemInput?.id, initial: true) { _, _ in
+      focusSystemInput()
+    }
+    .onChange(of: scenePhase) { _, phase in
+      if phase == .active { focusSystemInput() }
+      else { inputFocusWork?.cancel() }
+    }
+    .onDisappear { inputFocusWork?.cancel() }
     .accessibilityElement(children: .contain)
   }
 
   private var rowFill: Color {
     return set.done ? WorkoutPalette.incomeSoft : isActive ? RitmTheme.soft : .clear
+  }
+
+  private func focusSystemInput() {
+    inputFocusWork?.cancel()
+    guard scenePhase == .active, let request = workouts.systemInput,
+      request.target.workoutID == workouts.session?.id,
+      request.target.itemID == itemID, request.target.setID == set.id, !set.done else { return }
+    inputFocusWork = Task { @MainActor in
+      // The existing exercise transition lasts 0.38 s. Let it and any sheet dismissal finish
+      // before asking iOS for the keyboard; this work is cancelled when the row disappears.
+      do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
+      guard !Task.isCancelled, scenePhase == .active, workouts.systemInput?.id == request.id,
+        workouts.session?.id == request.target.workoutID,
+        workouts.set(item: itemID, set: set.id)?.done == false else { return }
+      focus = request.target.field == .weight ? .weight : .reps
+      workouts.consumeSystemInput(request.id)
+    }
   }
 
   private var isSelected: Bool { selection?.setID == set.id }

@@ -6,7 +6,7 @@ configuration="${1:-debug}"
 [[ "$configuration" == debug || "$configuration" == release ]] || {
   echo 'Usage: bash scripts/build-system-features.sh [debug|release]' >&2; exit 2;
 }
-interactive="${RITM_INTERACTIVE:-0}"
+interactive="${RITM_INTERACTIVE:-1}"
 [[ "$interactive" == 0 || "$interactive" == 1 ]] || { echo 'RITM_INTERACTIVE must be 0 or 1.' >&2; exit 2; }
 [[ "${RITM_CORE_TESTS_ONLY:-0}" != 1 ]] || { echo 'Unset RITM_CORE_TESTS_ONLY before an iOS build.' >&2; exit 2; }
 export RITM_INTERACTIVE="$interactive"

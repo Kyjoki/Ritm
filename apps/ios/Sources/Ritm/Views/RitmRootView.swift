@@ -152,8 +152,10 @@ struct RitmRootView: View {
       beginLeaving()
       setMore(false)
       store.notices.closePopover()
-      UIApplication.shared.sendAction(
-        #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+      if navigation.section != .workouts || store.workouts.systemInput == nil {
+        UIApplication.shared.sendAction(
+          #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+      }
     }
   }
 

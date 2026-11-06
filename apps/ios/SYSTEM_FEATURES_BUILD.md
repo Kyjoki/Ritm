@@ -39,7 +39,8 @@ App Group в signatures и grants обоих profiles. Profiles истекают
 `2026-11-13T09:39:32Z`. Это подтверждённый подписанный артефакт и provisioning;
 установка нового Ritm и исполнение его поверхностей на устройстве не выполнялись.
 
-По умолчанию кнопки — deep links, открывающие app. `RITM_INTERACTIVE=1` определяет compile flag
+По умолчанию включён `RITM_INTERACTIVE=1`; диагностический `RITM_INTERACTIVE=0` оставляет
+deep links, открывающие app. `RITM_INTERACTIVE=1` определяет compile flag
 во всех targets/dependencies и включает экспериментальные прямые `Button(intent:)`.
 Компиляцию и metadata нельзя выдавать за подтверждённую доставку действий iOS.
 

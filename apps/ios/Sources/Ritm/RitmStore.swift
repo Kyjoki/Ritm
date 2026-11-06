@@ -285,6 +285,11 @@ final class RitmStore {
       Task { [weak self] in
         guard let self else { return }
         if request.action == .finishWorkout { return }
+        if workouts.requestSystemInput(request) { return }
+        if request.action == .editSet {
+          toasts.show(text("Карточка обновилась. Проверьте текущий подход.", "The card changed. Check the current set."))
+          return
+        }
         if !(await workouts.performSystemAction(request)) {
           toasts.show(text("Карточка обновилась. Проверьте текущий подход.", "The card changed. Check the current set."))
         }

@@ -13,7 +13,6 @@ struct RitmWorkoutLiveActivity: Widget {
   var body: some WidgetConfiguration {
     ActivityConfiguration(for: RitmWorkoutAttributes.self) { context in
       WorkoutLockScreenCard(state: context.state, stale: context.isStale)
-        .activityBackgroundTint(.clear)
         .activitySystemActionForegroundColor(.primary)
         .widgetURL(URL(string: "ritm://open/workout"))
     } dynamicIsland: { context in
@@ -62,7 +61,15 @@ private struct WorkoutLockScreenCard: View {
   let state: WorkoutActivityState
   let stale: Bool
   @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.isLuminanceReduced) private var luminanceReduced
   private var restExpired: Bool { stale && state.content.phase == .rest }
+  private var palette: WorkoutSurfacePalette { WorkoutSurfacePalette(colorScheme: colorScheme) }
+  private var prominentMetric: Bool { state.content.phase == .rest && !restExpired }
+  private var updateAnimation: Animation? {
+    reduceMotion || luminanceReduced ? nil : .easeOut(duration: 0.22)
+  }
 
   var body: some View {
     VStack(spacing: 5) {
@@ -87,10 +94,15 @@ private struct WorkoutLockScreenCard: View {
             .tracking(-1).lineLimit(1).minimumScaleFactor(0.8)
             .contentTransition(.numericText())
         }
+        .padding(.horizontal, 10)
         .frame(width: 94, height: 46, alignment: .leading)
-        .padding(.leading, 10)
-        .background(.primary.opacity(colorScheme == .dark ? 0.13 : 0.06),
+        .foregroundStyle(prominentMetric ? palette.metricInk : palette.ink)
+        .background(prominentMetric ? palette.metricFill : palette.secondaryFill,
                     in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(palette.controlEdge, lineWidth: 0.5)
+        }
         .accessibilityElement(children: .combine)
 
         VStack(alignment: .leading, spacing: 2) {
@@ -119,11 +131,20 @@ private struct WorkoutLockScreenCard: View {
     }
     .padding(.horizontal, 14)
     .frame(height: 158)
-    .background(.ultraThinMaterial,
-                in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    .foregroundStyle(palette.ink)
+    .animation(updateAnimation, value: state.revision)
+    .animation(updateAnimation, value: restExpired)
+    // ActivityKit owns the wallpaper material. A nested SwiftUI Material can be flattened
+    // to opaque black by the widget renderer; the system tint's alpha controls translucency.
+    .activityBackgroundTint(palette.cardTint.opacity(reduceTransparency ? 1 : 0.78))
     .overlay {
       RoundedRectangle(cornerRadius: 24, style: .continuous)
-        .strokeBorder(.primary.opacity(colorScheme == .dark ? 0.10 : 0.06), lineWidth: 0.5)
+        .strokeBorder(
+          LinearGradient(colors: [palette.edgeHighlight, palette.edgeShadow,
+                                  palette.edgeHighlight.opacity(0.45)],
+                         startPoint: .topLeading, endPoint: .bottomTrailing),
+          lineWidth: 0.75)
+        .allowsHitTesting(false)
     }
     .accessibilityLabel(state.text("Тренировка Ritm", "Ritm workout"))
     .accessibilityValue(restExpired
@@ -210,19 +231,29 @@ private struct WorkoutSetProgress: View {
 private struct WorkoutActions: View {
   let state: WorkoutActivityState
   var restExpired = false
+  @Environment(\.colorScheme) private var colorScheme
+  private var palette: WorkoutSurfacePalette { WorkoutSurfacePalette(colorScheme: colorScheme) }
   private var primary: WorkoutSystemAction {
-    if restExpired { return .confirmSet }
+    if restExpired { return completionAction }
     switch state.content.phase {
     case .rest, .paused: return .skipRest
-    case .set: return .confirmSet
+    case .set: return completionAction
     case .allDone: return .finishWorkout
     }
   }
+  private var completionAction: WorkoutSystemAction { state.requiredInput == nil ? .confirmSet : .editSet }
+  private var completionLabel: String {
+    switch state.requiredInput {
+    case .weight: return state.text("Указать вес", "Enter weight")
+    case .reps: return state.text("Указать повторы", "Enter reps")
+    case nil: return state.text("Подход выполнен", "Complete set")
+    }
+  }
   private var primaryLabel: String {
-    if restExpired { return state.text("Подход выполнен", "Complete set") }
+    if restExpired { return completionLabel }
     switch state.content.phase {
     case .rest, .paused: return state.text("Пропустить", "Skip rest")
-    case .set: return state.text("Подход выполнен", "Complete set")
+    case .set: return completionLabel
     case .allDone: return state.text("Завершить тренировку", "Finish workout")
     }
   }
@@ -233,14 +264,21 @@ private struct WorkoutActions: View {
           Text(state.text("+15 с", "+15 s")).frame(minWidth: 43, maxHeight: .infinity)
         }
         .frame(width: 65)
-        .background(.primary.opacity(0.08),
+        .foregroundStyle(palette.ink)
+        .background(palette.secondaryFill,
                     in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .overlay {
+          RoundedRectangle(cornerRadius: 13, style: .continuous)
+            .strokeBorder(palette.controlEdge, lineWidth: 0.5)
+            .allowsHitTesting(false)
+        }
         .accessibilityLabel(state.text("Добавить 15 секунд отдыха", "Add 15 seconds of rest"))
       }
       action(primary) {
         HStack(spacing: 7) {
           if restExpired || state.content.phase == .set || state.content.phase == .allDone {
-            Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold))
+            Image(systemName: primary == .editSet ? "pencil" : "checkmark")
+              .font(.system(size: 11, weight: .semibold))
           }
           Text(primaryLabel).lineLimit(1).minimumScaleFactor(0.8)
           if !restExpired && (state.content.phase == .rest || state.content.phase == .paused) {
@@ -251,8 +289,14 @@ private struct WorkoutActions: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity).padding(.horizontal, 12)
       }
       .frame(maxWidth: .infinity)
-      .background(.primary.opacity(0.12),
+      .foregroundStyle(palette.primaryInk)
+      .background(palette.primaryFill,
                   in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+      .overlay {
+        RoundedRectangle(cornerRadius: 13, style: .continuous)
+          .strokeBorder(.white.opacity(colorScheme == .dark ? 0.45 : 0.18), lineWidth: 0.5)
+          .allowsHitTesting(false)
+      }
     }
     .font(.system(size: 11, weight: .semibold)).frame(height: 44).buttonStyle(.plain)
   }
@@ -264,15 +308,43 @@ private struct WorkoutActions: View {
     // Finishing is reviewed in the app. The ordinary build opens it for the same guarded action;
     // the verified App Intents mode can perform set/rest commands without foregrounding it.
     #if RITM_INTERACTIVE
-    if action != .finishWorkout {
-      Button(intent: RitmWorkoutActionIntent(request: state.request(action).rawValue)) { label() }
+    if action != .finishWorkout && action != .editSet {
+      Button(intent: RitmWorkoutActionIntent(request: state.request(action).rawValue)) {
+        actionLabel(label)
+      }
     } else {
-      Link(destination: state.actionURL(action)) { label() }
+      Link(destination: state.actionURL(action)) { actionLabel(label) }
     }
     #else
-    Link(destination: state.actionURL(action)) { label() }
+    Link(destination: state.actionURL(action)) { actionLabel(label) }
     #endif
   }
+
+  private func actionLabel<Label: View>(_ label: () -> Label) -> some View {
+    label()
+      .frame(maxWidth: .infinity, minHeight: 44)
+      .contentShape(Rectangle())
+  }
+}
+
+/// Neutral colors shared by the Lock Screen card and expanded Dynamic Island controls.
+/// The app's approved screens and its own theme remain independent from system surfaces.
+private struct WorkoutSurfacePalette {
+  let colorScheme: ColorScheme
+  private var dark: Bool { colorScheme == .dark }
+  private var charcoal: Color { Color(red: 0.102, green: 0.102, blue: 0.098) }
+  private var paper: Color { Color(red: 0.965, green: 0.965, blue: 0.945) }
+
+  var cardTint: Color { dark ? charcoal : paper }
+  var ink: Color { dark ? paper : charcoal }
+  var secondaryFill: Color { dark ? paper.opacity(0.09) : .white.opacity(0.48) }
+  var primaryFill: Color { dark ? paper.opacity(0.96) : charcoal.opacity(0.96) }
+  var primaryInk: Color { dark ? charcoal : paper }
+  var metricFill: Color { Color(red: 0.925, green: 0.925, blue: 0.898).opacity(0.96) }
+  var metricInk: Color { charcoal }
+  var controlEdge: Color { dark ? .white.opacity(0.18) : .black.opacity(0.08) }
+  var edgeHighlight: Color { .white.opacity(dark ? 0.42 : 0.92) }
+  var edgeShadow: Color { dark ? .white.opacity(0.07) : .black.opacity(0.08) }
 }
 
 private extension WorkoutActivityState {

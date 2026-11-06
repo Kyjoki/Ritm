@@ -56,6 +56,12 @@ struct WorkoutsView: View {
     .onChange(of: workouts.session == nil) { _, ended in
       if ended, screen == .active, finished == nil { screen = .home }
     }
+    .onChange(of: workouts.systemInput?.id, initial: true) { _, _ in
+      if let request = workouts.systemInput, request.target.workoutID == workouts.session?.id {
+        replacing = nil
+        screen = .active
+      }
+    }
     .alert(
       store.text("Завершить текущую и начать новую?", "Finish this workout and start a new one?"),
       isPresented: Binding(get: { replacing != nil }, set: { if !$0 { replacing = nil } })

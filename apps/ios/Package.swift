@@ -5,7 +5,8 @@ import PackageDescription
 // Allows Foundation/API tests on Linux/Windows without trying to compile SwiftUI.
 // xtool builds the default library product for the iPhone SDK.
 let coreTestsOnly = ProcessInfo.processInfo.environment["RITM_CORE_TESTS_ONLY"] == "1"
-let interactive = ProcessInfo.processInfo.environment["RITM_INTERACTIVE"] == "1"
+// Direct lock-screen actions are the normal build. 0 remains an explicit diagnostic fallback.
+let interactive = (ProcessInfo.processInfo.environment["RITM_INTERACTIVE"] ?? "1") == "1"
 let systemSettings: [SwiftSetting] = interactive ? [.define("RITM_INTERACTIVE")] : []
 var targets: [Target] = [
   .target(name: "RitmCore", swiftSettings: systemSettings),
