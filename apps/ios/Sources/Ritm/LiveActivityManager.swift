@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import RitmCore
+import RitmSystem
 
 #if canImport(ActivityKit)
 import ActivityKit
@@ -8,8 +9,7 @@ import ActivityKit
 
 /// Starts, updates and ends the lock-screen card of the active workout.
 ///
-/// SAFE WITHOUT AN EXTENSION: the card is drawn by a widget extension, and this build has none
-/// yet (see apps/ios/LIVE_ACTIVITY.md). Without it the manager never calls ActivityKit and only
+/// The card is drawn by the embedded widget extension. Without it the manager never calls ActivityKit and only
 /// reports `.extensionMissing`; if ActivityKit refuses a request the error is swallowed into
 /// `.failed`. Either way the workout is never blocked and no ghost card is left behind.
 @MainActor @Observable
@@ -26,7 +26,7 @@ final class LiveActivityManager {
 
   private(set) var status: Status = .idle
 
-  @ObservationIgnored private var lastContent: LiveActivityContent?
+  @ObservationIgnored private var lastContent: WorkoutActivityState?
   @ObservationIgnored private var failedWorkoutID: String?
   @ObservationIgnored private var work: Task<Void, Never>?
 
@@ -54,7 +54,7 @@ final class LiveActivityManager {
 
   /// Brings the card in line with `content` (`nil`: no workout). Calls are serialised, and
   /// ActivityKit is only touched when `LiveActivityLifecycle` says something really changed.
-  func sync(content: LiveActivityContent?, enabled: Bool) {
+  func sync(content: WorkoutActivityState?, enabled: Bool) {
     if !enabled || content == nil { failedWorkoutID = nil }
     let previous = work
     work = Task { [weak self] in
@@ -63,16 +63,26 @@ final class LiveActivityManager {
     }
   }
 
-  private func perform(content: LiveActivityContent?, enabled: Bool) async {
+  /// A background App Intent waits until its ActivityKit write has really been submitted.
+  func flush() async { await work?.value }
+
+  private func perform(content: WorkoutActivityState?, enabled: Bool) async {
     #if canImport(ActivityKit)
     guard Self.extensionInstalled else {
       status = enabled && content != nil ? .extensionMissing : .idle
       return
     }
+    // A new process has no lastContent. The system can still hold an earlier card.
+    guard enabled, content != nil else { await endAll(); status = .idle; return }
     let allowed = ActivityAuthorizationInfo().areActivitiesEnabled
+    guard allowed else { await endAll(); status = .systemDisabled; return }
     adoptExisting(for: content)
-    let decision = LiveActivityLifecycle.decide(
-      content: content, existing: lastContent, enabled: enabled && allowed)
+    var decision = LiveActivityLifecycle.decide(
+      content: content?.content, existing: lastContent?.content, enabled: enabled && allowed)
+    if decision == .none, enabled && allowed, let content, let lastContent,
+      content.revision != lastContent.revision || content.language != lastContent.language {
+      decision = .update(workoutID: content.workoutID)
+    }
     if enabled && content != nil && !allowed {
       status = .systemDisabled
     } else if content == nil || !enabled {
@@ -99,7 +109,7 @@ final class LiveActivityManager {
   // helper that looks the activity up itself; only Sendable values cross the boundary.
 
   /// After a relaunch the system may still hold the card: reuse the one of this workout.
-  private func adoptExisting(for content: LiveActivityContent?) {
+  private func adoptExisting(for content: WorkoutActivityState?) {
     guard lastContent == nil, let workoutID = content?.workoutID,
       let state = Self.stateOfActivity(workoutID: workoutID)
     else { return }
@@ -107,7 +117,7 @@ final class LiveActivityManager {
     status = .running
   }
 
-  private func start(_ content: LiveActivityContent) async {
+  private func start(_ content: WorkoutActivityState) async {
     guard failedWorkoutID != content.workoutID else { return }
     // A card of another workout (a ghost) goes first, so only one card ever exists.
     await Self.endActivities(except: content.workoutID)
@@ -127,7 +137,7 @@ final class LiveActivityManager {
     }
   }
 
-  private func update(_ content: LiveActivityContent) async {
+  private func update(_ content: WorkoutActivityState) async {
     if await Self.updateActivity(content) {
       lastContent = content
     } else {
@@ -142,19 +152,19 @@ final class LiveActivityManager {
     if status == .running { status = .idle }
   }
 
-  private nonisolated static func stateOfActivity(workoutID: String) -> LiveActivityContent? {
+  private nonisolated static func stateOfActivity(workoutID: String) -> WorkoutActivityState? {
     Activity<RitmWorkoutAttributes>.activities
       .first { $0.attributes.workoutID == workoutID }?.content.state
   }
 
-  private nonisolated static func request(_ content: LiveActivityContent) throws {
+  private nonisolated static func request(_ content: WorkoutActivityState) throws {
     _ = try Activity.request(
-      attributes: RitmWorkoutAttributes(workoutID: content.workoutID, startedAt: Date()),
+      attributes: RitmWorkoutAttributes(workoutID: content.workoutID, startedAt: content.startedAt),
       content: ActivityContent(state: content, staleDate: content.staleDate), pushType: nil)
   }
 
   /// `false` when this workout has no activity to update.
-  private nonisolated static func updateActivity(_ content: LiveActivityContent) async -> Bool {
+  private nonisolated static func updateActivity(_ content: WorkoutActivityState) async -> Bool {
     guard let activity = Activity<RitmWorkoutAttributes>.activities
       .first(where: { $0.attributes.workoutID == content.workoutID })
     else { return false }

@@ -4,5 +4,7 @@
 <dict>
     <!-- Write finished workouts to Apple Health. xtool lists this entitlement as free; whether Apple's server grants it to a free developer team is not verified. -->
     <key>com.apple.developer.healthkit</key><true/>
+    <key>com.apple.security.application-groups</key>
+    <array><string>group.app.ritm.personal</string></array>
 </dict>
 </plist>

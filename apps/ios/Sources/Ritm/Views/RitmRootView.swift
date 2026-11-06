@@ -137,6 +137,17 @@ struct RitmRootView: View {
     .onChange(of: store.wallet.showRequest) { _, _ in
       navigation.section = .finance
     }
+    .onChange(of: store.systemNavigation, initial: true) { _, request in
+      guard let request else { return }
+      switch request.section {
+      case .day: navigation.section = .day
+      case .calendar: navigation.section = .calendar
+      case .habits: navigation.section = .habits
+      case .finance: navigation.section = .finance
+      case .workouts: navigation.section = .workouts
+      }
+      store.systemNavigation = nil
+    }
     .onChange(of: navigation.section) { _, _ in
       beginLeaving()
       setMore(false)

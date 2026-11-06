@@ -1,0 +1,73 @@
+diff --git a/Sources/XKit/DeveloperServices/App Groups/DeveloperServicesAssignAppGroupsOperation.swift b/Sources/XKit/DeveloperServices/App Groups/DeveloperServicesAssignAppGroupsOperation.swift
+--- a/Sources/XKit/DeveloperServices/App Groups/DeveloperServicesAssignAppGroupsOperation.swift
++++ b/Sources/XKit/DeveloperServices/App Groups/DeveloperServicesAssignAppGroupsOperation.swift
+@@ -38,19 +38,32 @@
+         existingGroups: [String: DeveloperServicesAppGroup]
+     ) async throws -> DeveloperServicesAppGroup.GroupID {
+         let sanitized = ProvisioningIdentifiers.sanitize(groupID: groupID)
++        let desired = ProvisioningIdentifiers.groupID(fromSanitized: sanitized, context: context)
+         let group: DeveloperServicesAppGroup
+-        if let existingGroup = existingGroups[sanitized] {
++        if let existingGroup = existingGroups[desired.rawValue] {
+             group = existingGroup
+         } else {
+-            let groupID = ProvisioningIdentifiers.groupID(fromSanitized: sanitized, context: context)
+             let name = ProvisioningIdentifiers.groupName(fromSanitized: sanitized)
+             let request = DeveloperServicesAddAppGroupRequest(
+                 platform: .iOS,
+                 teamID: xcodeAuthData.teamID,
+                 name: name,
+-                groupID: groupID
++                groupID: desired
+             )
+-            group = try await client.send(request)
++            do {
++                group = try await client.send(request)
++            } catch {
++                // Another product may have created this exact group after our snapshot.
++                // Only a fresh owned-group list can establish safe idempotent reuse.
++                let listRequest = DeveloperServicesListAppGroupsRequest(
++                    platform: .iOS, teamID: xcodeAuthData.teamID
++                )
++                let apiClient = client
++                guard let owned = await Self.recoverExactOwnedGroup(desired, list: {
++                    try await apiClient.send(listRequest)
++                }) else { throw error }
++                group = owned
++            }
+         }
+ 
+         _ = try await client.send(
+@@ -65,12 +78,30 @@
+         return group.groupID
+     }
+ 
++    @_spi(RitmBuildTests)
++    public static func recoverExactOwnedGroup(
++        _ desired: DeveloperServicesAppGroup.GroupID,
++        list: @Sendable () async throws -> [DeveloperServicesAppGroup]
++    ) async -> DeveloperServicesAppGroup? {
++        for attempt in 0..<3 {
++            if Task.isCancelled { return nil }
++            if attempt > 0 {
++                do { try await Task.sleep(for: .milliseconds(250)) }
++                catch { return nil }
++            }
++            guard let current = try? await list() else { continue }
++            let exact = current.filter { $0.groupID == desired }
++            if exact.count == 1 { return exact[0] }
++            if exact.count > 1 { return nil }
++        }
++        return nil
++    }
++
+     public func perform() async throws -> [DeveloperServicesAppGroup.GroupID] {
+         let existing = try await client.send(DeveloperServicesListAppGroupsRequest(
+             platform: .iOS, teamID: xcodeAuthData.teamID
+         ))
+-        let sanitized = existing.map { (ProvisioningIdentifiers.sanitize(groupID: $0.groupID), $0) }
+-        let dict = Dictionary(sanitized, uniquingKeysWith: { $1 })
++        let dict = Dictionary(existing.map { ($0.groupID.rawValue, $0) }, uniquingKeysWith: { $1 })
+         return try await withThrowingTaskGroup(of: DeveloperServicesAppGroup.GroupID.self) { group in
+             for groupID in groupIDs {
+                 group.addTask {

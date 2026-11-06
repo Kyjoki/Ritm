@@ -1,10 +1,11 @@
 import SwiftUI
 import WidgetKit
 
-/// Entry point of the Ritm widget extension. It contains only the workout Live Activity.
+/// One extension contains the workout Live Activity and the combined daily widget.
 @main
 struct RitmWidgetBundle: WidgetBundle {
   var body: some Widget {
+    RitmDayHabitsWidget()
     RitmWorkoutLiveActivity()
   }
 }

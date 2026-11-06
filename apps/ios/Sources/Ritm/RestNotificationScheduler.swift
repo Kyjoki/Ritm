@@ -10,6 +10,8 @@ protocol RestNotificationCenter: AnyObject {
   func requestPermission() async -> Bool
   func add(_ plan: RestNotificationPlan) async throws
   func remove(identifiers: [String])
+  func pendingIdentifiers() async -> [String]
+  func deliveredIdentifiers() async -> [String]
 }
 
 enum RestNotificationPermission: Equatable {
@@ -41,21 +43,38 @@ final class SystemRestNotificationCenter: RestNotificationCenter {
   }
 
   func add(_ plan: RestNotificationPlan) async throws {
+    guard plan.fireDate > Date() else { throw RestSchedulingError.elapsed }
     let content = UNMutableNotificationContent()
     content.title = plan.title
     content.body = plan.body
     content.sound = .default
     content.threadIdentifier = "ritm.workout.rest"
-    let parts: Set<Calendar.Component> = [.year, .month, .day, .hour, .minute, .second]
+    content.categoryIdentifier = "RITM_WORKOUT_REST"
+    let prefix = RestNotificationPlanner.identifierPrefix
+    let logicalID = plan.identifier.components(separatedBy: ".request.").dropLast().joined(separator: ".request.")
+    let original = logicalID.isEmpty ? plan.identifier : logicalID
+    if original.hasPrefix(prefix) {
+      let destination = LocalNotificationDestination.workout(id: String(original.dropFirst(prefix.count)))
+      content.userInfo = [LocalNotificationDestination.userInfoKey: destination.url.absoluteString]
+    }
+    let parts: Set<Calendar.Component> = [.year, .month, .day, .hour, .minute, .second, .timeZone]
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
     let trigger = UNCalendarNotificationTrigger(
-      dateMatching: Calendar.current.dateComponents(parts, from: plan.fireDate), repeats: false)
-    // The same identifier replaces a pending request, so a moved end date never leaves a second one.
+      dateMatching: calendar.dateComponents(parts, from: plan.fireDate), repeats: false)
     try await center.add(UNNotificationRequest(identifier: plan.identifier, content: content, trigger: trigger))
   }
 
   func remove(identifiers: [String]) {
     center.removePendingNotificationRequests(withIdentifiers: identifiers)
     center.removeDeliveredNotifications(withIdentifiers: identifiers)
+  }
+
+  func pendingIdentifiers() async -> [String] {
+    await center.pendingNotificationRequests().map(\.identifier)
+  }
+  func deliveredIdentifiers() async -> [String] {
+    await center.deliveredNotifications().map(\.request.identifier)
   }
 }
 
@@ -80,12 +99,38 @@ final class RestNotificationScheduler {
   @ObservationIgnored private let center: RestNotificationCenter
   @ObservationIgnored private var scheduled: RestNotificationPlan?
   @ObservationIgnored private var revision = 0
+  @ObservationIgnored private let reconciler: LocalNotificationReconciler
+  @ObservationIgnored private var hasApplied = false
+  @ObservationIgnored private var work: Task<Void, Never>?
 
   init(center: RestNotificationCenter? = nil) {
-    self.center = center ?? SystemRestNotificationCenter()
+    let center = center ?? SystemRestNotificationCenter()
+    self.center = center
+    reconciler = LocalNotificationReconciler(
+      driver: LocalNotificationDriver(
+        pendingIdentifiers: { await center.pendingIdentifiers() },
+        deliveredIdentifiers: { await center.deliveredIdentifiers() },
+        add: { plan, requestID in
+          guard let fireDate = plan.fireDate else { return }
+          try await center.add(RestNotificationPlan(
+            identifier: requestID, fireDate: fireDate, title: plan.title, body: plan.body))
+        },
+        removePending: { center.remove(identifiers: $0) },
+        removeDelivered: { center.remove(identifiers: $0) }),
+      owns: { $0.hasPrefix(RestNotificationPlanner.identifierPrefix) })
   }
 
-  func refreshPermission() async { permission = await center.permission() }
+  func refreshPermission() async {
+    let ticket = revision
+    let fresh = await center.permission()
+    guard ticket == revision else { return }
+    permission = fresh
+    if permission != .allowed {
+      revision &+= 1
+      scheduled = nil
+      reconciler.clear()
+    }
+  }
 
   /// Called when the owner turns the switch on.
   @discardableResult
@@ -95,19 +140,28 @@ final class RestNotificationScheduler {
     return permission == .allowed
   }
 
+  /// App Intents wait for permission checks and OS submission before returning to the system.
+  func flush() async {
+    await work?.value
+    await reconciler.flush()
+  }
+
   /// Makes the pending notification match `plan`. `nil` (or a switch that is off) cancels it.
   func apply(_ plan: RestNotificationPlan?, enabled: Bool) {
     let wanted = enabled ? plan : nil
-    guard wanted != scheduled else { return }
+    guard !hasApplied || wanted != scheduled else { return }
+    hasApplied = true
     revision += 1
     let ticket = revision
-    let previous = scheduled
     scheduled = wanted
+    // Invalidate an older add before the permission read suspends.
+    work?.cancel()
+    work = nil
+    reconciler.clear()
     guard let wanted else {
-      if let previous { center.remove(identifiers: [previous.identifier]) }
       return
     }
-    Task { [weak self] in
+    work = Task { [weak self] in
       guard let self else { return }
       let state = await center.permission()
       guard ticket == revision else { return }
@@ -117,10 +171,14 @@ final class RestNotificationScheduler {
         scheduled = nil
         return
       }
-      do { try await center.add(wanted) } catch {
-        // Could not schedule: forget it so the next change tries again; the journal is unaffected.
-        if ticket == revision { scheduled = nil }
-      }
+      let plan = LocalNotificationPlan(
+        identifier: wanted.identifier, fireDate: wanted.fireDate, title: wanted.title, body: wanted.body,
+        threadIdentifier: "ritm.workout.rest", categoryIdentifier: "RITM_WORKOUT_REST",
+        destination: .workout(id: String(wanted.identifier.dropFirst(RestNotificationPlanner.identifierPrefix.count))))
+      let accepted = await reconciler.replace([plan])
+      if ticket == revision && !accepted.contains(plan.identifier) { scheduled = nil }
     }
   }
 }
+
+private enum RestSchedulingError: Error { case elapsed }

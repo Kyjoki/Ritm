@@ -1,0 +1,11 @@
+diff --git a/Sources/XToolSupport/DSCommands/DSCommand.swift b/Sources/XToolSupport/DSCommands/DSCommand.swift
+--- a/Sources/XToolSupport/DSCommands/DSCommand.swift
++++ b/Sources/XToolSupport/DSCommands/DSCommand.swift
+@@ -29,6 +29,7 @@
+         abstract: "Interact with Apple Developer Services",
+         subcommands: [
+             DSTeamsCommand.self,
++            DSAppGroupsAuditCommand.self,
+             DSCertificatesCommand.self,
+             DSIdentifiersCommand.self,
+             DSDevicesCommand.self,

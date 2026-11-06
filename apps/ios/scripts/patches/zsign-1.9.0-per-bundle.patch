@@ -1,0 +1,151 @@
+diff --git a/src/lib/Zupersign.cpp b/src/lib/Zupersign.cpp
+--- a/src/lib/Zupersign.cpp
++++ b/src/lib/Zupersign.cpp
+@@ -4,6 +4,7 @@
+ #include "macho.h"
+ #include "bundle.h"
+ #include "signing.h"
++#include <cstdlib>
+ 
+ static void print_ssl_err(char **exception, const char *reason) {
+     unsigned long last_error = ERR_peek_last_error();
+@@ -33,11 +34,50 @@
+ ) {
+     bool success;
+ 
+-    if (num_entitlements == 0) {
++    if (!exception || !progress) { return -1; }
++    if (!app_directory || !entitlements || num_entitlements == 0 ||
++        (cert_len && !cert_data) || (private_key_len && !private_key_data)) {
+         *exception = strdup("No entitlements provided");
+         return -1;
+     }
+ 
++    // Validate canonical component boundaries before reading an identity or signing.
++    char *rootBuffer = realpath(app_directory, NULL);
++    if (!rootBuffer) {
++        *exception = strdup("Invalid app bundle path");
++        return -1;
++    }
++    const string rootPath(rootBuffer);
++    free(rootBuffer);
++    const string prefix = rootPath + "/";
++    std::map<string, string> scopedEntitlements;
++    for (size_t i = 0; i < num_entitlements; ++i) {
++        if (!entitlements[i].bundle_path || !entitlements[i].data || !entitlements[i].len) {
++            *exception = strdup("Invalid entitlement entry");
++            return -1;
++        }
++        char *entryBuffer = realpath(entitlements[i].bundle_path, NULL);
++        if (!entryBuffer) {
++            *exception = strdup("Invalid entitlement bundle path");
++            return -1;
++        }
++        const string entryPath(entryBuffer);
++        free(entryBuffer);
++        if (entryPath != rootPath && entryPath.compare(0, prefix.size(), prefix) != 0) {
++            *exception = strdup("Entitlement bundle is outside the root app");
++            return -1;
++        }
++        const string relative = entryPath == rootPath ? "/" : entryPath.substr(prefix.size());
++        if (!scopedEntitlements.emplace(relative,
++            string(static_cast<const char *>(entitlements[i].data), entitlements[i].len)).second) {
++            *exception = strdup("Duplicate entitlement bundle path");
++            return -1;
++        }
++    }
++    if (scopedEntitlements.count("/") != 1) {
++        *exception = strdup("Root app entitlements are required");
++        return -1;
++    }
+     progress(progressContext, -1);
+ 
+     EVP_PKEY *pkey = NULL;
+@@ -68,10 +108,8 @@
+     }
+ 
+     ZSignAsset asset;
+-    // TODO: Use diff ents for diff products
+     success = asset.Init(
+-        cert, pkey, "",
+-        string(static_cast<const char *>(entitlements[0].data), entitlements[0].len),
++        cert, pkey, "", scopedEntitlements.at("/"),
+         is_adhoc, false, false
+     );
+     if (!success) {
+@@ -82,9 +120,10 @@
+     }
+ 
+     ZBundle bundle;
++    bundle.SetBundleEntitlements(scopedEntitlements);
+     success = bundle.SignFolder(
+         &asset,
+-        app_directory,
++        rootPath,
+         "",
+         "",
+         "",
+diff --git a/src/bundle.h b/src/bundle.h
+--- a/src/bundle.h
++++ b/src/bundle.h
+@@ -5,6 +5,7 @@
+ #include <vector>
+ #include <list>
+ #include <set>
++#include <map>
+ 
+ class ZBundle
+ {
+@@ -36,7 +37,13 @@
+ 					bool bEnableCache,
+ 					bool bRemoveProvision = false);
+ 
++public:
++	void SetBundleEntitlements(const std::map<string, string>& values) {
++		m_bundleEntitlements = values;
++	}
++
+ private:
++	std::map<string, string> m_bundleEntitlements;
+ 	bool SignNode(jvalue& jvNode);
+ 	void GetNodeChangedFiles(jvalue& jvNode);
+ 	void GetChangedFiles(jvalue& jvNode, vector<string>& arrChangedFiles);
+diff --git a/src/bundle.cpp b/src/bundle.cpp
+--- a/src/bundle.cpp
++++ b/src/bundle.cpp
+@@ -314,7 +314,11 @@
+ 			ZLog::PrintV(">>> SignFile: \t%s\n", strFile.c_str());
+ 			ZMachO macho;
+ 			if (macho.InitV("%s/%s", m_strAppFolder.c_str(), strFile.c_str())) {
+-				if (!macho.Sign(m_pSignAsset, m_bForceSign, "", "", "", "")) {
++				ZSignAsset fileAsset = *m_pSignAsset;
++				if (!m_bundleEntitlements.empty()) {
++					fileAsset.m_strEntitleData.clear();
++				}
++				if (!macho.Sign(&fileAsset, m_bForceSign, "", "", "", "")) {
+ 					return false;
+ 				}
+ 			} else {
+@@ -466,7 +470,21 @@
+ 		return false;
+ 	}
+ 
+-	if (!macho.Sign(m_pSignAsset, bForceSign, strBundleId, strInfoSHA1, strInfoSHA256, strCodeResData)) {
++	ZSignAsset nodeAsset = *m_pSignAsset;
++	if (!m_bundleEntitlements.empty()) {
++		auto entry = m_bundleEntitlements.find(strFolder);
++		if (entry == m_bundleEntitlements.end()) {
++			if (strFolder == "/" || ZFile::IsPathSuffix(strFolder, ".appex") ||
++				ZFile::IsPathSuffix(strFolder, ".app")) {
++				ZLog::Error(">>> Missing scoped app/extension entitlements!\n");
++				return false;
++			}
++			nodeAsset.m_strEntitleData.clear();
++		} else {
++			nodeAsset.m_strEntitleData = entry->second;
++		}
++	}
++	if (!macho.Sign(&nodeAsset, bForceSign, strBundleId, strInfoSHA1, strInfoSHA256, strCodeResData)) {
+ 		return false;
+ 	}
+ 

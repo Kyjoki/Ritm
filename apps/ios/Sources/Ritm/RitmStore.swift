@@ -1,6 +1,8 @@
 import Foundation
 import Observation
 import RitmCore
+import RitmSystem
+import UserNotifications
 
 /// Where a tapped finance notice should land; FinanceView consumes it and sets it back to nil.
 struct FinanceFocus: Equatable {
@@ -63,6 +65,16 @@ final class RitmStore {
   private(set) var isOffline = false
   private(set) var uncertainWrite = false
   private(set) var now = Date()
+  var systemNavigation: SystemNavigationRequest?
+  /// Independent from refresh generation: every account lifecycle invalidates old async work.
+  @ObservationIgnored private(set) var accountEpoch = AccountSurfaceContext.current()
+  @ObservationIgnored private let widgetPublisher = WidgetSnapshotPublisher()
+  @ObservationIgnored private var notificationBridge: SystemNotificationBridge?
+  @ObservationIgnored private var calendarFetchedAt: Date?
+  @ObservationIgnored private var calendarDay: String?
+  @ObservationIgnored private var calendarZone: String?
+  @ObservationIgnored private var queuedWalletAlerts: [String: (purchase: WalletPurchase, added: Date)] = [:]
+  @ObservationIgnored private var pendingAccountDestination: LocalNotificationDestination?
   private(set) var pendingTheme: Theme?
   /// When a feature-specific limit (for example the idea review) allows the next retry.
   private(set) var featureRetryAt: Date?
@@ -137,6 +149,22 @@ final class RitmStore {
       return .init(remote: client, serverKey: serverAddress.description)
     }
     health.reconcileOnLaunch()
+    notificationBridge = SystemNotificationBridge { [weak self] info in
+      guard let self, let destination = LocalNotifications.destination(from: info, accountEpoch: accountEpoch) else { return }
+      openNotification(destination)
+    }
+    UNUserNotificationCenter.current().delegate = notificationBridge
+    wallet.onAdded = { [weak self] purchases in
+      guard let self else { return }
+      let epoch = accountEpoch
+      Task { [weak self] in await self?.notifyNewWalletPurchases(purchases, epoch: epoch) }
+    }
+    wallet.onRemoved = { [weak self] ids in self?.notifications.removeWallet(ids: ids) }
+    #if RITM_INTERACTIVE
+    WorkoutIntentRouter.perform = { [weak self] request in
+      guard let self, await workouts.performSystemAction(request) else { throw WorkoutIntentFailure.stale }
+    }
+    #endif
   }
 
   /// Switches this device to another server and signs it out first. The session belongs to one
@@ -205,14 +233,95 @@ final class RitmStore {
 
   func updateLocalNotifications() async {
     let ticket = generation
+    let epoch = accountEpoch
     guard isSignedIn, let snapshot = bootstrap,
-      let credential = await client?.sessionCredential(), ticket == generation
+      let credential = await client?.sessionCredential(), ticket == generation, epoch == accountEpoch
     else {
       if !isSignedIn { notifications.clear() }
       return
     }
-    await notifications.update(snapshot: snapshot, until: credential.expires, now: Date())
+    let freshCalendar = calendarDay == today && calendarZone == timeZone
+    await notifications.update(snapshot: snapshot, events: freshCalendar ? todayEvents : [],
+      calendarReady: calendarReady && freshCalendar, calendarPartial: calendarPartial,
+      leadMinutes: 30, accountEpoch: epoch, until: credential.expires, now: Date())
+    guard epoch == accountEpoch, isSignedIn else { return }
+    publishWidget(expires: credential.expires)
+    await notifyNewWalletPurchases([], epoch: epoch)
   }
+
+  private func publishWidget(expires: Date) {
+    guard isSignedIn, let snapshot = bootstrap else { return }
+    let instant = Date()
+    let day = HabitSchedule.dateKey(instant, timeZone: timeZone)
+    let fresh = calendarReady && !calendarFailed && calendarDay == day && calendarZone == timeZone
+    let confirmed = habits.map { habitConfirmed[$0.id] ?? $0 }
+    widgetPublisher.publish(.make(account: snapshot, habits: confirmed,
+      events: fresh ? todayEvents : [],
+      calendarState: !fresh ? .unavailable : (calendarPartial ? .partial : .ready),
+      contextID: accountEpoch, expires: expires, now: instant))
+  }
+
+  func openNotification(_ destination: LocalNotificationDestination) {
+    if case .workout = destination {
+      systemNavigation = .init(section: .workouts)
+      return
+    }
+    guard isSignedIn, startupFinished else {
+      if !startupFinished { pendingAccountDestination = destination }
+      return
+    }
+    switch destination {
+    case .day, .task: systemNavigation = .init(section: .day)
+    case .googleEvent: systemNavigation = .init(section: .calendar)
+    case .wallet: systemNavigation = .init(section: .finance)
+    case .workout: systemNavigation = .init(section: .workouts)
+    }
+  }
+
+  /// Strict, local system links are handled before the separate Wallet import protocol.
+  func handleSystemLink(_ url: URL) -> Bool {
+    if let request = WorkoutActionRequest(url: url) {
+      systemNavigation = .init(section: .workouts)
+      Task { [weak self] in
+        guard let self else { return }
+        if request.action == .finishWorkout { return }
+        if !(await workouts.performSystemAction(request)) {
+          toasts.show(text("Карточка обновилась. Проверьте текущий подход.", "The card changed. Check the current set."))
+        }
+      }
+      return true
+    }
+    if let destination = LocalNotificationDestination(url: url) { openNotification(destination); return true }
+    let routes: [String: SystemSection] = ["ritm://open/calendar": .calendar,
+      "ritm://open/habits": .habits, "ritm://open/workout": .workouts, "ritm://workout": .workouts]
+    if let section = routes[url.absoluteString] { systemNavigation = .init(section: section); return true }
+    return false
+  }
+
+  /// A real, newly imported pending purchase only. Permission for workout alerts is independent.
+  func notifyNewWalletPurchases(_ purchases: [WalletPurchase], epoch: String) async {
+    guard epoch == accountEpoch else { return }
+    let instant = Date()
+    for purchase in purchases where !purchase.isTest && queuedWalletAlerts.count < 12 {
+      queuedWalletAlerts[purchase.id] = (purchase, instant)
+    }
+    let pending = Set(wallet.pending.map(\.id))
+    queuedWalletAlerts = queuedWalletAlerts.filter {
+      pending.contains($0.key) && instant.timeIntervalSince($0.value.added) < 300
+    }
+    guard isSignedIn else { return }
+    guard let snapshot = bootstrap else { return }
+    guard snapshot.settings.notifications else { queuedWalletAlerts = [:]; return }
+    guard !queuedWalletAlerts.isEmpty,
+      let credential = await client?.sessionCredential(), epoch == accountEpoch else { return }
+    let batch = queuedWalletAlerts.values.map(\.purchase)
+    let accepted = await notifications.notifyWallet(purchases: batch, language: language,
+      accountEpoch: epoch, until: credential.expires, now: Date())
+    guard epoch == accountEpoch else { return }
+    for id in accepted { queuedWalletAlerts[id] = nil }
+  }
+
+  func removeWalletNotification(id: String) { notifications.removeWallet(ids: [id]) }
 
   /// Apply the acknowledged preferences before reconciliation. In particular,
   /// a failed follow-up read must not reschedule reminders just switched off.
@@ -300,6 +409,10 @@ final class RitmStore {
     defer {
       isLoading = false
       startupFinished = true
+      if isSignedIn, let destination = pendingAccountDestination {
+        pendingAccountDestination = nil
+        openNotification(destination)
+      }
       schedulePolling()
     }
     do {
@@ -496,9 +609,7 @@ final class RitmStore {
       await client.setLanguage(freshAccount.settings.language)
       await refreshCalendar(ticket: ticket)
       await refreshFinance(ticket: ticket)
-      if ticket == generation, isSignedIn, let credential = await client.sessionCredential() {
-        await notifications.update(snapshot: freshAccount, until: credential.expires, now: now)
-      }
+      if ticket == generation, isSignedIn { await updateLocalNotifications() }
     } catch {
       guard ticket == generation, !Task.isCancelled else { return }
       await present(error)
@@ -555,6 +666,7 @@ final class RitmStore {
       let index = habits.firstIndex(where: { $0.id == id })
     else { return nil }
     let current = habits[index]
+    let epoch = accountEpoch
     guard HabitSchedule.canMark(current, on: date, today: today) else { return nil }
     let next = max(0, min(HabitSchedule.target(current), count))
     if habitConfirmed[id] == nil { habitConfirmed[id] = current }
@@ -564,17 +676,19 @@ final class RitmStore {
     generation += 1
     guard !habitSending.contains(id) else { return nil }
     habitSending.insert(id)
-    var result = await sendHabitQueue(id: id)
+    var result = await sendHabitQueue(id: id, epoch: epoch)
     // A tap that arrived while the failure was being reported is still queued: send it too.
-    while !(habitQueue[id]?.isEmpty ?? true), isSignedIn {
-      result = await sendHabitQueue(id: id) ?? result
+    while !(habitQueue[id]?.isEmpty ?? true), isSignedIn, epoch == accountEpoch {
+      result = await sendHabitQueue(id: id, epoch: epoch) ?? result
     }
+    guard epoch == accountEpoch else { return nil }
     habitSending.remove(id)
+    await updateLocalNotifications()
     return result
   }
 
-  private func sendHabitQueue(id: String) async -> HabitTick? {
-    guard let client, let first = habitConfirmed[id] else { return nil }
+  private func sendHabitQueue(id: String, epoch: String) async -> HabitTick? {
+    guard epoch == accountEpoch, let client, let first = habitConfirmed[id] else { return nil }
     var latest: Habit?
     while let (date, count) = habitQueue[id]?.first {
       habitQueue[id]?.removeValue(forKey: date)
@@ -588,11 +702,7 @@ final class RitmStore {
           saved = try await client.setHabitProgress(
             id: id, date: date, count: count, expectedUpdatedAt: base.updatedAt)
         }
-        guard isSignedIn else {
-          habitQueue[id] = nil
-          habitConfirmed[id] = nil
-          return nil
-        }
+        guard isSignedIn, epoch == accountEpoch else { return nil }
         habitConfirmed[id] = saved
         latest = saved
         // Newer taps are still queued: keep showing them, the last answer replaces the habit.
@@ -600,10 +710,12 @@ final class RitmStore {
           habits[i] = saved
         }
       } catch {
+        guard epoch == accountEpoch else { return nil }
         await failHabitTick(id: id, error: error)
         return nil
       }
     }
+    guard epoch == accountEpoch else { return nil }
     habitQueue[id] = nil
     habitConfirmed[id] = nil
     return latest.map { HabitTick(before: first, after: $0) }
@@ -611,12 +723,13 @@ final class RitmStore {
 
   /// Rolls the habit back to the last copy the server confirmed, tells the owner, and re-reads it.
   private func failHabitTick(id: String, error: Error) async {
+    let epoch = accountEpoch
     let restore = habitConfirmed[id]
     habitQueue[id] = nil
     habitConfirmed[id] = nil
     if let restore, let i = habits.firstIndex(where: { $0.id == id }) { habits[i] = restore }
     await present(error)
-    guard isSignedIn else { return }
+    guard isSignedIn, epoch == accountEpoch else { return }
     let detail = errorMessage
     errorMessage = nil
     toasts.show(
@@ -626,7 +739,7 @@ final class RitmStore {
           "Could not save the mark. The change was undone."))
     // Only this habit takes the server's copy; the others are left as they are.
     guard let client, let fresh = try? await client.habits().first(where: { $0.id == id }),
-      habitConfirmed[id] == nil, let i = habits.firstIndex(where: { $0.id == id })
+      epoch == accountEpoch, habitConfirmed[id] == nil, let i = habits.firstIndex(where: { $0.id == id })
     else { return }
     habits[i] = fresh
   }
@@ -708,6 +821,7 @@ final class RitmStore {
     isMutating = true
     generation += 1
     pollTask?.cancel()
+    invalidateAccountSurfaces()
     var revokeFailed = false
     do { try await client.logout() } catch { revokeFailed = true }
     wallet.reset()
@@ -765,6 +879,8 @@ final class RitmStore {
 
   private func refreshCalendar(ticket: Int) async {
     guard let client else { return }
+    let day = today
+    let zone = timeZone
     do {
       let status = try await client.googleStatus()
       guard ticket == generation, isSignedIn, !Task.isCancelled else { return }
@@ -781,8 +897,10 @@ final class RitmStore {
         return
       }
       let result = try await client.googleEvents(
-        from: today, to: HabitSchedule.addDays(to: today, days: 1) ?? today, timeZone: timeZone)
-      guard ticket == generation, isSignedIn, !Task.isCancelled else { return }
+        // Cover the local notification horizon as well as today's UI. Display calculations
+        // still filter their own day; a notification tomorrow must not need an open app.
+        from: day, to: HabitSchedule.addDays(to: day, days: 3) ?? day, timeZone: zone)
+      guard ticket == generation, isSignedIn, !Task.isCancelled, today == day, timeZone == zone else { return }
       let sortedEvents = result.events.sorted {
         ($0.start.dateTime ?? $0.start.date ?? "") < ($1.start.dateTime ?? $1.start.date ?? "")
       }
@@ -791,6 +909,9 @@ final class RitmStore {
       set(\.calendarReady, true)
       set(\.calendarPartial, result.partial)
       set(\.calendarFailed, false)
+      calendarFetchedAt = Date()
+      calendarDay = day
+      calendarZone = zone
       let statusText =
         result.partial
         ? text("Google вернул часть расписания.", "Google returned a partial schedule.")
@@ -854,6 +975,7 @@ final class RitmStore {
   }
 
   private func clearAccount() async {
+    invalidateAccountSurfaces()
     generation += 1
     pollTask?.cancel()
     isSignedIn = false
@@ -877,9 +999,28 @@ final class RitmStore {
     refreshRequested = false
     connectionErrorShown = false
     security.reset()
+    wallet.reset()
+    walletFolder.disconnect()
+    payments.reset()
     try? vault.delete()
-    notifications.clear()
+    let clearingEpoch = accountEpoch
     await client?.clearCredential()
+    if clearingEpoch == accountEpoch { await notifications.clearAndWait() }
+  }
+
+  /// Synchronous invalidation happens before any network suspension at sign-out/server switch.
+  private func invalidateAccountSurfaces() {
+    accountEpoch = AccountSurfaceContext.rotate()
+    pendingAccountDestination = nil
+    habitQueue = [:]
+    habitConfirmed = [:]
+    habitSending = []
+    queuedWalletAlerts = [:]
+    calendarFetchedAt = nil
+    calendarDay = nil
+    calendarZone = nil
+    widgetPublisher.clear()
+    notifications.clear()
   }
 
   private func parseISO(_ value: String?) -> Date? {

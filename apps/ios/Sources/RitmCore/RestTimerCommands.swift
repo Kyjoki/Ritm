@@ -151,7 +151,7 @@ public enum RestCommandReducer {
     if state.current == nil {
       state.rest.reset()
     } else {
-      state.rest.restart(now: now)
+      state.rest.restart(now: now, seconds: TimeInterval(item.restSeconds))
     }
     return .applied
   }

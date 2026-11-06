@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import RitmCore
+import RitmSystem
 import UIKit
 
 /// The training log of «Тренировки»: programs, history and the workout in progress.
@@ -329,6 +330,26 @@ final class WorkoutStore {
   /// Hands the workout to the end-of-rest notification and the lock-screen card. They only
   /// derive from it; a failure there never touches the journal.
   func syncAlerts(now: Date = Date()) { alerts.sync(session: session, rest: rest, now: now) }
+
+  /// The same store serves in-app edits, deep links and LiveActivityIntent. A command is
+  /// committed to disk before the background intent returns; no duplicate WorkoutStore exists.
+  @discardableResult
+  func performSystemAction(_ request: WorkoutActionRequest, now: Date = Date()) async -> Bool {
+    syncAlerts(now: now)
+    let result = WorkoutActionPolicy.apply(request, displayed: alerts.activityState,
+      state: SharedWorkoutState(session: session, rest: rest), now: now)
+    guard result.outcome == .applied else { return false }
+    session = result.state.session
+    rest = result.state.rest
+    scheduleSave(.session)
+    flush(.session)
+    // Invalidate the old card before yielding; a second +15 tap must not win during disk I/O.
+    syncAlerts(now: now)
+    await writeTail?.value
+    await alerts.liveActivity.flush()
+    await alerts.notifications.flush()
+    return !saveFailed
+  }
 
   // MARK: - Server sync
 

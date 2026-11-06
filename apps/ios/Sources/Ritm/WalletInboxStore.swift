@@ -23,6 +23,8 @@ final class WalletInboxStore {
   /// Ids being written right now, so a double tap cannot book a purchase twice.
   private(set) var booking: Set<String> = []
   @ObservationIgnored private let defaults: UserDefaults
+  @ObservationIgnored var onAdded: (([WalletPurchase]) -> Void)?
+  @ObservationIgnored var onRemoved: (([String]) -> Void)?
 
   init(defaults: UserDefaults = .standard) {
     self.defaults = defaults
@@ -96,8 +98,14 @@ final class WalletInboxStore {
 
   private func update(_ next: WalletState) {
     guard next != state else { return }
+    let previous = Set(state.pending.map(\.id))
+    let remaining = Set(next.pending.map(\.id))
+    let added = next.pending.filter { !previous.contains($0.id) && !$0.isTest }
+    let removed = Array(previous.subtracting(remaining))
     state = next
     if let data = try? JSONEncoder().encode(next) { defaults.set(data, forKey: Self.key) }
+    if !removed.isEmpty { onRemoved?(removed) }
+    if !added.isEmpty { onAdded?(added) }
   }
 
   private static func timestamp(_ date: Date) -> String {

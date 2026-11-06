@@ -1,4 +1,7 @@
 .build/
+.bsp/
+__pycache__/
+*.pyc
 .swiftpm/
 xtool/
 DerivedData/

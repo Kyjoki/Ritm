@@ -6,28 +6,38 @@ final class RestTimerCommandsTests: XCTestCase {
   private let t0 = Date(timeIntervalSince1970: 2_000_000)
 
   private func state(
-    filled: Bool = true, version: Int = 0, rest: RestTimer = RestTimer(), sets: Int = 2
+    filled: Bool = true, version: Int = 0, rest: RestTimer = RestTimer(), sets: Int = 2,
+    exerciseRest: Int = 180
   ) -> SharedWorkoutState {
     let list = (0..<sets).map {
       WorkoutSet(id: "s\($0)", weight: filled ? "80" : "", reps: filled ? "5" : "")
     }
-    let item = WorkoutSessionItem(id: "i", exerciseID: "bench", name: "Жим", previous: nil, sets: list)
+    let item = WorkoutSessionItem(id: "i", exerciseID: "bench", name: "Жим", previous: nil, sets: list,
+      restSeconds: exerciseRest)
     let session = WorkoutSession(id: "w", programID: "p", programName: "Грудь", startedAt: t0, items: [item])
     return SharedWorkoutState(version: version, session: session, rest: rest)
   }
 
   private func doneCount(_ s: SharedWorkoutState) -> Int { s.session?.doneSets ?? -1 }
 
-  func testConfirmTicksNextSetAndStartsRestWithThePreset() {
+  func testConfirmTicksNextSetAndStartsExerciseRest() {
     var rest = RestTimer()
     rest.setPreset(120, now: t0)
-    let result = state(rest: rest).applying(.confirmNextSet, now: t0, expectedVersion: 0)
+    let result = state(rest: rest, exerciseRest: 120).applying(.confirmNextSet, now: t0, expectedVersion: 0)
     XCTAssertEqual(result.outcome, .applied)
     XCTAssertEqual(doneCount(result.state), 1)
     XCTAssertEqual(result.state.rest.endDate, t0.addingTimeInterval(120))
     XCTAssertEqual(result.state.version, 1)
     XCTAssertEqual(result.state.phase(now: t0), .rest)
     XCTAssertEqual(result.state.currentSetIndex, 1)
+  }
+
+  func testExerciseRestOverridesGlobalPresetLikeInAppToggle() {
+    let rest = RestTimer(preset: 60)
+    let result = state(rest: rest, exerciseRest: 90).applying(.confirmNextSet, now: t0, expectedVersion: 0)
+    XCTAssertEqual(result.outcome, .applied)
+    XCTAssertEqual(result.state.rest.endDate, t0.addingTimeInterval(90))
+    XCTAssertEqual(result.state.rest.preset, 60)
   }
 
   func testConfirmNeedsWeightAndRepsAndChangesNothing() {

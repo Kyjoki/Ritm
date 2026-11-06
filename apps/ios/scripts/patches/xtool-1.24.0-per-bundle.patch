@@ -1,0 +1,33 @@
+diff --git a/Sources/XKit/Signer/SignerImpl.swift b/Sources/XKit/Signer/SignerImpl.swift
+--- a/Sources/XKit/Signer/SignerImpl.swift
++++ b/Sources/XKit/Signer/SignerImpl.swift
+@@ -152,9 +152,7 @@
+         entitlementMapping: [URL: Entitlements],
+         progress: @escaping (Double?) -> Void
+     ) async throws {
+-        // TODO: #131: update Zupersign to handle multiple entitlements files
+-        // this is a temp hack to just pass along the root app entitlements
+-        let entitlementMapping = entitlementMapping.filter { $0.key.path == app.path }
++        // Ritm's isolated backend consumes every validated bundle-scoped entry.
+         try self._sign(
+             app: app,
+             identity: identity,
+diff --git a/Package.swift b/Package.swift
+--- a/Package.swift
++++ b/Package.swift
+@@ -34,6 +34,7 @@
+         .macOS(.v14),
+     ],
+     products: [
++        .executable(name: "RitmSignerFixture", targets: ["RitmSignerFixture"]),
+         .library(
+             name: "XKit",
+             targets: ["XKit"]
+@@ -85,6 +86,7 @@
+         .package(url: "https://github.com/tuist/XcodeProj.git", from: "9.17.5"),
+     ],
+     targets: [
++        .executableTarget(name: "RitmSignerFixture", dependencies: ["XKit"], path: "RitmSignerFixture"),
+         .target(
+             name: "CXKit",
+             dependencies: [

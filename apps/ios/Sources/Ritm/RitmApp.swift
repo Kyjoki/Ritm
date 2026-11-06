@@ -11,9 +11,8 @@ struct RitmApp: App {
     WindowGroup {
       RitmRootView()
         .environment(store)
-        .task { await store.start() }
-        .task { await store.importWalletFile() }
-        .onOpenURL { store.handleWalletLink($0) }
+        .task { await store.start(); await store.importWalletFile() }
+        .onOpenURL { if !store.handleSystemLink($0) { store.handleWalletLink($0) } }
         .onChange(of: scenePhase) { _, phase in
           store.setActive(phase == .active)
           if phase == .active { Task { await store.importWalletFile() } }

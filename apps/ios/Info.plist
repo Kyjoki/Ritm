@@ -20,6 +20,8 @@
     <string>Ritm сохраняет в Здоровье только завершённые тренировки: тип, время начала и окончания и длительность. Подходы, веса и упражнения остаются в журнале Ritm.</string>
     <!-- Live Activities: the lock-screen workout card. Needs the widget extension in LiveActivity/. -->
     <key>NSSupportsLiveActivities</key><true/>
+    <!-- The signer may prefix this ID. RitmSystem resolves the signed root-bundle candidate. -->
+    <key>RitmAppGroup</key><string>group.app.ritm.personal</string>
     <!-- ritm://add?… is opened by the Apple Wallet automation in Shortcuts (see WalletInbox). -->
     <key>CFBundleURLTypes</key>
     <array>

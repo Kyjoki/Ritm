@@ -4,3 +4,11 @@ product: Ritm
 infoPath: Info.plist
 iconPath: Resources/AppIcon.png
 entitlementsPath: Ritm.entitlements
+resources:
+  - .build/ritm-appintents/Ritm/Metadata.appintents
+extensions:
+  - product: RitmWidgets
+    infoPath: LiveActivity/RitmWidget-Info.plist
+    entitlementsPath: LiveActivity/RitmWidget.entitlements
+    resources:
+      - .build/ritm-appintents/RitmWidgets/Metadata.appintents

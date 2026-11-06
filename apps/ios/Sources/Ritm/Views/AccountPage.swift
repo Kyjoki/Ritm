@@ -300,12 +300,12 @@ struct AccountView: View {
     SettingsCard(symbol: "bell", title: store.text("Уведомления", "Notifications")) {
       SettingsSwitchRow(
         title: store.text("Напоминания о задачах", "Task reminders"),
-        note: store.text("За 15 минут до начала, пока Ritm открыт", "15 minutes before the start, while Ritm is open"),
+        note: store.text("За 30 минут. Ближайшие напоминания работают и с закрытым Ritm.", "30 minutes before. Upcoming reminders also work with Ritm closed."),
         isOn: Binding(get: { draft.notifications }, set: { value in Task { await setNotifications(value) } }))
       SettingsDivider()
       SettingsSwitchRow(
         title: store.text("Утренний план", "Morning plan"),
-        note: store.text("Сводка в начале рабочего дня, пока Ritm открыт", "A summary at the start of the workday, while Ritm is open"),
+        note: store.text("Сводка в начале рабочего дня. Обновляется при открытии Ritm.", "A summary at the start of the workday. Refreshed when you open Ritm."),
         isOn: $draft.dailyBriefing)
         .disabled(!draft.notifications)
       if let notificationError {

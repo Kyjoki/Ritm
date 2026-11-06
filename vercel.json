@@ -2,6 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
     "deploymentEnabled": {
+      "chatgpt/ios-notifications-widgets-live-activities": false,
       "codex/ritm-native-ios": false,
       "claude/ritm-native-ios-parity": false,
       "claude/ritm-health-live-activity": false,

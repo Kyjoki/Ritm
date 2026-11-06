@@ -339,7 +339,10 @@ extension RitmStore {
   /// becomes active and on pull-to-refresh in Finance. `userInitiated` (the settings button and
   /// the refresh) rereads an unchanged file and says so when nothing is new.
   func importWalletFile(userInitiated: Bool = false) async {
+    guard isSignedIn, !isMutating else { return }
+    let epoch = accountEpoch
     guard case .contents(let contents, let modified) = await walletFolder.read(force: userInitiated)
+      , epoch == accountEpoch, isSignedIn
     else { return }
     let parsed = WalletFileImport.parse(
       text: contents, today: HabitSchedule.dateKey(Date(), timeZone: timeZone),
