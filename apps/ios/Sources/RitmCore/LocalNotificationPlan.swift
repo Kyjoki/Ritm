@@ -153,11 +153,6 @@ public enum LocalNotificationPlanner {
     let end = min(expiry, now.addingTimeInterval(horizon))
     let ru = snapshot.settings.language == .ru
     let epoch = LocalNotificationNamespace.key(accountEpoch)
-    let heading: String
-    if leadMinutes == 0 { heading = ru ? "Ritm · Пора начинать" : "Ritm · Starting now" }
-    else {
-      heading = ru ? "Ritm · Через \(leadMinutes) минут" : "Ritm · In \(leadMinutes) minutes"
-    }
     var wanted: [String: LocalNotificationPlan] = [:]
     let today = HabitSchedule.dateKey(now, timeZone: zone.identifier)
     // 48 absolute hours can touch four civil dates during a fall-back transition.
@@ -173,8 +168,12 @@ public enum LocalNotificationPlanner {
         guard fire > now, fire < end else { continue }
         let identifier = LocalNotificationNamespace.reminders
           + "\(epoch).task." + LocalNotificationNamespace.key(entry.task.id, day)
+        let finish = (1...1440).contains(entry.task.duration)
+          ? start.addingTimeInterval(Double(entry.task.duration) * 60) : nil
         wanted[identifier] = LocalNotificationPlan(
-          identifier: identifier, fireDate: fire, title: heading, body: entry.task.title,
+          identifier: identifier, fireDate: fire, title: entry.task.title,
+          body: NotificationTimeFormatting.range(start: start, end: finish, timeZone: zone,
+            language: snapshot.settings.language, relativeTo: fire),
           threadIdentifier: "ritm.reminders", categoryIdentifier: "RITM_TASK_REMINDER",
           destination: .task(id: entry.task.id, date: day), expiresAt: expiry, accountEpoch: epoch)
       }
@@ -206,7 +205,9 @@ public enum LocalNotificationPlanner {
         let identifier = LocalNotificationNamespace.reminders
           + "\(epoch).google." + LocalNotificationNamespace.key(event.calendarId, event.id)
         wanted[identifier] = LocalNotificationPlan(
-          identifier: identifier, fireDate: fire, title: heading, body: event.title,
+          identifier: identifier, fireDate: fire, title: event.title,
+          body: NotificationTimeFormatting.range(start: start, end: finish, timeZone: zone,
+            language: snapshot.settings.language, relativeTo: fire),
           threadIdentifier: "ritm.reminders", categoryIdentifier: "RITM_GOOGLE_REMINDER",
           destination: .googleEvent(
             id: event.id, calendarID: event.calendarId,

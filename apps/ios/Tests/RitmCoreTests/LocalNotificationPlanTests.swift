@@ -36,8 +36,8 @@ final class LocalNotificationPlanTests: XCTestCase {
     let plan = try XCTUnwrap(plans.first)
     XCTAssertEqual(plans.count, 1)
     XCTAssertEqual(plan.fireDate, instant("2026-11-06T04:30:00Z"))
-    XCTAssertEqual(plan.title, "Ritm · In 30 minutes")
-    XCTAssertEqual(plan.body, task.title)
+    XCTAssertEqual(plan.title, task.title)
+    XCTAssertEqual(plan.body, "10:00–10:30")
     XCTAssertEqual(plan.destination, .task(id: "t", date: "2026-11-06"))
     XCTAssertEqual(plan.expiresAt, now.addingTimeInterval(86_400))
     XCTAssertEqual(plan.accountEpoch, LocalNotificationNamespace.key("a"))
@@ -80,7 +80,7 @@ final class LocalNotificationPlanTests: XCTestCase {
       snapshot: snapshot([]), events: [complete, todo, allDay, dateOnly, ordinary, unknown, invalidStatus, ordinary],
       calendarReady: true, until: now.addingTimeInterval(86_400), now: now)
     XCTAssertEqual(plans.count, 2)
-    XCTAssertEqual(Set(plans.map(\.body)), ["todo", "ordinary"])
+    XCTAssertEqual(Set(plans.map(\.title)), ["todo", "ordinary"])
     XCTAssertTrue(LocalNotificationPlanner.plans(
       snapshot: snapshot([]), events: [ordinary], calendarReady: true, calendarPartial: true,
       until: now.addingTimeInterval(86_400), now: now).isEmpty)
@@ -132,8 +132,8 @@ final class LocalNotificationPlanTests: XCTestCase {
     let plans = LocalNotificationPlanner.plans(
       snapshot: snapshot(tasks), until: now.addingTimeInterval(86_400), now: now)
     XCTAssertEqual(plans.count, 48)
-    XCTAssertEqual(plans.first?.body, "0")
-    XCTAssertEqual(plans.last?.body, "47")
+    XCTAssertEqual(plans.first?.title, "0")
+    XCTAssertEqual(plans.last?.title, "47")
     XCTAssertEqual(plans.map(\.fireDate), plans.map(\.fireDate).sorted { $0! < $1! })
   }
 
@@ -168,6 +168,174 @@ final class LocalNotificationPlanTests: XCTestCase {
     XCTAssertNotEqual(first.first?.identifier, second.first?.identifier)
     XCTAssertEqual(first.first?.destination, .day)
     XCTAssertFalse(first[0].body.contains("0"))
+  }
+
+  func testGoogleTestUsesExactCalendarTitleAndAccountClockRangeWithoutChangingItsSchedule() throws {
+    let now = instant("2026-11-06T16:00:00Z")
+    let expiry = now.addingTimeInterval(86_400)
+    let value = event("Test", start: "2026-11-06T22:45:00+05:00", end: "2026-11-06T23:45:00+05:00")
+    let epoch = LocalNotificationNamespace.key("calendar-format")
+    for language in Language.allCases {
+      let plans = LocalNotificationPlanner.plans(
+        snapshot: snapshot([], zone: "Asia/Qyzylorda", language: language), events: [value],
+        calendarReady: true, leadMinutes: 30, accountEpoch: "calendar-format", until: expiry, now: now)
+      let plan = try XCTUnwrap(plans.first)
+      XCTAssertEqual(plans.count, 1)
+      XCTAssertEqual(plan.title, "Test")
+      XCTAssertEqual(plan.body, "22:45–23:45")
+      XCTAssertEqual(plan.fireDate, instant("2026-11-06T17:15:00Z"))
+      XCTAssertEqual(plan.identifier, LocalNotificationNamespace.reminders
+        + "\(epoch).google." + LocalNotificationNamespace.key("primary", "Test"))
+      XCTAssertEqual(plan.destination, .googleEvent(id: "Test", calendarID: "primary", date: "2026-11-06"))
+      XCTAssertEqual(plan.threadIdentifier, "ritm.reminders")
+      XCTAssertEqual(plan.categoryIdentifier, "RITM_GOOGLE_REMINDER")
+      XCTAssertEqual(plan.expiresAt, expiry)
+      XCTAssertEqual(plan.accountEpoch, epoch)
+    }
+  }
+
+  func testTimedTaskKeepsItsOriginalTitleAndDurationInTwentyFourHourTextForBothLanguages() throws {
+    let now = instant("2026-11-06T08:00:00Z")
+    let task = RitmTask(id: "lesson", title: "Dr. Иванов — Gym 2×10", date: "2026-11-06",
+      time: "14:05", duration: 90)
+    for language in Language.allCases {
+      for lead in [0, 30, 60] {
+        let plan = try XCTUnwrap(LocalNotificationPlanner.plans(
+          snapshot: snapshot([task], language: language), leadMinutes: lead,
+          accountEpoch: "task-format", until: now.addingTimeInterval(86_400), now: now).first)
+        XCTAssertEqual(plan.title, task.title)
+        XCTAssertEqual(plan.body, "14:05–15:35")
+        XCTAssertEqual(plan.fireDate, instant("2026-11-06T14:05:00Z").addingTimeInterval(-Double(lead) * 60))
+        XCTAssertEqual(plan.identifier, LocalNotificationNamespace.reminders
+          + LocalNotificationNamespace.key("task-format") + ".task."
+          + LocalNotificationNamespace.key("lesson", "2026-11-06"))
+        XCTAssertEqual(plan.destination, .task(id: "lesson", date: "2026-11-06"))
+        XCTAssertEqual(plan.categoryIdentifier, "RITM_TASK_REMINDER")
+      }
+    }
+  }
+
+  func testGoogleSourceOffsetIsConvertedToTheAccountZoneForTextAndRoute() throws {
+    let now = instant("2026-11-06T14:00:00Z")
+    var value = event("tokyo", start: "2026-11-07T01:45:00+09:00", end: "2026-11-07T02:30:00+09:00")
+    value.title = "東京 lesson"
+    value.timeZone = "Asia/Tokyo"
+    let plan = try XCTUnwrap(LocalNotificationPlanner.plans(
+      snapshot: snapshot([], zone: "Asia/Qyzylorda", language: .en), events: [value],
+      calendarReady: true, leadMinutes: 15, until: now.addingTimeInterval(86_400), now: now).first)
+    XCTAssertEqual(plan.title, "東京 lesson")
+    XCTAssertEqual(plan.body, "21:45–22:30")
+    XCTAssertEqual(plan.fireDate, instant("2026-11-06T16:30:00Z"))
+    XCTAssertEqual(plan.destination, .googleEvent(id: "tokyo", calendarID: "primary", date: "2026-11-06"))
+  }
+
+  private func assertOvernightNovemberRange(
+    _ body: String, language: Language, startTime: String, endTime: String,
+    file: StaticString = #filePath, line: UInt = #line
+  ) {
+    let sides = body.split(separator: "–", omittingEmptySubsequences: false)
+    XCTAssertEqual(sides.count, 2, body, file: file, line: line)
+    guard sides.count == 2 else { return }
+    let month = language == .ru ? "ноя" : "nov"
+    for (index, day, time) in [(0, "6", startTime), (1, "7", endTime)] {
+      let label = String(sides[index])
+      XCTAssertTrue(label.contains(time), body, file: file, line: line)
+      XCTAssertTrue(label.lowercased().contains(month), body, file: file, line: line)
+      // CLDR versions differ in month punctuation; verify the actual civil day separately.
+      XCTAssertNotNil(label.range(of: "(?<![0-9])\(day)(?![0-9])", options: .regularExpression),
+        body, file: file, line: line)
+    }
+  }
+
+  func testOvernightGoogleRangeShowsBothLocalDatesInTheSelectedLanguage() throws {
+    let now = instant("2026-11-06T16:00:00Z")
+    let value = event("overnight", start: "2026-11-06T18:30:00Z", end: "2026-11-06T20:15:00Z")
+    for language in Language.allCases {
+      let plan = try XCTUnwrap(LocalNotificationPlanner.plans(
+        snapshot: snapshot([], zone: "Asia/Qyzylorda", language: language), events: [value],
+        calendarReady: true, leadMinutes: 30, until: now.addingTimeInterval(86_400), now: now).first)
+      assertOvernightNovemberRange(plan.body, language: language, startTime: "23:30", endTime: "01:15")
+      XCTAssertEqual(plan.fireDate, instant("2026-11-06T18:00:00Z"))
+      XCTAssertEqual(plan.destination, .googleEvent(id: "overnight", calendarID: "primary", date: "2026-11-06"))
+    }
+  }
+
+  func testTimedTaskDurationAcrossMidnightShowsBothDatesInsteadOfClippingToTheDay() throws {
+    let now = instant("2026-11-06T16:00:00Z")
+    let task = RitmTask(id: "overnight", title: "Night work", date: "2026-11-06", time: "23:45", duration: 90)
+    for language in Language.allCases {
+      let plan = try XCTUnwrap(LocalNotificationPlanner.plans(
+        snapshot: snapshot([task], zone: "Asia/Qyzylorda", language: language), leadMinutes: 30,
+        until: now.addingTimeInterval(86_400), now: now).first)
+      assertOvernightNovemberRange(plan.body, language: language, startTime: "23:45", endTime: "01:15")
+      XCTAssertEqual(plan.title, task.title)
+      XCTAssertEqual(plan.fireDate, instant("2026-11-06T18:15:00Z"))
+      XCTAssertEqual(plan.destination, .task(id: "overnight", date: "2026-11-06"))
+    }
+  }
+
+  func testGoogleRangeMarksBothUtcOffsetsAcrossADaylightSavingClockChange() throws {
+    let now = instant("2026-11-01T03:00:00Z")
+    let value = event("fallback", start: "2026-11-01T01:15:00-04:00", end: "2026-11-01T01:45:00-05:00")
+    for language in Language.allCases {
+      let plan = try XCTUnwrap(LocalNotificationPlanner.plans(
+        snapshot: snapshot([], zone: "America/New_York", language: language), events: [value],
+        calendarReady: true, leadMinutes: 30, until: now.addingTimeInterval(86_400), now: now).first)
+      XCTAssertTrue(plan.body.contains("01:15 UTC-04:00"), plan.body)
+      XCTAssertTrue(plan.body.contains("01:45 UTC-05:00"), plan.body)
+      XCTAssertLessThan(try XCTUnwrap(plan.body.range(of: "UTC-04:00")).lowerBound,
+        try XCTUnwrap(plan.body.range(of: "UTC-05:00")).lowerBound)
+      XCTAssertEqual(plan.fireDate, instant("2026-11-01T04:45:00Z"))
+      XCTAssertEqual(plan.destination, .googleEvent(id: "fallback", calendarID: "primary", date: "2026-11-01"))
+    }
+  }
+
+  func testInvalidTaskDurationShowsOnlyStartAndKeepsTheSameDeadlineAndIdentity() throws {
+    let now = instant("2026-11-06T08:00:00Z")
+    for duration in [0, -30, 1441] {
+      let task = RitmTask(id: "invalid-duration", title: "Original title", date: "2026-11-06",
+        time: "14:00", duration: duration)
+      let plan = try XCTUnwrap(LocalNotificationPlanner.plans(
+        snapshot: snapshot([task]), leadMinutes: 30, until: now.addingTimeInterval(86_400), now: now).first)
+      XCTAssertEqual(plan.title, task.title)
+      XCTAssertEqual(plan.body, "14:00")
+      XCTAssertEqual(plan.fireDate, instant("2026-11-06T13:30:00Z"))
+      XCTAssertEqual(plan.identifier, LocalNotificationNamespace.reminders
+        + LocalNotificationNamespace.key("current") + ".task."
+        + LocalNotificationNamespace.key("invalid-duration", "2026-11-06"))
+      XCTAssertEqual(plan.destination, .task(id: "invalid-duration", date: "2026-11-06"))
+    }
+  }
+
+  func testGoogleInvalidOrReversedIntervalStillCannotBecomeANotification() {
+    let now = instant("2026-11-06T08:00:00Z")
+    for (start, end) in [
+      ("invalid", "2026-11-06T13:00:00Z"),
+      ("2026-11-06T12:00:00Z", "invalid"),
+      ("2026-11-06T12:00:00Z", "2026-11-06T12:00:00Z"),
+      ("2026-11-06T12:00:00Z", "2026-11-06T11:00:00Z"),
+    ] {
+      XCTAssertTrue(LocalNotificationPlanner.plans(
+        snapshot: snapshot([]), events: [event("invalid", start: start, end: end)], calendarReady: true,
+        until: now.addingTimeInterval(86_400), now: now).isEmpty)
+    }
+  }
+
+  func testEarlyReminderForANextDayGoogleEventIncludesTheEventDate() throws {
+    let now = instant("2026-11-06T18:00:00Z") // 23:00 in the account zone.
+    let value = event("after-midnight", start: "2026-11-07T00:15:00+05:00", end: "2026-11-07T01:15:00+05:00")
+    for language in Language.allCases {
+      let plan = try XCTUnwrap(LocalNotificationPlanner.plans(
+        snapshot: snapshot([], zone: "Asia/Qyzylorda", language: language), events: [value],
+        calendarReady: true, leadMinutes: 30, until: now.addingTimeInterval(86_400), now: now).first)
+      XCTAssertEqual(plan.title, value.title)
+      XCTAssertTrue(plan.body.contains("00:15–01:15"), plan.body)
+      XCTAssertTrue(plan.body.lowercased().contains(language == .ru ? "ноя" : "nov"), plan.body)
+      XCTAssertNotNil(plan.body.range(of: "(?<![0-9])7(?![0-9])", options: .regularExpression), plan.body)
+      XCTAssertEqual(plan.fireDate, instant("2026-11-06T18:45:00Z"))
+      XCTAssertEqual(plan.destination,
+        .googleEvent(id: "after-midnight", calendarID: "primary", date: "2026-11-07"))
+    }
   }
 
   func testWalletUsesOnlyRealPurchaseAndDoesNotExposeCard() throws {
