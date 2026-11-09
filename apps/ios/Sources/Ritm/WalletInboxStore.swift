@@ -140,9 +140,10 @@ extension RitmStore {
   }
 
   /// Books one pending purchase as an expense of its currency's account. Nothing is lost on a
-  /// failure: the purchase stays pending. Returns whether it was booked.
+  /// failure: the purchase stays pending. `accountID` is the named account to book into; nil is
+  /// the main account of the currency. Returns whether it was booked.
   @discardableResult
-  func confirmWalletPurchase(_ purchase: WalletPurchase) async -> Bool {
+  func confirmWalletPurchase(_ purchase: WalletPurchase, accountID: String? = nil) async -> Bool {
     guard let category = purchase.suggestedCategory, !category.isEmpty,
       wallet.beginBooking(purchase.id)
     else { return false }
@@ -160,7 +161,7 @@ extension RitmStore {
           "No \(purchase.currency.rawValue) account. Set an opening balance first."))
       return false
     }
-    let input = WalletEntryBuilder.expense(from: purchase, category: category)
+    let input = WalletEntryBuilder.expense(from: purchase, category: category, accountID: accountID)
     guard await write({ try await $0.createFinanceEntry(input) }) != nil else { return false }
     wallet.confirmed(id: purchase.id, category: category)
     // The new expense raises the banner and a bell notice (notices.update), so no toast.
@@ -168,9 +169,12 @@ extension RitmStore {
   }
 
   /// Confirms every pending purchase that has a category, stopping at the first failure.
-  func confirmAllWalletPurchases() async {
+  /// `accountIDs` maps a purchase id to its named account; the others go to the main account.
+  func confirmAllWalletPurchases(accountIDs: [String: String] = [:]) async {
     for purchase in wallet.pending {
-      guard await confirmWalletPurchase(purchase) else { return }
+      guard await confirmWalletPurchase(purchase, accountID: accountIDs[purchase.id]) else {
+        return
+      }
     }
   }
 }

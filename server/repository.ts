@@ -31,6 +31,21 @@ export function assertHabitStorage(habits: Habit[]) {
 export function assertFinanceReferences(entries: FinanceEntry[]) {
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
   for (const entry of entries) {
+    if ((entry.type === 'income' || entry.type === 'expense') && entry.accountId !== undefined) {
+      const target = byId.get(entry.accountId);
+      if (!target || !['account', 'deposit'].includes(target.type))
+        throw new AppError(
+          400,
+          'FINANCE_OPERATION_ACCOUNT',
+          'Счёт операции не найден. Обновите данные.',
+        );
+      if (target.currency !== entry.currency)
+        throw new AppError(
+          400,
+          'FINANCE_OPERATION_CURRENCY',
+          'Операция возможна только по счёту в той же валюте.',
+        );
+    }
     if (entry.type !== 'transfer') continue;
     const from = byId.get(entry.fromAccountId);
     const to = byId.get(entry.toAccountId);
@@ -77,6 +92,16 @@ export function assertFinanceAccountDeletion(entries: FinanceEntry[], id: string
       409,
       'FINANCE_ACCOUNT_HAS_TRANSFERS',
       'У этого счёта есть переводы. Сначала удалите или измените связанные переводы.',
+    );
+  if (
+    entries.some(
+      (entry) => (entry.type === 'income' || entry.type === 'expense') && entry.accountId === id,
+    )
+  )
+    throw new AppError(
+      409,
+      'FINANCE_ACCOUNT_HAS_OPERATIONS',
+      'У этого счёта есть операции. Сначала удалите их или перенесите на другой счёт.',
     );
 }
 

@@ -6,6 +6,8 @@ private struct FinanceEditing: Identifiable {
   var entry: FinanceEntry?
   var kind: FinanceEntryKind
   var currency: FinanceCurrency
+  /// The card the operation starts on.
+  var accountID: String?
 }
 
 private struct FinanceDetailRoute: Identifiable {
@@ -105,7 +107,7 @@ struct FinanceView: View {
     .sheet(item: $editing) { route in
       FinanceEditor(
         entry: route.entry, kind: route.kind, currency: route.currency,
-        entries: store.financeEntries, accountKinds: accountKinds
+        entries: store.financeEntries, accountKinds: accountKinds, cardID: route.accountID
       ) {
         await store.reloadFinance()
       }
@@ -142,8 +144,8 @@ struct FinanceView: View {
             "Будут удалены все позиции этого брокерского счёта. Действие изменит расчёты.",
             "Every position of this brokerage account will be deleted. This changes the totals.")
           : store.text(
-            "Действие изменит расчёты. Счёт, связанный переводами, удалить нельзя.",
-            "This changes the totals. An account linked by transfers cannot be deleted."))
+            "Действие изменит расчёты. Счёт с операциями или переводами удалить нельзя.",
+            "This changes the totals. An account with operations or transfers cannot be deleted."))
     }
     .confirmationDialog(
       store.text(
@@ -233,8 +235,8 @@ struct FinanceView: View {
       deleteFailure =
         store.errorMessage
         ?? store.text(
-          "Сервер не удалил счёт. Если он связан переводами, сначала удалите переводы.",
-          "The server did not delete the account. If it is linked by transfers, remove them first.")
+          "Сервер не удалил счёт. Если на нём есть операции или переводы, сначала удалите их.",
+          "The server did not delete the account. If it has operations or transfers, remove them first.")
       store.errorMessage = nil
     } else {
       for target in targets { accountKinds.remove(target.id) }
@@ -489,8 +491,9 @@ struct FinanceView: View {
     FinanceActions(
       canWrite: store.canWrite,
       open: { detail = FinanceDetailRoute(entryID: $0.id) },
-      add: { kind, currency in
-        editing = FinanceEditing(entry: nil, kind: kind, currency: currency)
+      add: { kind, currency, accountID in
+        editing = FinanceEditing(
+          entry: nil, kind: kind, currency: currency, accountID: accountID)
       },
       edit: { entry in
         editing = FinanceEditing(entry: entry, kind: entry.type, currency: entry.currency)

@@ -164,11 +164,14 @@ public enum WalletEntryBuilder {
   static let notePrefix = "Apple Pay · "
   static let maxNoteLength = 400
 
-  public static func expense(from purchase: WalletPurchase, category: String) -> FinanceEntryInput {
+  /// `accountID` is the account to book into; nil (the main account) leaves the field out.
+  public static func expense(
+    from purchase: WalletPurchase, category: String, accountID: String? = nil
+  ) -> FinanceEntryInput {
     let note = String((notePrefix + purchase.merchant).prefix(maxNoteLength))
     return FinanceEntryInput(
       type: .expense, currency: purchase.currency, note: note, amountMinor: purchase.amountMinor,
-      date: purchase.date, category: category)
+      date: purchase.date, category: category, accountId: accountID)
   }
 }
 

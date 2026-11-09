@@ -145,8 +145,8 @@ public enum FinanceWallet {
     return (start ?? today, today)
   }
 
-  /// Account: income and expense of its currency from its snapshot date on, plus its transfers.
-  /// Deposit: transfers only. Stocks: zero.
+  /// Account and deposit: the income and expense of the card (see `operation(_:belongsTo:)`) from
+  /// its snapshot date on, plus its transfers. Stocks: zero.
   public static func stats(
     _ entries: [FinanceEntry], card: FinanceCard, period: FinancePeriod, today: String
   ) -> FinancePeriodStats {
@@ -161,8 +161,8 @@ public enum FinanceWallet {
       guard isDated(entry, from: start, to: range.end) else { continue }
       let amount = entry.amountMinor ?? 0
       switch entry.type {
-      case .income where card.kind == .account: income += amount
-      case .expense where card.kind == .account: expense += amount
+      case .income where operation(entry, belongsTo: card): income += amount
+      case .expense where operation(entry, belongsTo: card): expense += amount
       case .transfer:
         if entry.toAccountId == card.id { transfersIn += amount }
         if entry.fromAccountId == card.id { transfersOut += amount }
@@ -222,17 +222,17 @@ public enum FinanceWallet {
     }
   }
 
-  /// Expenses of an account card by trimmed category, largest first. Past `limit` rows the
+  /// Expenses of an account or deposit card by trimmed category, largest first. Past `limit` rows the
   /// smallest ones fold into one «Другое» row (name nil), which is always last.
   public static func categories(
     _ entries: [FinanceEntry], card: FinanceCard, period: FinancePeriod, today: String,
     limit: Int = 5
   ) -> [FinanceCategoryShare] {
-    guard card.kind == .account, let asOf = card.asOf else { return [] }
+    guard card.kind != .stocks, let asOf = card.asOf else { return [] }
     let range = interval(period, today: today)
     var totals: [String: Int] = [:]
     var uncategorized = 0
-    for entry in entries where entry.type == .expense && entry.currency == card.currency {
+    for entry in entries where entry.type == .expense && operation(entry, belongsTo: card) {
       guard isDated(entry, from: max(range.start, asOf), to: range.end),
         let amount = entry.amountMinor, amount > 0
       else { continue }
@@ -300,7 +300,9 @@ public enum FinanceWallet {
       cards.first { $0.kind == kind && $0.currency == entry.currency }?.id
     }
     switch entry.type {
-    case .income, .expense: return card(.account)
+    case .income, .expense:
+      if let id = entry.accountId, cards.contains(where: { $0.id == id }) { return id }
+      return card(.account)
     case .stock: return card(.stocks)
     case .transfer:
       return [entry.toAccountId, entry.fromAccountId].compactMap { $0 }
@@ -371,10 +373,24 @@ extension FinanceWallet {
     return date >= start && date <= end
   }
 
+  /// An income or expense counts on the main account when it names no account or the main's own
+  /// id, and on a named account (deposit) only when it names that account.
+  public static func operation(_ entry: FinanceEntry, belongsTo card: FinanceCard) -> Bool {
+    guard entry.type == .income || entry.type == .expense, entry.currency == card.currency
+    else { return false }
+    switch card.kind {
+    case .account: return entry.accountId == nil || entry.accountId == card.id
+    case .deposit: return entry.accountId == card.id
+    case .stocks: return false
+    }
+  }
+
   private static func touches(_ entry: FinanceEntry, card: FinanceCard) -> Bool {
     guard entry.currency == card.currency else { return false }
     switch (card.kind, entry.type) {
-    case (.account, .income), (.account, .expense), (.stocks, .stock): return true
+    case (.account, .income), (.account, .expense), (.deposit, .income), (.deposit, .expense):
+      return operation(entry, belongsTo: card)
+    case (.stocks, .stock): return true
     case (.account, .transfer), (.deposit, .transfer):
       return entry.fromAccountId == card.id || entry.toAccountId == card.id
     default: return false

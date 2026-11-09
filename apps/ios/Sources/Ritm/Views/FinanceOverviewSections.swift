@@ -5,7 +5,8 @@ import SwiftUI
 struct FinanceActions {
   let canWrite: Bool
   let open: (FinanceEntry) -> Void
-  let add: (FinanceEntryKind, FinanceCurrency) -> Void
+  /// The third value is the card the operation starts on (nil: the overview).
+  let add: (FinanceEntryKind, FinanceCurrency, String?) -> Void
   let edit: (FinanceEntry) -> Void
   let remove: (FinanceEntry) -> Void
 }
@@ -50,24 +51,15 @@ struct FinanceOverviewSections: View {
       // The first account in a currency is the main one; every further account is a named one.
       Button {
         let hasMain = entries.contains { $0.type == .account && $0.currency == currency }
-        actions.add(hasMain ? .deposit : .account, currency)
+        actions.add(hasMain ? .deposit : .account, currency, nil)
       } label: {
         actionLabel(format.text("Счёт", "Account"), prominent: false)
       }
       .buttonStyle(RitmGlassButtonStyle())
       .disabled(!actions.canWrite)
-      Menu {
-        ForEach([FinanceEntryKind.income, .expense, .transfer], id: \.self) { kind in
-          Button {
-            actions.add(kind, currency)
-          } label: {
-            Label { Text(format.typeName(kind)) } icon: { RitmSymbol(FinanceDisplay.symbol(kind)) }
-          }
-        }
-      } label: {
-        actionLabel(format.text("Операция", "Operation"), prominent: true)
+      FinanceOperationMenu(format: format, canWrite: actions.canWrite) { kind in
+        actions.add(kind, currency, nil)
       }
-      .disabled(!actions.canWrite)
     }
     .opacity(actions.canWrite ? 1 : 0.6)
   }

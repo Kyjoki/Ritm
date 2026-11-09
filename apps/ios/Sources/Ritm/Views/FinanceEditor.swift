@@ -12,6 +12,8 @@ struct FinanceEditor: View {
   let entries: [FinanceEntry]
   let accountKinds: FinanceAccountKindStore
   let onSave: () async -> Void
+  /// The card the owner is looking at: the account an operation starts on.
+  let cardID: String?
   /// A `deposit` entry saved as «Счёт» (no deposit wording); remembered in `accountKinds`.
   @State private var plain: Bool
   @State private var kind: FinanceEntryKind
@@ -28,15 +30,18 @@ struct FinanceEditor: View {
   @State private var purchasePrice = ""
   @State private var fromID = ""
   @State private var toID = ""
+  /// The account an income or expense is booked into («Счёт»).
+  @State private var accountID = ""
   @State private var validation: String?
   @State private var saving = false
 
   init(
     entry: FinanceEntry?, kind: FinanceEntryKind, currency: FinanceCurrency,
-    entries: [FinanceEntry], accountKinds: FinanceAccountKindStore,
+    entries: [FinanceEntry], accountKinds: FinanceAccountKindStore, cardID: String? = nil,
     onSave: @escaping () async -> Void
   ) {
     self.entry = entry
+    self.cardID = cardID
     self.entries = entries
     self.accountKinds = accountKinds
     self.onSave = onSave
@@ -56,6 +61,14 @@ struct FinanceEditor: View {
     _purchasePrice = State(initialValue: FinanceDisplay.decimal(entry?.purchasePriceMinor))
     _fromID = State(initialValue: entry?.fromAccountId ?? "")
     _toID = State(initialValue: entry?.toAccountId ?? "")
+    let shownCurrency = entry?.currency ?? currency
+    _accountID = State(
+      initialValue: entry?.type == .income || entry?.type == .expense
+        ? FinanceOperationAccount.preselected(
+          entries, currency: shownCurrency, card: entry?.accountId)
+        : FinanceOperationAccount.preselected(
+          entries, currency: shownCurrency, card: cardID,
+          lastUsed: Self.lastAccount(shownCurrency)))
   }
   private var accounts: [FinanceEntry] {
     entries.filter { ($0.type == .account || $0.type == .deposit) && $0.currency == currency }
@@ -94,6 +107,7 @@ struct FinanceEditor: View {
           .tint(RitmTheme.accentColor)
           .financeInput()
       }
+      if kind == .income || kind == .expense { accountPicker }
       if kind == .deposit || kind == .stock {
         FinanceField(store.text("Название", "Name")) {
           FinanceTextInput(placeholder: namePlaceholder, text: $name)
@@ -138,13 +152,16 @@ struct FinanceEditor: View {
       if entry == nil, kind == .account, !mainAvailable { kind = .deposit }
       if date.isEmpty { date = store.today }
       if fromID.isEmpty {
-        fromID = accounts.first(where: { $0.type == .account })?.id ?? accounts.first?.id ?? ""
+        let open = accounts.first { $0.id == cardID }?.id
+        fromID = open ?? accounts.first(where: { $0.type == .account })?.id ?? accounts.first?.id ?? ""
       }
       if toID.isEmpty { toID = accounts.first(where: { $0.id != fromID })?.id ?? "" }
     }
     .onChange(of: currency) { _, _ in
       fromID = ""
       toID = ""
+      accountID = FinanceOperationAccount.preselected(
+        entries, currency: currency, card: cardID, lastUsed: Self.lastAccount(currency))
       // A second main account in one currency is refused: use a named account instead.
       if entry == nil, kind == .account, !mainAvailable { kind = .deposit }
     }
@@ -259,6 +276,28 @@ struct FinanceEditor: View {
       income: kind == .income, selection: $category, stored: entry?.category
     )
     .id(kind)
+  }
+
+  /// «Счёт»: every account, deposit and card of the chosen currency; the main one is shown as
+  /// «Основной счёт». The list follows the currency of the form.
+  @ViewBuilder private var accountPicker: some View {
+    let options = FinanceOperationAccount.options(entries, currency: currency)
+    if !options.isEmpty {
+      FinanceField(store.text("Счёт", "Account")) {
+        FinanceSelect(
+          options: options.map { ($0.id, $0.name ?? store.text("Основной счёт", "Main account")) },
+          selection: $accountID)
+      }
+    }
+  }
+
+  private static func lastAccountKey(_ currency: FinanceCurrency) -> String {
+    "ritm.finance.lastOperationAccount.\(currency.rawValue)"
+  }
+
+  /// The account of the last saved operation in this currency; nil when none was saved.
+  private static func lastAccount(_ currency: FinanceCurrency) -> String? {
+    UserDefaults.standard.string(forKey: lastAccountKey(currency))
   }
 
   private var transferFields: some View {
@@ -406,6 +445,9 @@ struct FinanceEditor: View {
       date: isTransaction ? date : nil, asOf: isTransaction ? nil : date,
       name: kind == .deposit || kind == .stock ? trimmedName : nil,
       category: kind == .income || kind == .expense ? trimmedCategory : nil,
+      accountId: kind == .income || kind == .expense
+        ? FinanceOperationAccount.requestAccountID(accountID, entries: entries, currency: currency)
+        : nil,
       fromAccountId: kind == .transfer ? fromID : nil, toAccountId: kind == .transfer ? toID : nil,
       exchange: kind == .stock && !symbol.isEmpty ? exchange : nil,
       ticker: kind == .stock && !symbol.isEmpty ? symbol : nil,
@@ -421,6 +463,9 @@ struct FinanceEditor: View {
     saving = false
     if let saved = result {
       if saved.type == .deposit { accountKinds.set(plain: plain, for: saved.id) }
+      if saved.type == .income || saved.type == .expense, !accountID.isEmpty {
+        UserDefaults.standard.set(accountID, forKey: Self.lastAccountKey(saved.currency))
+      }
       // A new operation announces itself with the banner (store.notices), not a toast.
       let announcedByBanner = entry == nil && (kind == .income || kind == .expense || kind == .transfer)
       if !announcedByBanner { store.toasts.show(savedToast(name: trimmedName)) }

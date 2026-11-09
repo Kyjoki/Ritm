@@ -7,6 +7,8 @@ struct FinanceInboxCard: View {
   @Environment(RitmStore.self) private var store
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var picking: PickRoute?
+  /// The account the owner picked per purchase id; without a pick the card label decides.
+  @State private var accountChoices: [String: String] = [:]
 
   private struct PickRoute: Identifiable {
     let id: String
@@ -94,6 +96,7 @@ struct FinanceInboxCard: View {
     return VStack(alignment: .leading, spacing: 10) {
       summary(purchase)
       categoryButton(purchase, state)
+      accountRow(purchase)
       actions(purchase, state)
       if let hint = state.hint {
         Text(hint)
@@ -194,10 +197,52 @@ struct FinanceInboxCard: View {
     .accessibilityHint(store.text("Открывает список категорий", "Opens the category list"))
   }
 
+  // MARK: Account
+
+  private func accountOptions(_ purchase: WalletPurchase) -> [FinanceAccountOption] {
+    FinanceOperationAccount.options(store.financeEntries, currency: purchase.currency)
+  }
+
+  /// The picked account while it still exists; else the one matching the purchase's card label
+  /// («Kaspi Gold»), else the main account.
+  private func selectedAccountID(_ purchase: WalletPurchase) -> String {
+    if let chosen = accountChoices[purchase.id],
+      accountOptions(purchase).contains(where: { $0.id == chosen })
+    {
+      return chosen
+    }
+    return WalletAccountMatch.defaultAccountID(for: purchase, entries: store.financeEntries)
+  }
+
+  /// nil for the main account, so the request leaves `accountId` out.
+  private func requestAccountID(_ purchase: WalletPurchase) -> String? {
+    FinanceOperationAccount.requestAccountID(
+      selectedAccountID(purchase), entries: store.financeEntries, currency: purchase.currency)
+  }
+
+  /// «Счёт» under the category: only when the currency has more than the main account.
+  @ViewBuilder private func accountRow(_ purchase: WalletPurchase) -> some View {
+    let options = accountOptions(purchase)
+    if options.count > 1, !purchase.isTest {
+      HStack(spacing: 10) {
+        Text(store.text("Счёт", "Account"))
+          .ritmFont(12, weight: .medium)
+          .foregroundStyle(RitmTheme.muted)
+        FinanceSelect(
+          options: options.map { ($0.id, $0.name ?? store.text("Основной счёт", "Main account")) },
+          selection: Binding(
+            get: { selectedAccountID(purchase) },
+            set: { accountChoices[purchase.id] = $0 }),
+          disabled: store.wallet.booking.contains(purchase.id))
+      }
+    }
+  }
+
   private func actions(_ purchase: WalletPurchase, _ state: RowState) -> some View {
     HStack(spacing: 8) {
       Button(store.text("Подтвердить", "Confirm")) {
-        Task { await store.confirmWalletPurchase(purchase) }
+        let account = requestAccountID(purchase)
+        Task { await store.confirmWalletPurchase(purchase, accountID: account) }
       }
       .buttonStyle(RitmPrimaryButtonStyle(minHeight: 48))
       .disabled(!state.canConfirm)
@@ -214,7 +259,10 @@ struct FinanceInboxCard: View {
   private func confirmAll(_ items: [WalletPurchase]) -> some View {
     let ready = items.allSatisfy { RowState(store: store, purchase: $0).canConfirm }
     return Button(store.text("Подтвердить все (\(items.count))", "Confirm all (\(items.count))")) {
-      Task { await store.confirmAllWalletPurchases() }
+      let accounts = items.reduce(into: [String: String]()) { result, purchase in
+        if let id = requestAccountID(purchase) { result[purchase.id] = id }
+      }
+      Task { await store.confirmAllWalletPurchases(accountIDs: accounts) }
     }
     .buttonStyle(RitmSecondaryButtonStyle(minHeight: 48))
     .frame(maxWidth: .infinity)

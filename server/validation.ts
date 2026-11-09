@@ -127,6 +127,7 @@ export const financeEntryInputSchema = z.discriminatedUnion('type', [
       currency: financeCurrencySchema,
       date: dateValue,
       category: z.string().trim().min(1).max(80),
+      accountId: idSchema.optional(),
       note: z.string().trim().max(1000),
     })
     .strict(),
@@ -137,6 +138,7 @@ export const financeEntryInputSchema = z.discriminatedUnion('type', [
       currency: financeCurrencySchema,
       date: dateValue,
       category: z.string().trim().min(1).max(80),
+      accountId: idSchema.optional(),
       note: z.string().trim().max(1000),
     })
     .strict(),

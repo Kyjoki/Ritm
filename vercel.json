@@ -9,7 +9,8 @@
       "claude/ritm-workouts-sync": false,
       "claude/ritm-security": false,
       "claude/ritm-session-keep": false,
-      "claude/ritm-workouts-redesign": false
+      "claude/ritm-workouts-redesign": false,
+      "claude/ritm-card-operations": false
     }
   },
   "framework": "vite",

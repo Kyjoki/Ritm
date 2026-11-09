@@ -23,9 +23,16 @@ struct FinanceAccountSections: View {
 
   private var entry: FinanceEntry? { entries.first(where: { $0.id == card.id }) }
 
+  /// A named account that has income or expense of its own shows the account's tiles and
+  /// categories; one that only takes transfers keeps the deposit wording.
+  private var hasOperations: Bool {
+    card.kind == .account || entries.contains { FinanceWallet.operation($0, belongsTo: card) }
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       header.ritmPageReveal(index: 2)
+      if card.kind != .stocks { operationRow.ritmPageReveal(index: 2) }
       switch card.kind {
       case .account:
         statsBlock
@@ -35,6 +42,7 @@ struct FinanceAccountSections: View {
         statsBlock
         depositPanel
         dynamicsPanel
+        if hasOperations { categoriesPanel }
       case .stocks:
         statsBlock
         positionsPanel
@@ -89,6 +97,14 @@ struct FinanceAccountSections: View {
     .padding(.horizontal, 2)
   }
 
+  /// «+ Операция» right under the header: income, expense or transfer on this very card.
+  private var operationRow: some View {
+    FinanceOperationMenu(format: format, canWrite: actions.canWrite) { kind in
+      actions.add(kind, card.currency, card.id)
+    }
+    .opacity(actions.canWrite ? 1 : 0.6)
+  }
+
   @ViewBuilder private var balanceLine: some View {
     if let balance = card.balanceMinor {
       let currency = card.currency
@@ -128,6 +144,13 @@ struct FinanceAccountSections: View {
             title: format.text("Результат", "Result"), value: "—", tone: FinanceTone.net(result))
           : signed(format.text("Результат", "Result"), result, FinanceTone.net(result)),
       ]
+    case .deposit where hasOperations:
+      let value = FinanceWallet.stats(entries, card: card, period: period, today: today)
+      return [
+        signed(format.text("Поступления", "Income"), value.incomeMinor, FinanceTone.income),
+        signed(format.text("Расходы", "Spending"), -value.expenseMinor, FinanceTone.expense),
+        signed(format.text("Разница", "Net"), value.netMinor, FinanceTone.net(value.netMinor)),
+      ]
     case .deposit:
       let value = FinanceWallet.stats(entries, card: card, period: period, today: today)
       return [
@@ -152,6 +175,12 @@ struct FinanceAccountSections: View {
       notes = [
         format.text(
           "Показатели \(format.periodLabel(period)).", "Figures \(format.periodLabel(period)).")
+      ]
+    case .deposit where hasOperations:
+      notes = [
+        format.text(
+          "Показатели \(format.periodLabel(period)). Разница включает переводы между своими счетами.",
+          "Figures \(format.periodLabel(period)). Net includes transfers between your own accounts.")
       ]
     case .deposit:
       notes = [
@@ -236,8 +265,8 @@ struct FinanceAccountSections: View {
       FinanceNotes(
         lines: [
           format.text(
-            "Баланс = стартовый остаток + переводы. Доходы и расходы записываются на основной счёт.",
-            "Balance = opening balance + transfers. Income and spending are recorded on the main account.")
+            "Баланс = стартовый остаток + переводы + доходы и расходы, записанные на этот счёт.",
+            "Balance = opening balance + transfers + income and spending recorded on this account.")
         ])
     }
   }
@@ -365,13 +394,12 @@ struct FinanceAccountSections: View {
   }
 
   /// `.btn.sm`: the small «+ Операция» button of the history header. A brokerage account adds a
-  /// position instead; an account opens the form on «Расход» (its type control switches it).
+  /// position instead; an account or deposit opens the form on «Расход» of this very card.
   private var addButton: some View {
     Button {
       switch card.kind {
-      case .account: actions.add(.expense, card.currency)
-      case .deposit: actions.add(.transfer, card.currency)
-      case .stocks: actions.add(.stock, card.currency)
+      case .account, .deposit: actions.add(.expense, card.currency, card.id)
+      case .stocks: actions.add(.stock, card.currency, nil)
       }
     } label: {
       HStack(spacing: 8) {

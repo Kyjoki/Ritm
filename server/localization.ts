@@ -49,6 +49,12 @@ const messages: Record<string, string> = {
     'The transfer date cannot precede either account opening balance.',
   'У этого счёта есть переводы. Сначала удалите или измените связанные переводы.':
     'This account has transfers. Delete or edit the linked transfers first.',
+  'У этого счёта есть операции. Сначала удалите их или перенесите на другой счёт.':
+    'This account has operations. Delete them or move them to another account first.',
+  'Счёт операции не найден. Обновите данные.':
+    'The operation account was not found. Refresh your data.',
+  'Операция возможна только по счёту в той же валюте.':
+    'Operations require an account in the same currency.',
   'Финансовая запись изменилась. Обновите данные и повторите действие.':
     'This finance entry has changed. Refresh your data and try again.',
   'Достигнут предел финансовых записей. Удалите ненужные записи.':

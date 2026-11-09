@@ -16,6 +16,9 @@ public struct FinanceEntryInput: Codable, Sendable, Equatable {
   public var asOf: String?
   public var name: String?
   public var category: String?
+  /// Income and expense only: the account or deposit of the same currency the operation belongs
+  /// to. nil is the main account of the currency.
+  public var accountId: String?
   public var fromAccountId: String?
   public var toAccountId: String?
   public var exchange: String?
@@ -31,6 +34,7 @@ public struct FinanceEntryInput: Codable, Sendable, Equatable {
     asOf: String? = nil,
     name: String? = nil,
     category: String? = nil,
+    accountId: String? = nil,
     fromAccountId: String? = nil,
     toAccountId: String? = nil,
     exchange: String? = nil,
@@ -48,6 +52,7 @@ public struct FinanceEntryInput: Codable, Sendable, Equatable {
     self.asOf = asOf
     self.name = name
     self.category = category
+    self.accountId = accountId
     self.fromAccountId = fromAccountId
     self.toAccountId = toAccountId
     self.exchange = exchange
@@ -58,7 +63,7 @@ public struct FinanceEntryInput: Codable, Sendable, Equatable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case type, currency, note, amountMinor, valueMinor, date, asOf, name, category
+    case type, currency, note, amountMinor, valueMinor, date, asOf, name, category, accountId
     case fromAccountId, toAccountId, exchange, ticker, quantity, unitPriceMinor, purchasePriceMinor
   }
 
@@ -88,6 +93,8 @@ public struct FinanceEntryInput: Codable, Sendable, Equatable {
       try values.encode(required(amountMinor, .amountMinor), forKey: .amountMinor)
       try values.encode(required(date, .date), forKey: .date)
       try values.encode(required(category, .category), forKey: .category)
+      // Absent means the main account; an older server rejects an unknown or empty field.
+      if let accountId, !accountId.isEmpty { try values.encode(accountId, forKey: .accountId) }
     case .account:
       try values.encode(required(valueMinor, .valueMinor), forKey: .valueMinor)
       try values.encode(required(asOf, .asOf), forKey: .asOf)
@@ -146,6 +153,10 @@ public struct FinanceEntry: Codable, Sendable, Equatable, Identifiable {
   public var category: String? {
     get { input.category }
     set { input.category = newValue }
+  }
+  public var accountId: String? {
+    get { input.accountId }
+    set { input.accountId = newValue }
   }
   public var fromAccountId: String? {
     get { input.fromAccountId }
@@ -209,6 +220,14 @@ public enum FinanceLedger {
       - (entry.fromAccountId == accountID ? entry.amountMinor ?? 0 : 0)
   }
 
+  /// Income and expense belong to the main account unless they name another account.
+  public static func operationDelta(_ entry: FinanceEntry, accountID: String, isMain: Bool) -> Int {
+    guard entry.type == .income || entry.type == .expense else { return 0 }
+    let belongs = entry.accountId == nil ? isMain : entry.accountId == accountID
+    guard belongs else { return 0 }
+    return entry.type == .income ? entry.amountMinor ?? 0 : -(entry.amountMinor ?? 0)
+  }
+
   public static func accountBalance(
     entries: [FinanceEntry], currency: FinanceCurrency, today: String
   ) -> Int? {
@@ -219,12 +238,8 @@ public enum FinanceLedger {
       guard entry.currency == currency, let date = entry.date, date >= asOf, date <= today else {
         continue
       }
-      switch entry.type {
-      case .transfer: balance += delta(entry, accountID: account.id)
-      case .income: balance += entry.amountMinor ?? 0
-      case .expense: balance -= entry.amountMinor ?? 0
-      default: break
-      }
+      balance += delta(entry, accountID: account.id)
+      balance += operationDelta(entry, accountID: account.id, isMain: true)
     }
     return balance
   }
@@ -236,10 +251,10 @@ public enum FinanceLedger {
       let asOf = deposit.asOf, asOf <= today, var balance = deposit.valueMinor
     else { return nil }
     for entry in entries {
-      guard entry.type == .transfer, entry.currency == deposit.currency,
-        let date = entry.date, date >= asOf, date <= today
+      guard entry.currency == deposit.currency, let date = entry.date, date >= asOf, date <= today
       else { continue }
       balance += delta(entry, accountID: deposit.id)
+      balance += operationDelta(entry, accountID: deposit.id, isMain: false)
     }
     return balance
   }
