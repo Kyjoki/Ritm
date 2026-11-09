@@ -9,6 +9,14 @@ function transferDelta(entry: FinanceEntry, accountId: string): number {
   );
 }
 
+/** Income and expense belong to the main account unless they name another account. */
+function operationDelta(entry: FinanceEntry, accountId: string, isMain: boolean): number {
+  if (entry.type !== 'income' && entry.type !== 'expense') return 0;
+  const belongs = entry.accountId === undefined ? isMain : entry.accountId === accountId;
+  if (!belongs) return 0;
+  return entry.type === 'income' ? entry.amountMinor : -entry.amountMinor;
+}
+
 /** Opening balance is the amount before transactions on its asOf date. */
 export function calculateAccountBalance(
   entries: FinanceEntry[],
@@ -23,12 +31,11 @@ export function calculateAccountBalance(
   return entries.reduce((balance, entry) => {
     if (entry.currency !== currency || !('date' in entry)) return balance;
     if (entry.date < account.asOf || entry.date > today) return balance;
-    if (entry.type === 'transfer') return balance + transferDelta(entry, account.id);
-    return balance + (entry.type === 'income' ? entry.amountMinor : -entry.amountMinor);
+    return balance + transferDelta(entry, account.id) + operationDelta(entry, account.id, true);
   }, account.valueMinor);
 }
 
-/** Existing deposit valuations remain the opening snapshot; transfers do not overwrite it. */
+/** Existing deposit valuations remain the opening snapshot; transfers and operations adjust it. */
 export function calculateDepositBalance(
   entries: FinanceEntry[],
   depositId: string,
@@ -41,12 +48,12 @@ export function calculateDepositBalance(
   if (!deposit || deposit.asOf > today) return null;
   return entries.reduce((balance, entry) => {
     if (
-      entry.type !== 'transfer' ||
+      !('date' in entry) ||
       entry.currency !== deposit.currency ||
       entry.date < deposit.asOf ||
       entry.date > today
     )
       return balance;
-    return balance + transferDelta(entry, deposit.id);
+    return balance + transferDelta(entry, deposit.id) + operationDelta(entry, deposit.id, false);
   }, deposit.valueMinor);
 }

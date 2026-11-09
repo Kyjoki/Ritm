@@ -461,9 +461,15 @@ export const FinancePage = memo(function FinancePage({
             (entry.type === 'transfer' &&
               (entry.fromAccountId === account?.id || entry.toAccountId === account?.id)) ||
             ((entry.type === 'income' || entry.type === 'expense') &&
+              (entry.accountId === undefined || entry.accountId === account?.id) &&
               (!account || (entry.date >= account.asOf && entry.date <= today))))) ||
         (view === 'deposits' &&
           ((entry.type === 'deposit' && (!selectedDeposit || entry.id === selectedDeposit.id)) ||
+            ((entry.type === 'income' || entry.type === 'expense') &&
+              entry.accountId !== undefined &&
+              (selectedDeposit
+                ? entry.accountId === selectedDeposit.id
+                : depositEntries.some((deposit) => deposit.id === entry.accountId))) ||
             (entry.type === 'transfer' &&
               (!selectedDeposit ||
                 entry.fromAccountId === selectedDeposit.id ||
@@ -681,6 +687,9 @@ export const FinancePage = memo(function FinancePage({
               amountMinor: minor,
               date: form.date,
               category: form.category.trim(),
+              ...(editing && 'accountId' in editing && editing.accountId
+                ? { accountId: editing.accountId }
+                : {}),
               ...common,
             }
           : form.type === 'account'

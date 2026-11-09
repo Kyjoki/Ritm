@@ -55,6 +55,8 @@ export type FinanceEntryInput =
       currency: FinanceCurrency;
       date: string;
       category: string;
+      /** Account or deposit of the same currency; absent means the main account. */
+      accountId?: string;
       note: string;
     }
   | {
@@ -63,6 +65,8 @@ export type FinanceEntryInput =
       currency: FinanceCurrency;
       date: string;
       category: string;
+      /** Account or deposit of the same currency; absent means the main account. */
+      accountId?: string;
       note: string;
     }
   | {
