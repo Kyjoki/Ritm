@@ -144,7 +144,11 @@ struct SettingsListRow<Trailing: View>: View {
           .accessibilityHidden(true)
       }
       labels
+      // The value on the right keeps its natural width. Without this the label's priority squeezed
+      // it to nothing, so «UTC+5» or «Завершить» wrapped letter by letter and stretched the row.
       trailing
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
       switch accessory {
       case .none: EmptyView()
       case .chevron:
