@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
 } from 'react';
@@ -86,6 +87,9 @@ const VIEW_LABELS: Record<CalendarView, string> = { day: 'День', week: 'Не
 const WEEKDAYS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 const INITIAL_HOUR = 9;
+const FIT_VISIBLE_HOURS = 9.5;
+const MIN_VISUAL_HOUR_HEIGHT = 44;
+const MAX_HOUR_HEIGHT = 160;
 const EMPTY_GOOGLE_EVENTS: GoogleCalendarEvent[] = [];
 const MOTION_ENTRIES =
   '.cal-grid-event, .cal-all-day-event, .cal-month-event, .cal-agenda-entry, .cal-month-dot';
@@ -249,7 +253,9 @@ export function CalendarPage({
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches,
   );
   const gridMetrics = isMobile ? CALENDAR_GRID_METRICS.mobile : CALENDAR_GRID_METRICS.desktop;
-  const { hourHeight, timeColumn } = gridMetrics;
+  const [fitHourHeight, setFitHourHeight] = useState<number | null>(null);
+  const hourHeight = isMobile ? gridMetrics.hourHeight : (fitHourHeight ?? gridMetrics.hourHeight);
+  const { timeColumn } = gridMetrics;
   const [view, setView] = useState<CalendarView>('week');
   const [eventPicker, setEventPicker] = useState<{ date: string; keys: string[] } | null>(null);
   const [preview, setPreview] = useState<{ date: string; key: string } | null>(null);
@@ -316,11 +322,22 @@ export function CalendarPage({
     const scroll = gridScrollRef.current;
     const panel = motionPanelRef.current;
     if (!scroll || !panel) return;
-    const alignColumns = () =>
+    const alignColumns = () => {
       panel.style.setProperty(
         '--cal-scrollbar-gutter',
         `${scroll.offsetWidth - scroll.clientWidth}px`,
       );
+      if (isMobile) return;
+      // Desktop rows scale with the panel: about 9-10 hours fit, never below 44 visual px.
+      const pageZoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+      const next = Math.round(
+        Math.min(
+          MAX_HOUR_HEIGHT,
+          Math.max(MIN_VISUAL_HOUR_HEIGHT / pageZoom, scroll.clientHeight / FIT_VISIBLE_HOURS),
+        ),
+      );
+      setFitHourHeight((current) => (current === next ? current : next));
+    };
     alignColumns();
     const observer = new ResizeObserver(alignColumns);
     observer.observe(scroll);
@@ -525,9 +542,13 @@ export function CalendarPage({
     }
     const period = `${view}:${selectedDate}:${hourHeight}`;
     if (!gridScrollRef.current || scrolledPeriodRef.current === period) return;
-    gridScrollRef.current.scrollTop = INITIAL_HOUR * hourHeight;
+    const showsToday = periodDays.includes(today);
+    const startHour = showsToday
+      ? Math.max(0, minutesInZone(timeZone, new Date()) / 60 - 1)
+      : INITIAL_HOUR - 1;
+    gridScrollRef.current.scrollTop = startHour * hourHeight;
     scrolledPeriodRef.current = period;
-  }, [isMobile, view, selectedDate, hourHeight]);
+  }, [isMobile, view, selectedDate, hourHeight, periodDays, today, timeZone]);
   const visibleCount = occurrencesByDay.reduce((total, day) => total + day.entries.length, 0);
   const noDateTasks = tasks.filter((task) => task.date === null && !task.completed);
   const periodLabel =
@@ -550,7 +571,7 @@ export function CalendarPage({
     setSelectedDate(today);
     window.requestAnimationFrame(() =>
       gridScrollRef.current?.scrollTo({
-        top: Math.max(0, (minutesInZone(timeZone, new Date()) / 60) * hourHeight - hourHeight * 2),
+        top: Math.max(0, (minutesInZone(timeZone, new Date()) / 60) * hourHeight - hourHeight),
         behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
           ? 'instant'
           : 'smooth',
@@ -906,7 +927,17 @@ export function CalendarPage({
             </button>
           ) : null}
         </div>
-        <div className="cal-segment" role="group" aria-label={t('Вид календаря')}>
+        <div
+          className="cal-segment"
+          role="group"
+          aria-label={t('Вид календаря')}
+          style={
+            {
+              '--n': 3,
+              '--i': (Object.keys(VIEW_LABELS) as CalendarView[]).indexOf(view),
+            } as CSSProperties
+          }
+        >
           {(Object.keys(VIEW_LABELS) as CalendarView[]).map((value) => (
             <button
               key={value}

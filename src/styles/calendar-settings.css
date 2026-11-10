@@ -2581,6 +2581,161 @@
     font-size: 0;
   }
 }
+/* Desktop calendar: one compact toolbar row, a panel that fills the window, only the hour grid scrolls. */
+@media (min-width: 761px) {
+  .main-content:has(.page-container[data-page='calendar']) {
+    padding-inline: 16px;
+  }
+  .main-content:has(.page-container[data-page='calendar']) .app-footer {
+    display: none;
+  }
+  .cal-page {
+    --cal-vh: 100dvh;
+    --cal-gap: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: calc(var(--cal-vh) - var(--cal-topbar, 0px));
+    min-height: 460px;
+  }
+  .cal-page .cal-toolbar {
+    flex: none;
+    margin: 0;
+    padding: 0 43px 0 0;
+    min-height: 0;
+    gap: 8px;
+  }
+  .cal-page .cal-toolbar-title {
+    white-space: nowrap;
+  }
+  .cal-page .cal-period h2 {
+    min-width: 0;
+    white-space: nowrap;
+  }
+  .cal-page .cal-sync-footer {
+    margin-left: auto;
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+  .cal-page .cal-sync-footer:not(.cal-google-status-warning) .cal-google-status-copy strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cal-page .cal-toolbar {
+    flex-wrap: nowrap;
+  }
+  .cal-page .cal-sync-footer.cal-google-status-warning {
+    flex: 0 1 auto;
+    min-height: 44px;
+  }
+  .cal-page .cal-sync-footer .cal-google-status-copy > span {
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .cal-page .cal-toolbar > * {
+    flex-shrink: 0;
+  }
+  .cal-page .cal-toolbar > .cal-sync-footer {
+    flex-shrink: 1;
+  }
+  .cal-page .cal-calendar-panel,
+  .cal-page .cal-month-panel {
+    flex: 1 1 0;
+    height: auto;
+    min-height: 0;
+  }
+  .cal-page .cal-calendar-panel {
+    padding: 4px 10px 0;
+  }
+  .cal-page .cal-grid-scroll {
+    overscroll-behavior: contain;
+  }
+  .cal-page .cal-all-day {
+    padding: 5px 0;
+  }
+  .cal-page .cal-month-panel {
+    padding: 8px 10px 10px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .cal-page .cal-month-grid {
+    flex: 1;
+    min-height: 0;
+    height: auto;
+    gap: 6px;
+    grid-template-rows: auto repeat(6, minmax(0, 1fr));
+  }
+  .cal-page .cal-weekday {
+    padding: 0 0 2px;
+  }
+  .cal-page .cal-month-cell {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border-radius: 10px;
+  }
+  .cal-page .cal-month-day {
+    flex: none;
+    padding: 6px 8px 3px;
+  }
+  .cal-page .cal-month-events {
+    min-height: 0;
+    overflow: hidden;
+    gap: 3px;
+    padding: 0 5px 5px;
+  }
+  .cal-page .cal-month-event {
+    padding: 3px 6px;
+    font-size: 12px;
+    border-left: 2px solid var(--calendar-event-border, var(--accent));
+    border-radius: 4px;
+  }
+  .cal-page .cal-month-add {
+    bottom: 4px;
+  }
+  /* Event blocks follow the approved prototype: 1 px border, 2 px accent edge, title + time. */
+  .cal-page .cal-grid-event {
+    padding: 4px 4px 4px 6px;
+    border: 1px solid
+      var(--calendar-event-border, color-mix(in srgb, var(--accent) 40%, transparent));
+    border-left-width: 2px;
+    border-radius: 4px;
+  }
+  .cal-page .cal-grid-event.cal-compact-event {
+    padding-block: 2px;
+  }
+  .cal-page .cal-day-column {
+    border-left-color: color-mix(in srgb, var(--line) 45%, transparent);
+  }
+  .cal-page .cal-free-slot,
+  .cal-page .cal-free-slot:nth-child(odd) {
+    border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  }
+  .cal-page .cal-free-slot:nth-child(even) {
+    border-top: 1px dashed color-mix(in srgb, var(--line) 22%, transparent);
+  }
+  .cal-page .cal-now-line {
+    height: 2px;
+  }
+  .cal-page .cal-secondary {
+    display: none;
+  }
+  .cal-page .cal-calendar-panel,
+  .cal-page .cal-month-panel {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    border-bottom-width: 0;
+  }
+}
+@media (min-width: 1200px) {
+  .cal-page {
+    --cal-vh: 125dvh;
+    --cal-gap: 15px;
+  }
+}
 .settings-security-row {
   display: flex;
   align-items: center;

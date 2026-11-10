@@ -10,7 +10,8 @@
       "claude/ritm-session-keep": false,
       "claude/ritm-workouts-redesign": false,
       "claude/ritm-card-operations": false,
-      "claude/ritm-card-operations-server": false
+      "claude/ritm-card-operations-server": false,
+      "claude/ritm-web-habits": false
     }
   },
   "framework": "vite",
