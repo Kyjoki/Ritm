@@ -125,7 +125,7 @@
 .fin-stack[data-motion='slide'] {
   --fin-h-dur: 300ms;
 }
-.fin-card {
+.fin .fin-card {
   --kbg: var(--fin-k-violet);
   --kglow: var(--fin-g-violet);
   position: absolute;

@@ -275,6 +275,12 @@
     height: var(--dtop-h);
     max-width: 1240px;
     gap: 12px;
+    /* The bar spans the whole top edge, over the page's own header actions (Финансы, Привычки...):
+       only its real controls take clicks, the rest lets them through. */
+    pointer-events: none;
+  }
+  .ritm-glass .workspace-top .theme-switch {
+    pointer-events: auto;
   }
   .ritm-glass .main-content:has(.page-container[data-page='calendar']) .workspace-top {
     max-width: none;
