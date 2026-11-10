@@ -16,7 +16,8 @@
       "claude/ritm-card-operations-server": false,
       "claude/ritm-web-habits": false,
       "claude/ritm-web-workouts": false,
-      "claude/ritm-web-finance": false
+      "claude/ritm-web-finance": false,
+      "claude/ritm-web-motion": false
     }
   },
   "framework": "vite",

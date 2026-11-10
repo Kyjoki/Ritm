@@ -1,4 +1,5 @@
-/* Finance: tokens, totals and the wallet stack (the active card sits in front, the rest peek out above it). */
+/* Finance: tokens, totals and the wallet. Collapsed, the active card sits in front and the rest peek out above it;
+   a tap opens the stack into a carousel with the selected card centred (geometry in finance-stack.ts). */
 .fin {
   --fin-income: #2a7f66;
   --fin-income-bg: rgba(116, 189, 158, 0.16);
@@ -100,17 +101,29 @@
 }
 
 /* ---- stack ---- */
+.fin-wallet {
+  container-type: inline-size;
+  margin-top: 4px;
+}
 .fin-stack {
+  --fin-card-h: calc(100cqw * 54 / 85.6);
   position: relative;
   isolation: isolate;
-  padding-top: calc((var(--n) - 1) * 44px);
-  margin-top: 4px;
-  padding-bottom: 16px;
+  overflow-x: clip;
+  height: calc((var(--n) - 1) * 44px + var(--fin-card-h) + 16px);
+  transition: height calc(var(--fin-mv) * var(--fin-h-dur, 480ms) + 1ms) var(--fin-ease);
 }
-.fin-stack::before {
-  content: '';
-  display: block;
-  aspect-ratio: 85.6 / 54;
+.fin-stack[data-open='true'] {
+  height: calc(var(--fin-card-h) * 0.857143 + 84px);
+}
+.fin-stack[data-motion='open'] {
+  --fin-h-dur: 480ms;
+}
+.fin-stack[data-motion='close'] {
+  --fin-h-dur: 420ms;
+}
+.fin-stack[data-motion='slide'] {
+  --fin-h-dur: 300ms;
 }
 .fin-card {
   --kbg: var(--fin-k-violet);
@@ -131,11 +144,11 @@
   overflow: hidden;
   cursor: pointer;
   transform-origin: 50% 0;
-  transform: translate3d(0, var(--ty, 0), 0) scale(var(--s, 1));
-  filter: brightness(var(--br, 1));
+  will-change: transform;
   box-shadow: 0 16px 30px -16px var(--fin-card-drop);
   transition:
-    transform calc(var(--fin-mv) * 380ms + 1ms) var(--fin-ease),
+    transform calc(var(--fin-mv) * var(--dur, 380ms) + 1ms) var(--fin-ease)
+      calc(var(--fin-mv) * var(--delay, 0ms)),
     filter 0.3s ease,
     box-shadow 0.3s ease;
   -webkit-tap-highlight-color: transparent;
@@ -279,10 +292,10 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.fin-card:not(.is-front) .fin-card-face {
+.fin-card.is-strip .fin-card-face {
   opacity: 0;
 }
-.fin-card:not(.is-front) .fin-card-strip {
+.fin-card.is-strip .fin-card-strip {
   opacity: 1;
 }
 .fin-card-check {
@@ -307,10 +320,109 @@
   transform: scale(1);
   transition-delay: 0.18s;
 }
+
+/* ---- carousel: dots, hint, screen-reader status ---- */
+.fin-dots,
+.fin-cap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 101;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.22s,
+    visibility 0s 0.22s;
+}
+.fin-dots {
+  bottom: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+}
+.fin-stack[data-open='true'] .fin-dots {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 0.25s 0.18s,
+    visibility 0s;
+}
+.fin-dot {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.fin-dot::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--hover);
+  transition:
+    width 0.25s var(--fin-ease),
+    background 0.25s;
+}
+.fin-dot[aria-current='true']::before {
+  width: 20px;
+  background: var(--accent);
+}
+.fin-dot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -6px;
+  border-radius: 12px;
+}
+.fin-cap {
+  bottom: 4px;
+  margin: 0;
+  font-size: 11px;
+  text-align: center;
+  color: var(--muted);
+  pointer-events: none;
+}
+.fin-stack[data-open='true'] .fin-cap {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.3s 0.3s;
+}
+.fin-stack .fin-cap.is-gone {
+  opacity: 0;
+  visibility: hidden;
+}
+.fin-stack > [role='status'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@keyframes fin-card-fade-a {
+  from {
+    opacity: 0.35;
+  }
+}
+@keyframes fin-card-fade-b {
+  from {
+    opacity: 0.35;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .fin-card,
-  .fin-card-check {
+  .fin-card-check,
+  .fin-stack {
     transition-duration: 1ms;
     transition-delay: 0s;
+  }
+  /* Reduce Motion: no travel, a short fade on every open, collapse and selection change. */
+  .fin-stack[data-flip='0'] .fin-card {
+    animation: fin-card-fade-a 120ms ease both;
+  }
+  .fin-stack[data-flip='1'] .fin-card {
+    animation: fin-card-fade-b 120ms ease both;
   }
 }

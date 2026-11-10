@@ -16,6 +16,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { ApiError } from '../lib/api';
+import { revealTheme } from '../lib/theme-reveal';
 import '../styles/login.css';
 
 export interface LoginCredentials {
@@ -107,7 +108,10 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
             type="button"
             className="signin-theme"
             aria-label={theme === 'dark' ? t('Светлая тема') : t('Тёмная тема')}
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            data-theme-toggle=""
+            onClick={(event) =>
+              revealTheme(() => setTheme(theme === 'dark' ? 'light' : 'dark'), event.currentTarget)
+            }
           >
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </button>

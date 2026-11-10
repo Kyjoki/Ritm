@@ -293,3 +293,31 @@
 .motion-v2 [data-motion-offscreen='true']::after {
   animation-play-state: paused !important;
 }
+
+/* ---- theme switch: the new theme grows as a circle from the toggle (src/lib/theme-reveal.ts) ---- */
+.theme-reveal::view-transition-group(root),
+.theme-reveal::view-transition-old(root),
+.theme-reveal::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+.theme-reveal::view-transition-old(root) {
+  z-index: 1;
+}
+.theme-reveal::view-transition-new(root) {
+  z-index: 2;
+}
+.theme-vt-fade::view-transition-group(root) {
+  animation-duration: var(--theme-fade-ms, 120ms);
+}
+.theme-fade *,
+.theme-fade *::before,
+.theme-fade *::after {
+  transition:
+    background-color var(--theme-fade-ms, 250ms) ease,
+    color var(--theme-fade-ms, 250ms) ease,
+    border-color var(--theme-fade-ms, 250ms) ease,
+    fill var(--theme-fade-ms, 250ms) ease,
+    stroke var(--theme-fade-ms, 250ms) ease,
+    box-shadow var(--theme-fade-ms, 250ms) ease !important;
+}

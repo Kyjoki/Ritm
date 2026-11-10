@@ -2,7 +2,8 @@ import type { CSSProperties } from 'react';
 import { RefreshCw } from 'lucide-react';
 import type { FinanceCurrency } from '../../../shared/types';
 import { useI18n } from '../../lib/i18n';
-import { FinanceTotals, WalletStack } from './FinanceWallet';
+import { FinanceTotals } from './FinanceWallet';
+import { WalletStack } from './WalletStack';
 import type { FinanceCard } from './finance-wallet';
 
 /** Left column: totals per currency, the wallet stack and the refresh control. */

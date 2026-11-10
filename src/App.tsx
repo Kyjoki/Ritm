@@ -32,6 +32,7 @@ import type {
 import { api, ApiError } from './lib/api';
 import { useI18n, getLanguage, translate } from './lib/i18n';
 import { dateInZone, minutesInZone } from './lib/date';
+import { revealTheme } from './lib/theme-reveal';
 import { addDays, getDayOccurrences, isTimedOccurrence } from './features/calendar-utils';
 import { CalendarPage } from './features/CalendarPage';
 import { SettingsPage } from './features/SettingsPage';
@@ -258,11 +259,22 @@ export default function App() {
     };
   }, [data?.settings.notifications]);
   const theme = data?.settings.theme;
+  const themeShown = useRef(false);
+  const applyTheme = useCallback((next: 'light' | 'dark', trigger?: Element | null) => {
+    const root = document.documentElement;
+    const apply = () => {
+      root.dataset.theme = next;
+      setResolvedTheme(next);
+    };
+    const changed = themeShown.current && root.dataset.theme !== next;
+    themeShown.current = true;
+    if (changed) revealTheme(apply, trigger);
+    else apply();
+  }, []);
   useEffect(() => {
     if (page === 'login-preview') return;
     if (previewTheme) {
-      document.documentElement.dataset.theme = previewTheme;
-      setResolvedTheme(previewTheme);
+      applyTheme(previewTheme);
       return;
     }
     const media = window.matchMedia('(prefers-color-scheme: dark)');
@@ -279,8 +291,7 @@ export default function App() {
       }
       const resolved =
         selected === 'dark' || (selected === 'system' && media.matches) ? 'dark' : 'light';
-      document.documentElement.dataset.theme = resolved;
-      setResolvedTheme(resolved);
+      applyTheme(resolved);
     };
     update();
     media.addEventListener('change', update);
@@ -291,7 +302,7 @@ export default function App() {
         /* storage may be unavailable */
       }
     return () => media.removeEventListener('change', update);
-  }, [theme, page, previewTheme]);
+  }, [theme, page, previewTheme, applyTheme]);
   useEffect(() => {
     document.title = `${tr(page === 'login-preview' ? tr('Вход') : (navigation.find((n) => n.id === page)?.label ?? tr('Мой день')))} — Ritm`;
   }, [page, tr]);
@@ -647,15 +658,18 @@ export default function App() {
     setMigrationLoading(false);
     setMigrationError('');
   };
-  const themeToggle = async () => {
+  const themeToggle = async (trigger: Element) => {
     if (previewTheme) {
       setPreviewTheme(previewTheme === 'dark' ? 'light' : 'dark');
       return;
     }
     if (!data) return;
+    const next = resolvedTheme === 'dark' ? 'light' : 'dark';
+    applyTheme(next, trigger);
     try {
-      await saveSettings({ ...data.settings, theme: resolvedTheme === 'dark' ? 'light' : 'dark' });
+      await saveSettings({ ...data.settings, theme: next });
     } catch (e) {
+      applyTheme(resolvedTheme, trigger);
       handleError(e);
     }
   };
@@ -791,7 +805,8 @@ export default function App() {
           </p>
           <button
             className="icon-button theme-switch"
-            onClick={() => void themeToggle()}
+            data-theme-toggle=""
+            onClick={(event) => void themeToggle(event.currentTarget)}
             aria-label={
               resolvedTheme === 'dark' ? tr('Включить светлую тему') : tr('Включить тёмную тему')
             }
