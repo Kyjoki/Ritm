@@ -329,10 +329,11 @@ final class RitmStore {
   func removeWalletNotification(id: String) { notifications.removeWallet(ids: [id]) }
 
   /// Apply the acknowledged preferences before reconciliation. In particular,
-  /// a failed follow-up read must not reschedule reminders just switched off.
-  func saveSettings(_ value: AccountSettings) async -> AccountSettings? {
+  /// a failed follow-up read must not reschedule reminders just switched off. Only the fields
+  /// in `patch` are sent, so a value this phone did not touch is never overwritten.
+  func saveSettings(_ patch: AccountSettingsPatch) async -> AccountSettings? {
     await write { client in
-      let saved = try await client.saveSettings(value)
+      let saved = try await client.patchSettings(patch)
       self.bootstrap?.settings = saved
       if !saved.notifications { self.notifications.clear() }
       await client.setLanguage(saved.language)
@@ -344,13 +345,16 @@ final class RitmStore {
   /// starts light (public/theme-init.js).
   var theme: Theme { pendingTheme ?? bootstrap?.settings.theme ?? .light }
 
+  /// Shows a theme at once while its save is on the way; nil goes back to the account's theme.
+  func previewTheme(_ value: Theme?) { pendingTheme = value }
+
   /// The header toggle switches at once and saves the opposite of what is shown to the account.
   /// A failed save falls back to the server value.
   func toggleTheme(showingDark: Bool) async {
-    guard var settings = bootstrap?.settings, pendingTheme == nil else { return }
-    settings.theme = showingDark ? .light : .dark
-    pendingTheme = settings.theme
-    _ = await saveSettings(settings)
+    guard bootstrap != nil, pendingTheme == nil else { return }
+    let next: Theme = showingDark ? .light : .dark
+    pendingTheme = next
+    _ = await saveSettings(AccountSettingsPatch(theme: next))
     pendingTheme = nil
   }
 

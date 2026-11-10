@@ -8,6 +8,8 @@ struct FinanceCardSettingsSheet: View {
   let defaultCards: [FinanceCard]
   let layoutStore: FinanceCardLayoutStore
   let format: FinanceFormat
+  /// Pushed from Settings instead of presented as a sheet: no title and Done button, room for the bar.
+  var embedded = false
   @Environment(\.dismiss) private var dismiss
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -17,7 +19,7 @@ struct FinanceCardSettingsSheet: View {
     return ZStack {
       RitmBackground()
       VStack(spacing: 0) {
-        header
+        if embedded { hint } else { header }
         List {
           ForEach(cards) { card in
             row(card, cards: cards, theme: themes[card.id] ?? .violet)
@@ -30,6 +32,7 @@ struct FinanceCardSettingsSheet: View {
         .scrollContentBackground(.hidden)
         .environment(\.editMode, .constant(.active))
         .animation(reduceMotion ? nil : FinanceMotion.snap, value: cards.map(\.id))
+        .contentMargins(.bottom, embedded ? 130 : 0, for: .scrollContent)
       }
     }
     .presentationDetents([.medium, .large])
@@ -38,6 +41,19 @@ struct FinanceCardSettingsSheet: View {
   }
 
   // MARK: Header
+
+  private var hint: some View {
+    Text(
+      format.text(
+        "Перетащите за ручку, чтобы изменить порядок. Цвет меняется сразу.",
+        "Drag the handle to reorder. The colour changes right away.")
+    )
+    .ritmFont(13)
+    .foregroundStyle(RitmTheme.muted)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.horizontal, 20)
+    .padding(.vertical, 8)
+  }
 
   private var header: some View {
     VStack(alignment: .leading, spacing: 6) {

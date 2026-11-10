@@ -51,8 +51,8 @@ struct WalletFolderPicker: UIViewControllerRepresentable {
   }
 }
 
-/// The folder rows of the «Apple Wallet» card (`.s-wl-row`): the picker button with what Ritm sees
-/// right now, the import button, and a way to forget the folder.
+/// The folder part of the Wallet page: what Ritm sees
+/// right now, the import button, the picker and a way to forget the folder.
 struct WalletFolderPanel: View {
   @Environment(RitmStore.self) private var store
   @State private var choosing = false
@@ -62,27 +62,31 @@ struct WalletFolderPanel: View {
     let source = store.walletFolder
     let state = describe(source)
     VStack(alignment: .leading, spacing: 0) {
-      row(
-        button: SettingsSmallButton(title: pickTitle(source)) { choosing = true },
-        text: state.text, isProblem: state.isProblem,
-        extra: lastImportLine(source)
-      )
-      .accessibilityElement(children: .contain)
-      row(
-        button: SettingsSmallButton(title: store.text("Импортировать сейчас", "Import now")) {
+      SettingsGroup {
+        SettingsInfoRow(
+          icon: "folder", title: store.text("Папка «Ritm»", "Folder “Ritm”"), value: folderValue(source))
+        SettingsInfoRow(
+          title: store.text("Последний импорт", "Last import"),
+          value: SettingsTrailing(source.lastImport.map { formatted($0.date) } ?? "—"))
+      }
+      SettingsFootnote(text: state.text, tone: state.isProblem ? .error : .none)
+      if let extra = lastImportLine(source) { SettingsFootnote(text: extra) }
+      SettingsButtonStack {
+        SettingsActionButton(title: store.text("Импортировать сейчас", "Import now")) {
           Task { await store.importWalletFile(userInitiated: true) }
         }
-        .disabled(!source.isChosen || source.isReading),
+        .disabled(!source.isChosen || source.isReading)
+        SettingsActionButton(title: pickTitle(source), kind: .secondary) { choosing = true }
+        if source.isChosen {
+          SettingsActionButton(title: store.text("Забыть папку", "Forget folder"), kind: .dangerText) {
+            confirmingForget = true
+          }
+        }
+      }
+      SettingsFootnote(
         text: store.text(
           "Заберёт новые строки из purchases.txt в «Новые покупки». Ritm делает это сам при открытии.",
-          "Takes the new lines from purchases.txt into New purchases. Ritm also does this when it opens."),
-        isProblem: false, extra: nil
-      )
-      .padding(.top, 14)
-      if source.isChosen {
-        Button(store.text("Забыть папку", "Forget folder")) { confirmingForget = true }
-          .buttonStyle(SettingsTextButtonStyle())
-      }
+          "Takes the new lines from purchases.txt into New purchases. Ritm also does this when it opens."))
     }
     .sheet(isPresented: $choosing) {
       WalletFolderPicker(
@@ -109,19 +113,15 @@ struct WalletFolderPanel: View {
     }
   }
 
-  /// `.s-wl-row`: a button on the left, a muted paragraph filling the rest.
-  private func row(button: some View, text: String, isProblem: Bool, extra: String?) -> some View {
-    HStack(spacing: 10) {
-      button
-      VStack(alignment: .leading, spacing: 4) {
-        Text(text)
-          .ritmFont(11, lineSpacing: 3.5)
-          .foregroundStyle(isProblem ? RitmTheme.danger : RitmTheme.muted)
-          .fixedSize(horizontal: false, vertical: true)
-        if let extra { WalletNote(extra) }
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .accessibilityElement(children: .combine)
+  /// The short state of the folder for its row.
+  private func folderValue(_ source: WalletFolderSource) -> SettingsTrailing {
+    switch source.status {
+    case .ready: SettingsTrailing(store.text("Найдена", "Found"), .ok)
+    case .notChosen: SettingsTrailing(store.text("Не выбрана", "Not chosen"), .none)
+    case .downloading: SettingsTrailing(store.text("Загрузка", "Downloading"), .none)
+    case .fileMissing: SettingsTrailing(store.text("Нет файла", "No file"), .warn)
+    case .needsRepick: SettingsTrailing(store.text("Нужен доступ", "Access needed"), .warn)
+    case .failed: SettingsTrailing(store.text("Ошибка", "Error"), .error)
     }
   }
 

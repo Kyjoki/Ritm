@@ -246,8 +246,12 @@ public actor APIClient {
     return result.habit
   }
 
-  public func saveSettings(_ settings: AccountSettings) async throws -> AccountSettings {
-    try await request(path: ["settings"], method: "PATCH", body: encoded(settings))
+  /// Sends only the changed fields; the server merges them and answers with all settings.
+  public func patchSettings(_ patch: AccountSettingsPatch) async throws -> AccountSettings {
+    guard !patch.isEmpty else {
+      throw APIError(message: "Нет изменений.", status: 400, code: "INVALID_INPUT")
+    }
+    return try await request(path: ["settings"], method: "PATCH", body: encoded(patch))
   }
 
   public func googleStatus() async throws -> GoogleCalendarStatus {

@@ -2,11 +2,11 @@ import RitmCore
 import SwiftUI
 import UIKit
 
-/// «Apple Wallet»: how Apple Pay purchases reach Ritm through a Shortcuts automation. The
+/// «Как настроить» on the Wallet page: how Apple Pay purchases reach Ritm through a Shortcuts automation. The
 /// recommended mode writes each payment to a file in Files and shows a notification from
 /// Shortcuts, so Ritm does not open at every payment; the other mode opens Ritm through a link.
 /// Everything stays on this iPhone. Layout follows proto/sections/settings.js (`.s-wl-*`).
-struct WalletSettingsCard: View {
+struct WalletSetupGuide: View {
   private enum Mode: Hashable { case background, opensApp }
 
   @Environment(RitmStore.self) private var store
@@ -22,7 +22,7 @@ struct WalletSettingsCard: View {
   private var fileName: String { WalletFileImport.fileName }
 
   var body: some View {
-    SettingsCard(symbol: "wallet.pass", title: "Apple Wallet") {
+    RitmCard(padding: 20, radius: 24) {
       VStack(alignment: .leading, spacing: 0) {
         WalletNote(
           store.text(
@@ -98,7 +98,6 @@ struct WalletSettingsCard: View {
       templateBox(notificationText, label: store.text("Текст уведомления", "Notification text"))
         .padding(.top, 8)
       templateButtons(withNewLine: true).padding(.top, 10)
-      WalletFolderPanel().padding(.top, 14)
     }
   }
 
