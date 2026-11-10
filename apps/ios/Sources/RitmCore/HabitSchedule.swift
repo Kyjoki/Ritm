@@ -37,32 +37,87 @@ public enum HabitSchedule {
     return String(format: "%04d-%02d-%02d", parts.year!, parts.month!, parts.day!)
   }
 
-  public static func isValidDate(_ key: String) -> Bool { parsedDate(key) != nil }
+  public static func isValidDate(_ key: String) -> Bool { civilDays(key) != nil }
 
-  private static func parsedDate(_ key: String) -> Date? {
+  /// `yyyy-MM-dd` as a day number (days since 1970-01-01), nil for anything that is not a real
+  /// calendar day. Plain integer arithmetic: habit streaks and heatmaps ask for thousands of
+  /// these, so there is no `Calendar` and no formatting per call.
+  private static func civilDays(_ key: String) -> Int? {
     guard key.utf8.count == 10 else { return nil }
-    let parts = key.split(separator: "-", omittingEmptySubsequences: false)
-    guard parts.count == 3, parts[0].count == 4, parts[1].count == 2, parts[2].count == 2,
-      parts.allSatisfy({ $0.utf8.allSatisfy { (48...57).contains($0) } }),
-      let year = Int(parts[0]), year >= 1, let month = Int(parts[1]), let day = Int(parts[2]),
-      let date = calendar.date(from: DateComponents(year: year, month: month, day: day, hour: 12))
-    else { return nil }
-    let roundtrip = calendar.dateComponents([.year, .month, .day], from: date)
-    guard roundtrip.year == year, roundtrip.month == month, roundtrip.day == day else { return nil }
-    return date
+    var digits = [Int](repeating: 0, count: 8)
+    var position = 0
+    var filled = 0
+    for byte in key.utf8 {
+      defer { position += 1 }
+      if position == 4 || position == 7 {
+        guard byte == 45 else { return nil }
+        continue
+      }
+      guard (48...57).contains(byte) else { return nil }
+      digits[filled] = Int(byte) - 48
+      filled += 1
+    }
+    let year = digits[0] * 1000 + digits[1] * 100 + digits[2] * 10 + digits[3]
+    let month = digits[4] * 10 + digits[5]
+    let day = digits[6] * 10 + digits[7]
+    guard year >= 1, (1...12).contains(month), day >= 1, day <= daysInMonth(year, month) else {
+      return nil
+    }
+    return daysFromCivil(year, month, day)
   }
 
+  private static func daysInMonth(_ year: Int, _ month: Int) -> Int {
+    switch month {
+    case 2: return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 ? 29 : 28
+    case 4, 6, 9, 11: return 30
+    default: return 31
+    }
+  }
+
+  /// Howard Hinnant's `days_from_civil` for the proleptic Gregorian calendar.
+  private static func daysFromCivil(_ year: Int, _ month: Int, _ day: Int) -> Int {
+    let y = month <= 2 ? year - 1 : year
+    let era = (y >= 0 ? y : y - 399) / 400
+    let yearOfEra = y - era * 400
+    let dayOfYear = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1
+    let dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
+    return era * 146_097 + dayOfEra - 719_468
+  }
+
+  /// The inverse of `daysFromCivil` (`civil_from_days`).
+  private static func civilFromDays(_ days: Int) -> (year: Int, month: Int, day: Int) {
+    let z = days + 719_468
+    let era = (z >= 0 ? z : z - 146_096) / 146_097
+    let dayOfEra = z - era * 146_097
+    let yearOfEra = (dayOfEra - dayOfEra / 1460 + dayOfEra / 36_524 - dayOfEra / 146_096) / 365
+    let dayOfYear = dayOfEra - (365 * yearOfEra + yearOfEra / 4 - yearOfEra / 100)
+    let shifted = (5 * dayOfYear + 2) / 153
+    let day = dayOfYear - (153 * shifted + 2) / 5 + 1
+    let month = shifted < 10 ? shifted + 3 : shifted - 9
+    let year = yearOfEra + era * 400 + (month <= 2 ? 1 : 0)
+    return (year, month, day)
+  }
+
+  private static func key(forDays days: Int) -> String? {
+    let parts = civilFromDays(days)
+    guard (1...9999).contains(parts.year) else { return nil }
+    let year = String(parts.year)
+    return String(repeating: "0", count: 4 - year.count) + year + "-" + twoDigits(parts.month)
+      + "-" + twoDigits(parts.day)
+  }
+
+  private static func twoDigits(_ value: Int) -> String { value < 10 ? "0\(value)" : "\(value)" }
+
   public static func addDays(to key: String, days: Int) -> String? {
-    guard let date = parsedDate(key),
-      let shifted = calendar.date(byAdding: .day, value: days, to: date)
-    else { return nil }
-    return dateKey(shifted, timeZone: "UTC")
+    guard let day = civilDays(key) else { return nil }
+    return Self.key(forDays: day + days)
   }
 
   /// Sunday = 0, matching the persisted web schedule.
   public static func weekday(_ key: String) -> Int? {
-    guard let date = parsedDate(key) else { return nil }
-    return calendar.component(.weekday, from: date) - 1
+    guard let day = civilDays(key) else { return nil }
+    // 1970-01-01 was a Thursday.
+    return ((day % 7) + 7 + 4) % 7
   }
 
   public static func week(containing key: String) -> [String] {
