@@ -20,6 +20,8 @@ struct WorkoutExerciseCard: View {
   let itemID: String
   @Binding var selection: WorkoutSetSelection?
   let ticked: (WorkoutSessionItem.TickResult) -> Void
+  /// Opens the sheet that changes this exercise in the running workout.
+  let options: () -> Void
 
   private var workouts: WorkoutStore { store.workouts }
 
@@ -38,22 +40,7 @@ struct WorkoutExerciseCard: View {
             previous: item.previous?.set(at: index), selection: $selection, ticked: ticked)
         }
         if let chosen = effectiveSelection(item, active: active) { stepper(item, chosen) }
-        Button {
-          withAnimation(RitmMotion.easeOut(0.25)) { workouts.addSet(item: itemID) }
-        } label: {
-          HStack(spacing: 6) {
-            RitmSymbol("plus").font(.system(size: 15))
-            Text(store.text("Подход", "Set")).ritmFont(13, weight: .semibold)
-          }
-          .foregroundStyle(RitmTheme.accentColor)
-          .frame(maxWidth: .infinity, minHeight: 44)
-          .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-          .contentShape(Rectangle())
-        }
-        .buttonStyle(RitmPressStyle())
-        .padding(.horizontal, 4).padding(.top, 6)
-        .disabled(item.sets.count >= WorkoutSessionItem.maxSets)
-        .accessibilityLabel(store.text("Добавить подход", "Add a set"))
+        setCountButtons(item)
       }
       .padding(.top, 14).padding(.bottom, 10).padding(.horizontal, 10)
       .background { RitmPanelBackground(radius: 22) }
@@ -61,15 +48,60 @@ struct WorkoutExerciseCard: View {
   }
 
   private func header(_ item: WorkoutSessionItem) -> some View {
-    HStack(alignment: .firstTextBaseline, spacing: 8) {
+    HStack(alignment: .center, spacing: 8) {
       Text(item.name).ritmFont(19, weight: .bold, tracking: -0.04).foregroundStyle(RitmTheme.text)
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityAddTraits(.isHeader)
       Text("\(item.doneCount)/\(item.sets.count)")
         .ritmFont(12, weight: .semibold).foregroundStyle(RitmTheme.muted).monospacedDigit()
+      Button(action: options) {
+        RitmSymbol("slider.horizontal.3").font(.system(size: 17))
+          .foregroundStyle(RitmTheme.accentColor)
+          .frame(width: 44, height: 44).contentShape(Rectangle())
+      }
+      .buttonStyle(RitmPressStyle(scale: 0.92))
+      .padding(.vertical, -8).padding(.trailing, -6)
+      .accessibilityLabel(store.text("Изменить упражнение в этой тренировке", "Edit the exercise in this workout"))
     }
     .padding(.horizontal, 6).padding(.bottom, 10)
+  }
+
+  /// «− Подход» removes the last set that is not done, «+ Подход» adds one.
+  private func setCountButtons(_ item: WorkoutSessionItem) -> some View {
+    let canRemove = item.sets.count > 1 && item.sets.contains { !$0.done }
+    return HStack(spacing: 8) {
+      setCountButton(
+        symbol: "minus", title: store.text("Подход", "Set"), enabled: canRemove,
+        label: store.text("Убрать последний невыполненный подход", "Remove the last unfinished set")
+      ) { workouts.removeLastOpenSet(item: itemID) }
+      setCountButton(
+        symbol: "plus", title: store.text("Подход", "Set"),
+        enabled: item.sets.count < WorkoutSessionItem.maxSets,
+        label: store.text("Добавить подход", "Add a set")
+      ) { workouts.addSet(item: itemID) }
+    }
+    .padding(.horizontal, 4).padding(.top, 6)
+  }
+
+  private func setCountButton(
+    symbol: String, title: String, enabled: Bool, label: String, action: @escaping () -> Void
+  ) -> some View {
+    Button {
+      withAnimation(RitmMotion.easeOut(0.25)) { action() }
+    } label: {
+      HStack(spacing: 6) {
+        RitmSymbol(symbol).font(.system(size: 15))
+        Text(title).ritmFont(13, weight: .semibold)
+      }
+      .foregroundStyle(RitmTheme.accentColor)
+      .frame(maxWidth: .infinity, minHeight: 44)
+      .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(RitmPressStyle())
+    .disabled(!enabled).opacity(enabled ? 1 : 0.4)
+    .accessibilityLabel(label)
   }
 
   private var columnTitles: some View {

@@ -17,7 +17,7 @@ struct WorkoutHeroCard: View {
   private var russian: Bool { store.language == .ru }
   private var dayNames: [String] {
     russian
-      ? ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"] : ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+      ? ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"] : ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
   }
 
   var body: some View {

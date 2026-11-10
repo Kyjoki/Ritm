@@ -1,9 +1,9 @@
 import Foundation
 
-/// One day of the week strip on «Тренировки» (Monday first).
+/// One day of the week strip on «Тренировки» (Sunday first, like Calendar and Habits).
 public struct WorkoutWeekDay: Equatable, Sendable {
   public let key: String
-  /// 0 = Monday … 6 = Sunday.
+  /// 0 = Sunday … 6 = Saturday.
   public let index: Int
   public let isDone: Bool
   public let isToday: Bool
@@ -24,14 +24,15 @@ public enum WorkoutStats {
   /// Workouts per week when no habit is linked.
   public static let fallbackGoal = 4
 
-  /// The Monday of the week that contains `key`.
-  public static func monday(of key: String) -> String? {
+  /// The Sunday that starts the week containing `key`: the Calendar and Habits screens begin
+  /// their weeks on Sunday too.
+  public static func weekStart(of key: String) -> String? {
     guard let weekday = HabitSchedule.weekday(key) else { return nil }
-    return HabitSchedule.addDays(to: key, days: -((weekday + 6) % 7))
+    return HabitSchedule.addDays(to: key, days: -weekday)
   }
 
   private static func weekKeys(containing key: String) -> [String] {
-    guard let start = monday(of: key) else { return [] }
+    guard let start = weekStart(of: key) else { return [] }
     return (0..<7).compactMap { HabitSchedule.addDays(to: start, days: $0) }
   }
 
@@ -71,11 +72,11 @@ public enum WorkoutStats {
     return WorkoutWeek(days: days, done: 0, goal: 0, habitTitle: nil)
   }
 
-  /// Kilograms lifted in the week that starts on `monday`.
-  public static func volume(_ history: WorkoutHistory, weekStarting monday: String, timeZone: String)
+  /// Kilograms lifted in the week that starts on `weekStart` (a Sunday).
+  public static func volume(_ history: WorkoutHistory, weekStarting weekStart: String, timeZone: String)
     -> Double
   {
-    let keys = Set(weekKeys(containing: monday))
+    let keys = Set(weekKeys(containing: weekStart))
     return history.records
       .filter { keys.contains(HabitSchedule.dateKey($0.endedAt, timeZone: timeZone)) }
       .reduce(0) { $0 + $1.volume }
@@ -85,7 +86,7 @@ public enum WorkoutStats {
   public static func volumeTrend(_ history: WorkoutHistory, today: String, timeZone: String)
     -> (volume: Double, percent: Int?)
   {
-    guard let start = monday(of: today), let previous = HabitSchedule.addDays(to: start, days: -7)
+    guard let start = weekStart(of: today), let previous = HabitSchedule.addDays(to: start, days: -7)
     else { return (0, nil) }
     let current = volume(history, weekStarting: start, timeZone: timeZone)
     let last = volume(history, weekStarting: previous, timeZone: timeZone)
@@ -95,14 +96,14 @@ public enum WorkoutStats {
 
   /// Weeks in a row with at least one workout; this week counts once it has one.
   public static func streakWeeks(_ history: WorkoutHistory, today: String, timeZone: String) -> Int {
-    guard var week = monday(of: today) else { return 0 }
-    let mondays = Set(workoutDays(history, timeZone: timeZone).compactMap(monday(of:)))
-    if !mondays.contains(week) {
+    guard var week = weekStart(of: today) else { return 0 }
+    let weeks = Set(workoutDays(history, timeZone: timeZone).compactMap(weekStart(of:)))
+    if !weeks.contains(week) {
       guard let previous = HabitSchedule.addDays(to: week, days: -7) else { return 0 }
       week = previous
     }
     var count = 0
-    while mondays.contains(week) {
+    while weeks.contains(week) {
       count += 1
       guard let previous = HabitSchedule.addDays(to: week, days: -7) else { break }
       week = previous

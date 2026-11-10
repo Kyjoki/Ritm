@@ -124,7 +124,7 @@ final class WorkoutRecordsTests: XCTestCase {
 }
 
 final class WorkoutWeekTests: XCTestCase {
-  // 2026-11-04 is a Wednesday; the week is 2 … 8 November.
+  // 2026-11-04 is a Wednesday; the week starts on Sunday: 1 … 7 November.
   private let today = "2026-11-04"
 
   private func habit(
@@ -142,9 +142,9 @@ final class WorkoutWeekTests: XCTestCase {
     XCTAssertEqual(week.goal, 5)
     XCTAssertEqual(week.done, 2)
     XCTAssertEqual(week.habitTitle, "Gym")
-    XCTAssertEqual(week.days.map(\.isDone), [true, false, true, false, false, false, false])
-    XCTAssertEqual(week.days.first(where: \.isToday)?.index, 2)
-    XCTAssertEqual(week.days.first?.key, "2026-11-02")
+    XCTAssertEqual(week.days.map(\.isDone), [false, true, false, true, false, false, false])
+    XCTAssertEqual(week.days.first(where: \.isToday)?.index, 3)
+    XCTAssertEqual(week.days.first?.key, "2026-11-01")
     XCTAssertEqual(week.progress, 0.4, accuracy: 0.001)
   }
 
@@ -160,10 +160,10 @@ final class WorkoutWeekTests: XCTestCase {
 
   func testEverydayHabitHasAGoalOfSevenAndIgnoresOtherWeeks() {
     let week = WorkoutStats.week(
-      habit: habit(done: ["2026-11-01", "2026-11-03", "2026-11-09"]), history: WorkoutHistory(),
+      habit: habit(done: ["2026-10-31", "2026-11-01", "2026-11-03", "2026-11-08"]), history: WorkoutHistory(),
       today: today, timeZone: "UTC")
     XCTAssertEqual(week.goal, 7)
-    XCTAssertEqual(week.done, 1)  // only the 3rd lies in this week
+    XCTAssertEqual(week.done, 2)  // the 1st (Sunday) and the 3rd; 31 Oct and 8 Nov are other weeks
   }
 
   func testWithoutAHabitTheRingCountsWorkoutDaysOutOfFour() {
@@ -177,13 +177,13 @@ final class WorkoutWeekTests: XCTestCase {
     XCTAssertEqual(week.goal, 4)
     XCTAssertEqual(week.done, 2)
     XCTAssertNil(week.habitTitle)
-    XCTAssertEqual(week.days.map(\.isDone), [false, true, true, false, false, false, false])
+    XCTAssertEqual(week.days.map(\.isDone), [false, false, true, true, false, false, false])
   }
 
   func testVolumeTrendAgainstLastWeek() {
     let history = WorkoutHistory(records: [
       workout("now", "2026-11-03T10:00:00Z", [(bench, "Жим", 100, 10)]),  // 1000
-      workout("last", "2026-10-28T10:00:00Z", [(bench, "Жим", 100, 8)]),  // 800 (week of 26 Oct)
+      workout("last", "2026-10-28T10:00:00Z", [(bench, "Жим", 100, 8)]),  // 800 (week of 25 Oct)
     ])
     let trend = WorkoutStats.volumeTrend(history, today: today, timeZone: "UTC")
     XCTAssertEqual(trend.volume, 1000)
@@ -195,8 +195,8 @@ final class WorkoutWeekTests: XCTestCase {
 
   func testStreakCountsWeeksInARowAndSurvivesAnEmptyCurrentWeek() {
     let history = WorkoutHistory(records: [
-      workout("w0", "2026-10-28T10:00:00Z", [(bench, "Жим", 80, 5)]),  // 26 Oct week
-      workout("w1", "2026-10-21T10:00:00Z", [(bench, "Жим", 80, 5)]),  // 19 Oct week
+      workout("w0", "2026-10-28T10:00:00Z", [(bench, "Жим", 80, 5)]),  // week of 25 Oct
+      workout("w1", "2026-10-21T10:00:00Z", [(bench, "Жим", 80, 5)]),  // week of 18 Oct
       workout("w3", "2026-10-07T10:00:00Z", [(bench, "Жим", 80, 5)]),  // gap before it
     ])
     XCTAssertEqual(WorkoutStats.streakWeeks(history, today: today, timeZone: "UTC"), 2)

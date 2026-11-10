@@ -37,7 +37,7 @@ struct WorkoutsView: View {
       Group {
         switch screen {
         case .home: WorkoutHomeView(go: go, start: start)
-        case .history: WorkoutHistoryView(go: go)
+        case .history: WorkoutHistoryView(go: go, start: start)
         case .program(let id): WorkoutProgramView(programID: id, go: go, start: start)
         case .editor(let id, let isNew): WorkoutEditorView(programID: id, isNew: isNew, go: go)
         case .active: WorkoutActiveView(go: go, finished: { finished = $0 })

@@ -22,10 +22,43 @@ struct WorkoutActiveView: View {
   @State private var sheet: Sheet?
   @State private var confirmingFinish = false
   @State private var confirmingCancel = false
+  /// «Сохранить изменения в программе?», asked when the workout differs from its program.
+  @State private var savingProgram = false
+  /// An exercise with done sets that is about to be replaced or removed: asked first.
+  @State private var replacingItem: String?
+  @State private var removingItem: String?
 
-  private enum Sheet: String, Identifiable {
+  fileprivate enum Sheet: Identifiable, Equatable {
     case menu, exercises
-    var id: String { rawValue }
+    case options(String)
+    case pick(Pick)
+
+    var id: String {
+      switch self {
+      case .menu: "menu"
+      case .exercises: "exercises"
+      case .options(let id): "options-" + id
+      case .pick(let pick): "pick-" + pick.id
+      }
+    }
+  }
+
+  /// Why the exercise picker is open.
+  fileprivate enum Pick: Equatable {
+    case add(after: Int?)
+    case replace(String)
+
+    var id: String {
+      switch self {
+      case .add(let after): "add-\(after ?? -1)"
+      case .replace(let id): "replace-" + id
+      }
+    }
+
+    var isReplace: Bool {
+      if case .replace = self { return true }
+      return false
+    }
   }
 
   private var workouts: WorkoutStore { store.workouts }
@@ -52,20 +85,20 @@ struct WorkoutActiveView: View {
       sheet = nil
       confirmingFinish = false
       confirmingCancel = false
+      savingProgram = false
+      replacingItem = nil
+      removingItem = nil
       show(index)
       selection = WorkoutSetSelection(itemID: request.target.itemID, setID: request.target.setID,
         field: request.target.field == .weight ? .weight : .reps)
     }
-    .sheet(item: $sheet) { sheet in
-      switch sheet {
-      case .menu: menuSheet
-      case .exercises: exercisesSheet
-      }
-    }
+    .sheet(item: $sheet) { sheet in sheetContent(sheet) }
     .alert(
       store.text("Завершить тренировку?", "Finish the workout?"), isPresented: $confirmingFinish
     ) {
-      Button(store.text("Завершить", "Finish")) { finish() }
+      Button(store.text("Завершить", "Finish")) {
+        if workouts.programChange == nil { finish(saving: false) } else { later { savingProgram = true } }
+      }
       Button(store.text("Продолжить тренировку", "Keep going"), role: .cancel) {}
     } message: {
       let left = (workouts.session?.totalSets ?? 0) - (workouts.session?.doneSets ?? 0)
@@ -73,6 +106,48 @@ struct WorkoutActiveView: View {
         store.text(
           "Невыполненных подходов: \(left). В историю попадут только отмеченные.",
           "Sets not done: \(left). Only ticked sets go to the history."))
+    }
+    .confirmationDialog(
+      store.text("Сохранить изменения в программе?", "Save the changes to the program?"),
+      isPresented: $savingProgram, titleVisibility: .visible
+    ) {
+      Button(store.text("Сохранить в программу", "Save to the program")) { finish(saving: true) }
+      Button(store.text("Только в этой тренировке", "Only in this workout")) { finish(saving: false) }
+      Button(store.text("Продолжить тренировку", "Keep going"), role: .cancel) {}
+    } message: {
+      Text(changeSummary)
+    }
+    .alert(
+      store.text("Заменить упражнение?", "Replace the exercise?"),
+      isPresented: Binding(get: { replacingItem != nil }, set: { if !$0 { replacingItem = nil } })
+    ) {
+      Button(store.text("Выбрать замену", "Choose a replacement")) {
+        if let id = replacingItem { later { sheet = .pick(.replace(id)) } }
+        replacingItem = nil
+      }
+      Button(store.text("Отмена", "Cancel"), role: .cancel) { replacingItem = nil }
+    } message: {
+      let done = replacingItem.flatMap { workouts.item($0)?.doneCount } ?? 0
+      Text(
+        store.text(
+          "Выполненных подходов: \(done). Они останутся в этой тренировке под прежним упражнением, у нового подходы начнутся заново.",
+          "Sets done: \(done). They stay in this workout under the old exercise; the new one starts its sets again."))
+    }
+    .alert(
+      store.text("Убрать упражнение?", "Remove the exercise?"),
+      isPresented: Binding(get: { removingItem != nil }, set: { if !$0 { removingItem = nil } })
+    ) {
+      Button(store.text("Убрать", "Remove"), role: .destructive) {
+        if let id = removingItem { remove(id) }
+        removingItem = nil
+      }
+      Button(store.text("Отмена", "Cancel"), role: .cancel) { removingItem = nil }
+    } message: {
+      let done = removingItem.flatMap { workouts.item($0)?.doneCount } ?? 0
+      Text(
+        store.text(
+          "Выполненных подходов: \(done). Они не попадут в историю.",
+          "Sets done: \(done). They will not go to the history."))
     }
     .alert(
       store.text("Отменить тренировку?", "Cancel the workout?"), isPresented: $confirmingCancel
@@ -168,7 +243,9 @@ struct WorkoutActiveView: View {
     return VStack(spacing: 0) {
       if session.items.indices.contains(index) {
         WorkoutExerciseCard(
-          itemID: session.items[index].id, selection: $selection, ticked: { ticked($0, session: session) }
+          itemID: session.items[index].id, selection: $selection,
+          ticked: { ticked($0, session: session) },
+          options: { sheet = .options(session.items[index].id) }
         )
         .id(session.items[index].id)
         .transition(
@@ -276,113 +353,147 @@ struct WorkoutActiveView: View {
         store.text("Отметьте хотя бы один выполненный подход", "Tick at least one set first"))
     } else if session.doneSets < session.totalSets {
       confirmingFinish = true
+    } else if workouts.programChange != nil {
+      savingProgram = true
     } else {
-      finish()
+      finish(saving: false)
     }
   }
 
-  private func finish() {
+  private func finish(saving: Bool) {
     sheet = nil
-    guard let record = workouts.finishWorkout() else { return }
+    guard let record = workouts.finishWorkout(savingToProgram: saving) else { return }
+    if saving { store.toasts.show(store.text("Программа обновлена", "Program updated")) }
     finished(record)
     go(.summary)
   }
 
-  // MARK: Sheets
-
-  private var menuSheet: some View {
-    VStack(spacing: 4) {
-      menuRow(symbol: "checkmark", title: store.text("Завершить тренировку", "Finish workout"), danger: false) {
-        sheet = nil
-        if let session = workouts.session { tryFinish(session) }
-      }
-      menuRow(symbol: "trash", title: store.text("Отменить тренировку", "Cancel workout"), danger: true) {
-        sheet = nil
-        confirmingCancel = true
-      }
-      Button { sheet = nil } label: {
-        Text(store.text("Закрыть", "Close")).ritmFont(16, weight: .semibold)
-          .foregroundStyle(RitmTheme.accentColor)
-          .frame(maxWidth: .infinity, minHeight: 56)
-          .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-      }
-      .buttonStyle(RitmPressStyle())
-      .padding(.top, 6)
-    }
-    .padding(.horizontal, 16).padding(.top, 20)
-    .frame(maxHeight: .infinity, alignment: .top)
-    .background(RitmTheme.background)
-    .presentationDetents([.height(250)])
-    .ritmSheetGrabber()
+  /// What the workout changed in its program, for the question at the finish.
+  private var changeSummary: String {
+    guard let change = workouts.programChange else { return "" }
+    var parts: [String] = []
+    if change.added > 0 { parts.append(store.text("добавлено \(change.added)", "added \(change.added)")) }
+    if change.removed > 0 { parts.append(store.text("убрано \(change.removed)", "removed \(change.removed)")) }
+    if change.modified > 0 { parts.append(store.text("изменено \(change.modified)", "changed \(change.modified)")) }
+    if change.reordered { parts.append(store.text("новый порядок", "new order")) }
+    let name = workouts.session?.programName ?? ""
+    let list = parts.joined(separator: ", ")
+    return store.text("Программа «\(name)»: \(list).", "Program “\(name)”: \(list).")
   }
 
-  private func menuRow(symbol: String, title: String, danger: Bool, action: @escaping () -> Void) -> some View {
-    Button(action: action) {
-      HStack(spacing: 12) {
-        RitmSymbol(symbol).font(.system(size: 21))
-        Text(title).ritmFont(16, weight: .semibold)
-        Spacer(minLength: 0)
-      }
-      .foregroundStyle(danger ? RitmTheme.danger : RitmTheme.text)
-      .padding(.horizontal, 14).frame(minHeight: 56)
-      .contentShape(Rectangle())
+  /// Lets an alert finish closing before the next presentation starts.
+  private func later(_ work: @escaping @MainActor () -> Void) {
+    Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(350))
+      work()
     }
-    .buttonStyle(RitmPressStyle())
   }
 
-  /// `.xl`: every exercise with its progress; tap to open it.
-  private var exercisesSheet: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 4) {
-        Text(store.text("Упражнения", "Exercises")).ritmFont(19, weight: .bold, tracking: -0.03)
-          .foregroundStyle(RitmTheme.text).padding(.horizontal, 4).padding(.bottom, 6)
-          .accessibilityAddTraits(.isHeader)
-        ForEach(Array((workouts.session?.items ?? []).enumerated()), id: \.element.id) { index, item in
-          let full = item.doneCount == item.sets.count
-          Button {
-            sheet = nil
-            show(index)
-          } label: {
-            HStack(spacing: 12) {
-              Group {
-                if full {
-                  RitmSymbol("checkmark").font(.system(size: 16, weight: .bold))
-                } else {
-                  Text("\(index + 1)").ritmFont(13, weight: .bold)
-                }
-              }
-              .foregroundStyle(full ? WorkoutColors.income : RitmTheme.muted)
-              .frame(width: 32, height: 32)
-              .background(full ? WorkoutPalette.incomeSoft : WorkoutPalette.inset, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-              VStack(alignment: .leading, spacing: 0) {
-                Text(item.name).ritmFont(14.5, weight: .semibold, tracking: -0.02).foregroundStyle(RitmTheme.text)
-                Text(store.text("\(item.doneCount) из \(item.sets.count) подходов", "\(item.doneCount) of \(item.sets.count) sets"))
-                  .ritmFont(11.5).foregroundStyle(RitmTheme.muted)
-              }
-              .frame(maxWidth: .infinity, alignment: .leading)
-              if index == current {
-                Text(store.text("Сейчас", "Now")).ritmFont(12, weight: .bold).foregroundStyle(RitmTheme.accentColor)
-              } else {
-                RitmSymbol("chevron.right").font(.system(size: 16)).foregroundStyle(RitmTheme.muted)
-              }
-            }
-            .padding(.horizontal, 12).padding(.vertical, 10)
-            .background {
-              if index == current {
-                RoundedRectangle(cornerRadius: 16, style: .continuous).fill(RitmTheme.soft)
-                  .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(RitmTheme.accentColor, lineWidth: 1.5) }
-              }
-            }
-            .contentShape(Rectangle())
-          }
-          .buttonStyle(RitmPressStyle())
-        }
-      }
-      .padding(.horizontal, 16).padding(.top, 22).padding(.bottom, 24)
+  // MARK: Editing the exercises
+
+  @ViewBuilder private func sheetContent(_ sheet: Sheet) -> some View {
+    switch sheet {
+    case .menu:
+      WorkoutMenuSheet(canRemove: (workouts.session?.items.count ?? 0) > 1) { menu($0) }
+    case .exercises:
+      WorkoutExercisesSheet(
+        current: current,
+        open: { index in
+          self.sheet = nil
+          show(index)
+        },
+        add: { self.sheet = .pick(.add(after: nil)) },
+        options: { self.sheet = .options($0) },
+        move: moveExercise)
+    case .options(let id):
+      WorkoutExerciseOptionsSheet(
+        itemID: id, canRemove: (workouts.session?.items.count ?? 0) > 1,
+        replace: { startReplace(id) }, remove: { startRemove(id) })
+    case .pick(let pick):
+      WorkoutExercisePicker(
+        title: pick.isReplace
+          ? store.text("Заменить упражнение", "Replace exercise")
+          : store.text("Добавить упражнение", "Add exercise"),
+        used: Set((workouts.session?.items ?? []).map(\.exerciseID)),
+        usedNote: store.text("уже в тренировке", "already in the workout")
+      ) { picked(pick, $0) }
     }
-    .background(RitmTheme.background)
-    .presentationDetents([.medium, .large])
-    .ritmSheetGrabber()
+  }
+
+  private var currentItemID: String? { workouts.session?.items[safe: current]?.id }
+
+  private func menu(_ action: WorkoutMenuAction) {
+    switch action {
+    case .exercises: sheet = .exercises
+    case .addAfterCurrent: sheet = .pick(.add(after: current))
+    case .addAtEnd: sheet = .pick(.add(after: nil))
+    case .replaceCurrent: if let id = currentItemID { startReplace(id) }
+    case .removeCurrent: if let id = currentItemID { startRemove(id) }
+    case .finish:
+      sheet = nil
+      if let session = workouts.session { tryFinish(session) }
+    case .cancel:
+      sheet = nil
+      confirmingCancel = true
+    }
+  }
+
+  /// An exercise with done sets asks first; they stay in the log under the old exercise.
+  private func startReplace(_ id: String) {
+    if workouts.session?.hasDoneSets(id) == true {
+      sheet = nil
+      replacingItem = id
+    } else {
+      sheet = .pick(.replace(id))
+    }
+  }
+
+  private func startRemove(_ id: String) {
+    sheet = nil
+    if workouts.session?.hasDoneSets(id) == true {
+      removingItem = id
+    } else {
+      remove(id)
+    }
+  }
+
+  private func remove(_ id: String) {
+    keepingCurrent {
+      withAnimation(reduceMotion ? RitmMotion.reducedFade : RitmMotion.easeOut(0.3)) {
+        workouts.removeExercise(item: id)
+      }
+    }
+  }
+
+  private func picked(_ pick: Pick, _ exercise: WorkoutExercise) {
+    let id: String?
+    switch pick {
+    case .add(let after): id = workouts.addExercise(exercise, after: after)
+    case .replace(let itemID): id = workouts.replaceExercise(item: itemID, with: exercise)
+    }
+    guard let id else {
+      store.toasts.show(
+        store.text("Это упражнение уже есть в тренировке.", "This exercise is already in the workout."))
+      return
+    }
+    selection = nil
+    if let index = workouts.session?.items.firstIndex(where: { $0.id == id }) { show(index) }
+  }
+
+  private func moveExercise(from: Int, to: Int) {
+    keepingCurrent { workouts.moveExercise(from: from, to: to) }
+  }
+
+  /// Runs a change of the exercise list and keeps the same exercise on screen.
+  private func keepingCurrent(_ change: () -> Void) {
+    let id = currentItemID
+    change()
+    guard let items = workouts.session?.items else { return }
+    if let id, let index = items.firstIndex(where: { $0.id == id }) {
+      current = index
+    } else {
+      current = min(current, max(0, items.count - 1))
+    }
   }
 }
 

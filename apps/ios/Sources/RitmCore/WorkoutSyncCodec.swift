@@ -66,6 +66,22 @@ public enum WorkoutSyncCodec {
     return JSONValue.object(object).decoded(WorkoutProgram.self)
   }
 
+  /// A program doc that carries `muscle` for an exercise this iPhone already knows is the newer
+  /// word on its group (`null` clears it); an exercise without the key is from an older build.
+  private static func applyGroups(of data: JSONValue, to library: inout WorkoutLibrary) {
+    guard case .array(let items)? = data.objectValue?["exercises"] else { return }
+    for item in items {
+      guard case .object(let fields) = item, case .string(let id)? = fields["id"],
+        let raw = fields["muscle"]
+      else { continue }
+      if raw == .null {
+        library.setMuscle(nil, ofExercise: id)
+      } else if let group = raw.decoded(WorkoutMuscle.self) {
+        library.setMuscle(group, ofExercise: id)
+      }
+    }
+  }
+
   static func record(id: String, data: JSONValue) -> WorkoutRecord? {
     guard case .object(var object) = data else { return nil }
     object["id"] = .string(id)
@@ -95,8 +111,9 @@ public enum WorkoutSyncCodec {
         ranked.removeAll { $0.program.id == id }
         guard let value = change, let program = program(id: id, data: value) else { continue }
         ranked.append((value.objectValue?["order"]?.numberValue ?? .greatestFiniteMagnitude, program))
-        let known = Set(library.customExercises.map(\.id))
         let extra = value.objectValue?["exercises"]?.decoded([WorkoutExercise].self) ?? []
+        applyGroups(of: value, to: &library)
+        let known = Set(library.customExercises.map(\.id))
         library.customExercises += extra.filter { !known.contains($0.id) }
         if !extra.isEmpty {
           var seen = Set<String>()

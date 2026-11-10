@@ -62,7 +62,7 @@ struct WorkoutHomeView: View {
     )
     .sheet(isPresented: $showingSettings) { WorkoutSettingsSheet() }
     .sheet(item: $recordTarget) { WorkoutRecordSheet(target: $0) }
-    .sheet(item: $opened) { WorkoutSessionSheet(record: $0) }
+    .sheet(item: $opened) { WorkoutSessionSheet(record: $0, repeatWorkout: start) }
   }
 
   // MARK: Pieces

@@ -40,6 +40,7 @@ struct WorkoutHistoryRow: View {
 struct WorkoutHistoryView: View {
   @Environment(RitmStore.self) private var store
   let go: (WorkoutScreen) -> Void
+  let start: (String) -> Void
   @State private var opened: WorkoutRecord?
 
   var body: some View {
@@ -66,55 +67,7 @@ struct WorkoutHistoryView: View {
         }
       }
     )
-    .sheet(item: $opened) { WorkoutSessionSheet(record: $0) }
-  }
-}
-
-/// The details of one finished workout.
-struct WorkoutSessionSheet: View {
-  @Environment(RitmStore.self) private var store
-  @Environment(\.dismiss) private var dismiss
-  let record: WorkoutRecord
-
-  var body: some View {
-    let russian = store.language == .ru
-    ScrollView {
-      VStack(alignment: .leading, spacing: 16) {
-        HStack {
-          Text(WorkoutText.date(record.endedAt, language: store.language, year: true))
-            .ritmText(.sectionTitle).foregroundStyle(RitmTheme.text)
-            .accessibilityAddTraits(.isHeader)
-          Spacer()
-          Button(store.text("Закрыть", "Close")) { dismiss() }
-            .buttonStyle(RitmTextButtonStyle(size: 13))
-        }
-        Text(
-          "\(record.programName) · \(WorkoutText.duration(record.duration, russian: russian)) · "
-            + store.text("объём ", "volume ") + WorkoutText.kilograms(record.volume, russian: russian)
-        )
-        .ritmText(.body).foregroundStyle(RitmTheme.muted)
-        ForEach(record.exercises) { exercise in
-          VStack(alignment: .leading, spacing: 4) {
-            Text(exercise.name).ritmFont(14, weight: .semibold).foregroundStyle(RitmTheme.text)
-            ForEach(Array(exercise.sets.enumerated()), id: \.offset) { index, set in
-              HStack(spacing: 12) {
-                Text("\(index + 1)").foregroundStyle(RitmTheme.muted).frame(width: 18, alignment: .leading)
-                Text(
-                  "\(WorkoutFormat.weight(set.weight, comma: russian))\u{00A0}\(russian ? "кг" : "kg") × \(set.reps)"
-                )
-                Spacer()
-              }
-              .ritmFont(13).monospacedDigit().foregroundStyle(RitmTheme.text)
-              .frame(minHeight: 32)
-              Divider()
-            }
-          }
-        }
-      }
-      .padding(20)
-    }
-    .background(RitmTheme.background)
-    .presentationDetents([.medium, .large])
+    .sheet(item: $opened) { WorkoutSessionSheet(record: $0, repeatWorkout: start) }
   }
 }
 

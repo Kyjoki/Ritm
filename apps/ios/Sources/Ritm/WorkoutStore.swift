@@ -154,6 +154,14 @@ final class WorkoutStore {
     mutateLibrary { $0.createExercise(named: name, muscle: muscle) }
   }
 
+  /// «Группа мышц…»: sets or clears the group of an exercise the owner created. It changes the
+  /// exercise itself, so every program, the running workout and the history show it. Built-in
+  /// exercises are read-only.
+  @discardableResult
+  func setExerciseMuscle(_ muscle: WorkoutMuscle?, ofExercise id: String) -> Bool {
+    mutateLibrary { $0.setMuscle(muscle, ofExercise: id) }
+  }
+
   /// «Сохранить» in the editor: writes the draft as program `id` (new or existing).
   @discardableResult
   func saveProgram(_ draft: WorkoutProgramDraft, as id: String) -> Bool {
@@ -221,18 +229,68 @@ final class WorkoutStore {
     mutateSession { $0.update(itemID) { $0.removeSet(setID: setID) } }
   }
 
-  func replaceExercise(item itemID: String, with exercise: WorkoutExercise) {
+  /// Removes the last set of the exercise that is not done.
+  func removeLastOpenSet(item itemID: String) {
+    mutateSession { $0.update(itemID) { $0.removeLastOpenSet() } }
+  }
+
+  // MARK: Editing the running workout
+  //
+  // These change the running workout only (a copy of the program). The program changes only when
+  // the owner agrees at the finish (`finishWorkout(savingToProgram:)`); cancelling drops it all.
+
+  /// Replaces the exercise: its sets start again, done ones stay in the log under the old
+  /// exercise. Returns the id of the new item, `nil` when the exercise is already in the workout.
+  @discardableResult
+  func replaceExercise(item itemID: String, with exercise: WorkoutExercise) -> String? {
     let snapshot = history
+    var newID: String?
     mutateSession {
-      $0.replaceExercise(itemID, with: exercise.id, name: exercise.name, history: snapshot)
+      newID = $0.replaceExercise(itemID, with: exercise.id, name: exercise.name, history: snapshot)
     }
+    return newID
+  }
+
+  /// Adds an exercise at the end, or after the one at `index`. Returns its item id.
+  @discardableResult
+  func addExercise(_ exercise: WorkoutExercise, after index: Int? = nil) -> String? {
+    let snapshot = history
+    var newID: String?
+    mutateSession {
+      newID = $0.addExercise(exercise.id, name: exercise.name, history: snapshot, after: index)
+    }
+    return newID
+  }
+
+  @discardableResult
+  func removeExercise(item itemID: String) -> Bool {
+    var removed = false
+    mutateSession { removed = $0.removeExercise(itemID) }
+    return removed
+  }
+
+  func moveExercise(from: Int, to: Int) {
+    mutateSession { $0.moveExercise(from: from, to: to) }
+  }
+
+  /// +1 / −1 of sets, reps or rest of one exercise.
+  func step(_ field: WorkoutProgramDraft.Field, direction: Int, item itemID: String) {
+    mutateSession { $0.update(itemID) { $0.step(field, direction: direction) } }
+  }
+
+  /// What the running workout changed against its saved program; `nil` when nothing.
+  var programChange: WorkoutProgramChange? {
+    guard let session, let program = library.program(session.programID) else { return nil }
+    return session.change(from: program)
   }
 
   /// Saves the ticked sets to the history and ends the workout. `nil` when nothing was ticked.
-  /// A lift that beats a record is stored as the new record.
+  /// A lift that beats a record is stored as the new record. With `savingToProgram` the exercises
+  /// of the workout (as edited while it ran) are also written into its program.
   @discardableResult
-  func finishWorkout(now: Date = Date()) -> WorkoutRecord? {
+  func finishWorkout(savingToProgram: Bool = false, now: Date = Date()) -> WorkoutRecord? {
     guard let current = session, let record = current.finished(at: now) else { return nil }
+    if savingToProgram { mutateLibrary { $0.saveChanges(of: current) } }
     let update = WorkoutRecords.updates(finished: record, before: recordCards, bests: bests)
     history = WorkoutHistory(records: [record] + history.records)
     if update.bests != bests {

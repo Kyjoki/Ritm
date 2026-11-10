@@ -33,6 +33,22 @@ public enum WorkoutMuscle: String, Codable, CaseIterable, Sendable {
   }
 }
 
+/// The chip row of the exercise search.
+public enum WorkoutMuscleFilter: Hashable, Sendable {
+  case any
+  case group(WorkoutMuscle)
+  /// «Без группы»: exercises with no muscle group.
+  case none
+
+  public func matches(_ muscle: WorkoutMuscle?) -> Bool {
+    switch self {
+    case .any: true
+    case .group(let group): muscle == group
+    case .none: muscle == nil
+    }
+  }
+}
+
 public enum WorkoutCatalog {
   private static let builtinNames: [(id: String, ru: String, en: String, muscle: WorkoutMuscle)] = [
     ("bench", "Жим лёжа", "Bench press", .chest),
@@ -92,11 +108,22 @@ public enum WorkoutCatalog {
   public static func search(
     _ query: String, muscle: WorkoutMuscle?, custom: [WorkoutExercise], language: Language
   ) -> [WorkoutExercise] {
+    search(query, filter: muscle.map(WorkoutMuscleFilter.group) ?? .any, custom: custom, language: language)
+  }
+
+  /// The exercises that match the search text and the chip: all, one group, or «Без группы».
+  public static func search(
+    _ query: String, filter: WorkoutMuscleFilter, custom: [WorkoutExercise], language: Language
+  ) -> [WorkoutExercise] {
     let key = query.trimmingCharacters(in: .whitespaces).lowercased()
     return all(custom: custom, language: language).filter { exercise in
-      (muscle == nil || exercise.muscle == muscle)
-        && (key.isEmpty || exercise.name.lowercased().contains(key))
+      filter.matches(exercise.muscle) && (key.isEmpty || exercise.name.lowercased().contains(key))
     }
+  }
+
+  /// Whether the «Без группы» chip is worth showing.
+  public static func hasUngrouped(custom: [WorkoutExercise]) -> Bool {
+    custom.contains { $0.muscle == nil }
   }
 }
 
@@ -218,6 +245,15 @@ extension WorkoutLibrary {
     return exercise
   }
 
+  /// Sets (or, with `nil`, clears) the muscle group of an exercise the owner created. Built-in
+  /// exercises keep the group of the catalog, so they return `false` and stay as they are.
+  @discardableResult
+  public mutating func setMuscle(_ muscle: WorkoutMuscle?, ofExercise id: String) -> Bool {
+    guard let index = customExercises.firstIndex(where: { $0.id == id }) else { return false }
+    customExercises[index].muscle = muscle
+    return true
+  }
+
   private mutating func update(_ id: String, _ change: (inout WorkoutProgram) -> Void) {
     guard let index = programs.firstIndex(where: { $0.id == id }) else { return }
     change(&programs[index])
@@ -248,7 +284,7 @@ extension WorkoutSessionItem {
     }
     return WorkoutSessionItem(
       id: makeID(), exerciseID: exerciseID, name: name, previous: previous, sets: sets,
-      restSeconds: restSeconds)
+      restSeconds: restSeconds, plannedReps: plannedReps ?? WorkoutProgramItem.defaultReps)
   }
 }
 
@@ -277,27 +313,30 @@ extension WorkoutSession {
     change(&items[index])
   }
 
-  /// Replaces an exercise DURING the workout. The new one shows its own last results. Sets that
-  /// are already done stay logged under the old exercise (which keeps only them); the unfinished
-  /// ones move to the new exercise. With nothing done yet the old exercise is simply swapped.
+  /// Replaces an exercise DURING the workout. The new one starts with the old one's planned sets
+  /// and reps and shows its own last results. Sets that are already done stay logged under the old
+  /// exercise (which keeps only them and is marked as kept for the log); with nothing done yet the
+  /// old exercise is simply swapped. Returns the new item's id, or `nil` when nothing changed.
+  @discardableResult
   public mutating func replaceExercise(
     _ itemID: String, with exerciseID: String, name: String, history: WorkoutHistory,
     makeID: () -> String = WorkoutID.make
-  ) {
+  ) -> String? {
     guard let index = items.firstIndex(where: { $0.id == itemID }),
       !items.contains(where: { $0.exerciseID == exerciseID })
-    else { return }
+    else { return nil }
     let old = items[index]
-    let open = old.sets.filter { !$0.done }.count
     let replacement = WorkoutSessionItem.make(
-      exerciseID: exerciseID, name: name, setCount: max(1, open), history: history,
-      restSeconds: old.restSeconds, makeID: makeID)
+      exerciseID: exerciseID, name: name, setCount: max(1, old.sets.count), history: history,
+      plannedReps: old.plannedReps, restSeconds: old.restSeconds, makeID: makeID)
     if old.sets.contains(where: \.done) {
       items[index].sets = old.sets.filter(\.done)
+      items[index].keptForLog = true
       items.insert(replacement, at: index + 1)
     } else {
       items[index] = replacement
     }
+    return replacement.id
   }
 
   /// The history entry for what was ticked, or `nil` when nothing was. Only done sets count.

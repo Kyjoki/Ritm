@@ -225,6 +225,8 @@ struct WorkoutReorderList<Item: Identifiable, Row: View>: View where Item.ID == 
   var spacing: CGFloat = 10
   var cornerRadius: CGFloat = 23
   var handleSize: CGFloat = 20
+  /// Lets a sheet that holds the list refuse to be swiped away while a card is dragged.
+  var isDragging: Binding<Bool>?
   let onMove: (Int, Int) -> Void
   @ViewBuilder let row: (Item, WorkoutDragHandle) -> Row
 
@@ -261,6 +263,7 @@ struct WorkoutReorderList<Item: Identifiable, Row: View>: View where Item.ID == 
     }
     .coordinateSpace(name: Self.space)
     .background(alignment: .topLeading) { slot }
+    .onChange(of: model.active != nil) { _, dragging in isDragging?.wrappedValue = dragging }
   }
 
   @ViewBuilder private var slot: some View {

@@ -76,6 +76,15 @@ public struct WorkoutExercise: Codable, Equatable, Hashable, Identifiable, Senda
       id: try c.decode(String.self, forKey: .id), name: c.workoutValue(.name, ""),
       muscle: try? c.decodeIfPresent(WorkoutMuscle.self, forKey: .muscle))
   }
+
+  /// `muscle` is always written (`null` when cleared), so a synced exercise whose group was
+  /// removed can be told apart from one written by an older build that never had the key.
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(id, forKey: .id)
+    try c.encode(name, forKey: .name)
+    try c.encode(muscle, forKey: .muscle)
+  }
 }
 
 public struct WorkoutProgramItem: Codable, Equatable, Identifiable, Sendable {
@@ -344,10 +353,16 @@ public struct WorkoutSessionItem: Codable, Equatable, Identifiable, Sendable {
   public var sets: [WorkoutSet]
   /// The rest after a set, copied from the program when the workout starts.
   public var restSeconds: Int
+  /// The reps target of the exercise (what the program says, or what was set during the workout).
+  public var plannedReps: Int
+  /// The old exercise after a replacement, kept only so its done sets stay in the log. It is not
+  /// part of the program while all its sets are done.
+  public var keptForLog: Bool
 
   public init(
     id: String, exerciseID: String, name: String, previous: WorkoutPrevious?,
-    sharedWeight: String = "", sets: [WorkoutSet], restSeconds: Int = WorkoutProgramItem.defaultRest
+    sharedWeight: String = "", sets: [WorkoutSet], restSeconds: Int = WorkoutProgramItem.defaultRest,
+    plannedReps: Int = WorkoutProgramItem.defaultReps, keptForLog: Bool = false
   ) {
     self.id = id
     self.exerciseID = exerciseID
@@ -356,15 +371,21 @@ public struct WorkoutSessionItem: Codable, Equatable, Identifiable, Sendable {
     self.sharedWeight = sharedWeight
     self.sets = sets
     self.restSeconds = restSeconds
+    self.plannedReps = min(max(plannedReps, WorkoutProgramItem.repsRange.lowerBound), WorkoutProgramItem.repsRange.upperBound)
+    self.keptForLog = keptForLog
   }
 
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
+    let sets = c.workoutLossy(WorkoutSet.self, .sets)
+    // A workout saved before the target was stored: take it from the first set.
+    let guessedReps = sets.first.flatMap { WorkoutNumber.reps($0.reps) } ?? WorkoutProgramItem.defaultReps
     self.init(
       id: try c.decode(String.self, forKey: .id), exerciseID: try c.decode(String.self, forKey: .exerciseID),
       name: c.workoutValue(.name, ""), previous: try? c.decodeIfPresent(WorkoutPrevious.self, forKey: .previous),
-      sharedWeight: c.workoutValue(.sharedWeight, ""), sets: c.workoutLossy(WorkoutSet.self, .sets),
-      restSeconds: c.workoutValue(.restSeconds, WorkoutProgramItem.defaultRest))
+      sharedWeight: c.workoutValue(.sharedWeight, ""), sets: sets,
+      restSeconds: c.workoutValue(.restSeconds, WorkoutProgramItem.defaultRest),
+      plannedReps: c.workoutValue(.plannedReps, guessedReps), keptForLog: c.workoutValue(.keptForLog, false))
   }
 
   public var doneCount: Int { sets.filter(\.done).count }

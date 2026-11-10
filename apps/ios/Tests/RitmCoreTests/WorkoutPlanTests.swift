@@ -152,8 +152,9 @@ final class WorkoutPlanTests: XCTestCase {
     XCTAssertEqual(session.items[0].exerciseID, "builtin.bench")
     XCTAssertEqual(session.items[0].sets.count, 1)
     XCTAssertTrue(session.items[0].sets[0].done)
+    XCTAssertTrue(session.items[0].keptForLog)
     XCTAssertEqual(session.items[1].exerciseID, "builtin.squat")
-    XCTAssertEqual(session.items[1].sets.count, 2)
+    XCTAssertEqual(session.items[1].sets.count, 3, "the replacement starts with the planned sets again")
     XCTAssertEqual(session.items[1].previous?.sets.first?.weight, 100)
     XCTAssertTrue(session.items[1].sets.allSatisfy { !$0.done })
   }
