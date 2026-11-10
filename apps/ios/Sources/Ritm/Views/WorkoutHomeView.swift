@@ -28,12 +28,7 @@ struct WorkoutHomeView: View {
   var body: some View {
     WorkoutPage(
       header: {
-        RitmPageHeading(title: store.text("Тренировки", "Workouts"), gap: 12) {
-          WorkoutRoundButton(
-            symbol: "slider.horizontal.3",
-            label: store.text("Настройки тренировок", "Workout settings")
-          ) { showingSettings = true }
-        }
+        RitmPageHeading(title: store.text("Тренировки", "Workouts"), gap: 12)
       },
       content: {
         VStack(alignment: .leading, spacing: 0) {

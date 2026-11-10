@@ -174,9 +174,14 @@ struct HabitDoneButton: View {
   let action: () -> Void
   @Environment(RitmStore.self) private var store
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  /// The pop plays for the user's own tap, not when another day flips `done` under the card.
+  @State private var taps = 0
 
   var body: some View {
-    Button(action: action) {
+    Button {
+      taps += 1
+      action()
+    } label: {
       HStack(spacing: 7) {
         if done {
           RitmSymbol("checkmark").font(.system(size: 15, weight: .bold)).foregroundStyle(tint.base)
@@ -189,7 +194,7 @@ struct HabitDoneButton: View {
       .frame(maxWidth: .infinity, minHeight: height)
       .background(done ? tint.buttonDone : tint.button, in: Capsule())
       .overlay { Capsule().strokeBorder(tint.buttonRim, lineWidth: 1) }
-      .habitPop(done, reduceMotion: reduceMotion)
+      .habitPop(taps, reduceMotion: reduceMotion)
       .contentShape(Capsule())
     }
     .buttonStyle(RitmPressStyle(scale: 0.98))

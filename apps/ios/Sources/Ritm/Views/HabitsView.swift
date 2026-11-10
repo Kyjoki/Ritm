@@ -130,15 +130,19 @@ struct HabitsView: View {
         overview: overview, month: month, offset: offset, selectedDay: day, today: today,
         canGoBack: (dates.first ?? "") > earliest,
         onMonth: { value in
-          month = value
-          offset = 0
-          selectedDay = nil
+          changeDay {
+            month = value
+            offset = 0
+            selectedDay = nil
+          }
         },
         onStep: { delta in
-          offset = min(0, offset + delta)
-          selectedDay = nil
+          changeDay {
+            offset = min(0, offset + delta)
+            selectedDay = nil
+          }
         },
-        onSelect: { selectedDay = $0 }
+        onSelect: { picked in changeDay { selectedDay = picked } }
       )
       .ritmPageReveal(index: 0)
       dayHeading(active, day: day).ritmPageReveal(index: 1)
@@ -153,6 +157,14 @@ struct HabitsView: View {
       .padding(.top, 14)
     }
     if !active.isEmpty { awards(active) }
+  }
+
+  /// Picking another day only swaps what the cards show. The list must not animate that: the
+  /// ticks, the «Выполнить» pill and the footers would all morph at once and read as a glitch.
+  private func changeDay(_ change: () -> Void) {
+    var transaction = Transaction()
+    transaction.disablesAnimations = true
+    withTransaction(transaction, change)
   }
 
   private func effectiveDay(_ dates: [String]) -> String {
@@ -198,7 +210,6 @@ struct HabitsView: View {
         .ritmFont(18, weight: .semibold, tracking: -0.04)
         .foregroundStyle(RitmTheme.text)
         .accessibilityAddTraits(.isHeader)
-        .habitSwap(key: day)
       Spacer(minLength: 8)
       if summary.planned > 0 {
         HStack(spacing: 4) {
@@ -238,7 +249,6 @@ struct HabitsView: View {
         .ritmPageReveal(index: 2 + index)
       }
     }
-    .habitSwap(key: day)
   }
 
   private func isListed(_ habit: Habit, on day: String) -> Bool {
