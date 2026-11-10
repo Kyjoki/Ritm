@@ -118,6 +118,18 @@
     -webkit-backdrop-filter: none;
     z-index: 45;
   }
+  /* The desktop sidebar takes its surface from the page theme, so its ink must follow the theme too,
+     not the separate sidebar-dark / sidebar-light switch (pale ink on a pale sidebar). */
+  :root[data-theme='light'] .ritm-glass .sidebar,
+  :root[data-theme='light'] .ritm-glass.sidebar-dark .sidebar {
+    --nav-ink: #4f3f62;
+    --nav-active-ink: #5a3190;
+  }
+  :root[data-theme='dark'] .ritm-glass .sidebar,
+  :root[data-theme='dark'] .ritm-glass.sidebar-light .sidebar {
+    --nav-ink: #c1b3d4;
+    --nav-active-ink: #e2caff;
+  }
   .ritm-glass .sidebar .brand-button {
     display: flex;
     justify-content: flex-start;
