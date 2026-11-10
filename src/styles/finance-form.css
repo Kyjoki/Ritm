@@ -1,0 +1,142 @@
+/* Finance dialogs: the entry form and the stock price form. */
+.fin-dialog {
+  --dialog-max-width: 560px;
+}
+.fin-form {
+  display: grid;
+  gap: 16px;
+}
+.fin-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.fin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+}
+.fin-field textarea {
+  resize: vertical;
+}
+.fin-optional {
+  color: var(--muted);
+  font-weight: 400;
+}
+.fin-help {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.fin-error {
+  margin: 0;
+  padding: 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-radius: 12px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.fin-kinds {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--glass-inset);
+}
+.fin-kinds legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.fin-kinds button {
+  min-width: 0;
+  min-height: 38px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  transition:
+    background 0.2s,
+    color 0.2s;
+}
+.fin-kinds button[aria-pressed='true'] {
+  background: var(--glass-raised);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.fin-kinds:disabled button:not([aria-pressed='true']) {
+  opacity: 0.45;
+}
+.fin-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fin-chips button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--field);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+.fin-chips button:hover:not(:disabled) {
+  color: var(--text);
+}
+.fin-chips button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--soft);
+  color: var(--accent);
+}
+.fin-chips button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.fin-transfer,
+.fin-stock-form {
+  display: grid;
+  gap: 14px;
+}
+.fin-stock-total {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.fin-link-out {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.fin-form .dialog-actions {
+  margin-top: 3px;
+}
+@media (max-width: 560px) {
+  .fin-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
