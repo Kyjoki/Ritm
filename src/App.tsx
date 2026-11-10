@@ -47,6 +47,7 @@ import { Dialog } from './components/Dialog';
 import './styles/visual-refresh.css';
 import './styles/motion.css';
 import './styles/navigation-glass.css';
+import './styles/desktop-shell.css';
 import { MotionControls, MotionPage, MotionPresence } from './components/Motion';
 import {
   calendarOccurrences,
@@ -57,6 +58,7 @@ import {
 const EMPTY_GOOGLE_EVENTS: GoogleCalendarEvent[] = [];
 
 type Page = 'day' | 'calendar' | 'habits' | 'assistant' | 'finance' | 'settings' | 'login-preview';
+const SIDEBAR_ORDER = ['day', 'calendar', 'habits', 'finance', 'assistant', 'settings'] as const;
 const navigation = [
   { id: 'day' as const, label: 'Мой день', icon: LayoutDashboard },
   { id: 'calendar' as const, label: 'Календарь', icon: CalendarDays },
@@ -719,22 +721,24 @@ export default function App() {
         </button>
         <div className="sidebar-nav-scroll" ref={sidebarScroll}>
           <nav className="sidebar-nav" aria-label={tr('Основная навигация')}>
-            {navigation.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                onClick={() => go(id)}
-                className={page === id ? 'is-active' : ''}
-                aria-current={page === id ? 'page' : undefined}
-                data-tooltip={tr(label)}
-                aria-label={tr(label)}
-              >
-                <span className="nav-button-content">
-                  <Icon size={18} aria-hidden="true" />
-                  <span className="nav-label">{tr(label)}</span>
-                </span>
-                {page === id ? <span className="nav-dot" /> : null}
-              </button>
-            ))}
+            {SIDEBAR_ORDER.map((order) => navigation.find((item) => item.id === order)!).map(
+              ({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => go(id)}
+                  className={page === id ? 'is-active' : ''}
+                  aria-current={page === id ? 'page' : undefined}
+                  data-tooltip={tr(label)}
+                  aria-label={tr(label)}
+                >
+                  <span className="nav-button-content">
+                    <Icon size={18} aria-hidden="true" />
+                    <span className="nav-label">{tr(label)}</span>
+                  </span>
+                  {page === id ? <span className="nav-dot" /> : null}
+                </button>
+              ),
+            )}
           </nav>
         </div>
         <div className="sidebar-bottom">
@@ -763,6 +767,9 @@ export default function App() {
             <Brand />
           </div>
           <span>{tr('ЛИЧНОЕ ПРОСТРАНСТВО')}</span>
+          <p className="dtop-title gradient-title" aria-hidden="true">
+            {tr(navigation.find((item) => item.id === page)?.label ?? 'Мой день')}
+          </p>
           <button
             className="icon-button theme-switch"
             onClick={() => void themeToggle()}

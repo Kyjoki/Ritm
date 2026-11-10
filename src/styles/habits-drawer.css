@@ -1,0 +1,617 @@
+/* Habit analytics drawer (a bottom sheet on phones) and the add/edit dialog. */
+@keyframes hb-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes hb-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes hb-drawer-in {
+  0% {
+    opacity: 0;
+    transform: translateX(calc(100% * var(--hb-mv)));
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes hb-drawer-out {
+  40% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(calc(100% * var(--hb-mv)));
+  }
+}
+@keyframes hb-sheet-up {
+  0% {
+    opacity: 0;
+    transform: translateY(calc(100% * var(--hb-mv)));
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes hb-sheet-down {
+  40% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(calc(100% * var(--hb-mv)));
+  }
+}
+@keyframes hb-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(18px * var(--hb-mv))) scale(calc(1 - 0.03 * var(--hb-mv)));
+  }
+}
+@keyframes hb-dialog-out {
+  to {
+    opacity: 0;
+    transform: translateY(calc(18px * var(--hb-mv))) scale(calc(1 - 0.03 * var(--hb-mv)));
+  }
+}
+
+/* ---- drawer shell ---- */
+dialog.hb-drawer-dialog {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  overflow: hidden;
+}
+dialog.hb-drawer-dialog::backdrop {
+  background: var(--hb-scrim);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: hb-fade var(--hb-d-back) linear;
+}
+dialog.hb-drawer-dialog.is-closing {
+  pointer-events: none;
+}
+dialog.hb-drawer-dialog.is-closing::backdrop {
+  animation: hb-fade-out var(--hb-d-out) linear forwards;
+}
+.hb-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(430px, 100%);
+  background: var(--glass-dense);
+  border-left: 1px solid var(--hb-pb);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  animation: hb-drawer-in var(--hb-d-sheet) var(--hb-ease);
+}
+.is-closing .hb-drawer {
+  animation: hb-drawer-out var(--hb-d-out) var(--hb-ease) forwards;
+}
+.hb-drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px 20px 24px;
+  scrollbar-width: thin;
+}
+.hb-drawer button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.hb-drawer button:disabled {
+  cursor: default;
+}
+.hb-drawer-id {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 2px 0 14px;
+}
+.hb-drawer-id .hb-tx {
+  gap: 3px;
+}
+.hb-drawer-id h2 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -0.05em;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+.hb-drawer-id p {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.hb-drawer-period {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.hb-drawer-stats {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--hc) 11%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--hc) 26%, var(--line));
+}
+.hb-stat-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.hb-stat-grid .hb-stat b {
+  font-size: 20px;
+  letter-spacing: -0.04em;
+}
+.hb-stat-grid .hb-stat span {
+  line-height: 1.25;
+}
+.hb-summary {
+  margin: -2px 4px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.hb-summary b {
+  color: var(--text);
+  font-weight: 650;
+}
+.hb-card-block {
+  margin-bottom: 12px;
+  padding: 14px 14px 12px;
+  border: 1px solid var(--hb-pb);
+  border-radius: 22px;
+  background: var(--panel);
+}
+.hb-block-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.hb-block-head h3 {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+.hb-block-head small {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.hb-drawer-ctl {
+  display: grid;
+  gap: 9px;
+  margin-bottom: 12px;
+}
+.hb-drawer-ctl .hb-qs button {
+  width: 44px;
+  height: 44px;
+}
+.hb-drawer-ctl .hb-qv input {
+  font-size: 22px;
+}
+.hb-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.hb-drawer-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.hb-drawer-actions .hb-btn {
+  min-height: 46px;
+}
+
+/* week row, month calendar, legend, readout */
+.hb-wk7 {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+.hb-wk {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+}
+.hb-wk i {
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.hb-wk em {
+  font-style: normal;
+  font-size: 12.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.hb-wk .hb-bx {
+  width: 100%;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  border: 1px solid color-mix(in srgb, var(--line) 85%, var(--hc));
+  background: var(--hb-tile);
+  transition: transform 0.13s var(--hb-ease);
+}
+.hb-wk:active:not(:disabled) .hb-bx {
+  transform: scale(0.93);
+}
+.hb-wk.is-done .hb-bx {
+  background: var(--hc);
+  border-color: transparent;
+  color: var(--hb-ink);
+}
+.hb-wk.is-part .hb-bx {
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--hc) 58%, transparent) var(--p),
+    var(--hb-tile) var(--p)
+  );
+  border-color: color-mix(in srgb, var(--hc) 48%, var(--line));
+}
+.hb-wk.is-off .hb-bx {
+  background: none;
+  border-style: dashed;
+  opacity: 0.5;
+}
+.hb-wk.is-future .hb-bx {
+  background: none;
+  opacity: 0.5;
+}
+.hb-wk.is-miss .hb-bx::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+}
+.hb-wk small {
+  min-height: 13px;
+  font-size: 10.5px;
+  line-height: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.hb-wk.is-today i,
+.hb-wk.is-today em {
+  color: var(--accent);
+}
+.hb-wk.is-sel .hb-bx {
+  box-shadow:
+    0 0 0 2px var(--panel),
+    0 0 0 4px var(--accent);
+}
+.hb-cal-head,
+.hb-cal {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.hb-cal-head {
+  margin-bottom: 5px;
+}
+.hb-cal-head i {
+  text-align: center;
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.hb-cal .hb-dc {
+  height: 36px;
+}
+.hb-cal .hb-dc.is-sel {
+  box-shadow:
+    0 0 0 2px var(--panel),
+    0 0 0 4px var(--accent);
+}
+.hb-cal .hb-dc:disabled {
+  cursor: default;
+}
+.hb-card-block .hb-heat {
+  gap: 2px;
+}
+.hb-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.hb-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.hb-legend .hb-hm {
+  width: 11px;
+  height: 11px;
+  aspect-ratio: auto;
+}
+.hb-readout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--hc) 11%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--hc) 24%, var(--line));
+}
+.hb-readout b {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.hb-readout span {
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.hb-chips {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+  margin: 10px 0 8px;
+}
+.hb-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  height: 32px;
+  padding: 0;
+  border-radius: 99px;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.hb-chip.is-on {
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--accent) 20%, var(--panel));
+  color: var(--accent);
+}
+.hb-chip.is-next {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  color: var(--text);
+}
+.hb-card-block .hb-timeline {
+  margin-top: 2px;
+}
+
+/* ---- add / edit dialog ---- */
+.dialog.hb-dialog {
+  --dialog-max-width: 480px;
+  border-radius: 26px;
+  border: 1px solid var(--hb-pb);
+  background: var(--glass-dense);
+  box-shadow: var(--glass-shadow);
+  animation: hb-dialog-in var(--hb-d-sheet) var(--hb-ease) both;
+}
+.dialog.hb-dialog.is-closing {
+  animation: hb-dialog-out var(--hb-d-out) var(--hb-ease) forwards;
+}
+.dialog.hb-dialog .dialog-head {
+  background: transparent;
+  border-bottom: 0;
+  margin-bottom: 10px;
+  padding-block: 4px;
+}
+.dialog.hb-dialog .page-eyebrow {
+  display: none;
+}
+.dialog.hb-dialog .dialog-head h2 {
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.045em;
+}
+.hb-form {
+  display: grid;
+  gap: 16px;
+}
+.hb-form button {
+  font: inherit;
+  cursor: pointer;
+}
+.hb-form button:disabled {
+  cursor: default;
+}
+.hb-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.hb-field > span,
+.hb-field > legend {
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.hb-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 2px;
+}
+.hb-field-row .hb-field > span {
+  font-size: 12px;
+}
+.hb-input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  outline: 0;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.hb-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.hb-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+.hb-icon-grid button,
+.hb-weekday-grid button {
+  height: 44px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--field);
+  color: var(--text);
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+.hb-icon-grid button[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--accent) 22%, var(--field));
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+}
+.hb-weekday-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+.hb-weekday-grid button {
+  font-size: 13px;
+  font-weight: 650;
+}
+.hb-weekday-grid button[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
+.hb-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.hb-quick button {
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.hb-quick button:hover {
+  background: var(--soft);
+}
+.hb-form-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12.5px;
+}
+.hb-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+.hb-form-actions .hb-btn {
+  min-height: 44px;
+}
+.hb-spacer {
+  flex: 1;
+}
+
+/* ---- phones: the drawer becomes a bottom sheet ---- */
+@media (max-width: 760px) {
+  .hb-drawer {
+    top: auto;
+    left: 0;
+    width: 100%;
+    max-height: 92%;
+    border-left: 0;
+    border-top: 1px solid var(--hb-pb);
+    border-radius: 30px 30px 0 0;
+    animation-name: hb-sheet-up;
+  }
+  .is-closing .hb-drawer {
+    animation-name: hb-sheet-down;
+  }
+  .hb-drawer-body {
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  }
+  .hb-form-actions {
+    flex-wrap: wrap;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  dialog.hb-drawer-dialog *,
+  .dialog.hb-dialog {
+    transition-duration: 0.01ms !important;
+  }
+}

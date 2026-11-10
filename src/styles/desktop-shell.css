@@ -1,0 +1,480 @@
+/* Desktop prototype design: tokens, sidebar, top bar, glass panels and the calendar skin.
+   Phones (<= 760 px) keep the existing mobile layout. */
+:root {
+  --font: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --lg-spring: cubic-bezier(0.2, 0.9, 0.25, 1.12);
+  --btn-primary: linear-gradient(125deg, #6540ae, #855acc 72%, #9e70d7);
+  --btn-primary-ink: #fff;
+  --btn-primary-shadow:
+    0 10px 26px rgba(103, 63, 168, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  --calm-hi: rgba(255, 255, 255, 0.95);
+  --calm-lo: rgba(62, 35, 107, 0.05);
+  --panel-shadow:
+    0 7px 22px rgba(44, 24, 72, 0.08), inset 0 1px 0 var(--calm-hi), inset 0 -1px 0 var(--calm-lo);
+  --glass-dense: rgba(252, 250, 255, 0.96);
+  --glass-inset: rgba(235, 226, 248, 0.62);
+  --glass-light: linear-gradient(155deg, rgba(255, 255, 255, 0.34), transparent 65%);
+  --glass-raised: rgba(255, 255, 255, 0.9);
+  --glass-stroke: rgba(255, 255, 255, 0.85);
+  --glass-shadow:
+    0 18px 54px rgba(62, 35, 107, 0.16), 0 2px 8px rgba(62, 35, 107, 0.06),
+    inset 0 1px 0 var(--calm-hi);
+  --seg-off: #5f5470;
+  --seg-well: rgba(62, 35, 107, 0.09);
+  --nav-pill-shadow: rgba(85, 48, 134, 0.12);
+  --lg-thumb: rgba(255, 255, 255, 0.92);
+  --lg-edge-lo: rgba(255, 255, 255, 0.5);
+  --lg-inner: rgba(255, 255, 255, 0.78);
+  --page-bg:
+    radial-gradient(ellipse 55% 43% at 90% 5%, rgba(159, 116, 225, 0.2), transparent 77%),
+    radial-gradient(ellipse 36% 36% at 10% 80%, rgba(211, 182, 246, 0.18), transparent 76%),
+    radial-gradient(ellipse 35% 24% at 55% 50%, rgba(231, 207, 255, 0.14), transparent 82%), #f7f5fb;
+  --sb-w: 240px;
+  --dtop-h: 76px;
+}
+:root[data-theme='dark'] {
+  --btn-primary: linear-gradient(125deg, #b390e9, #d0aff1);
+  --btn-primary-ink: #21162f;
+  --btn-primary-shadow:
+    0 10px 26px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  --calm-hi: rgba(255, 255, 255, 0.07);
+  --calm-lo: rgba(0, 0, 0, 0.2);
+  --panel-shadow:
+    0 7px 22px rgba(0, 0, 0, 0.24), inset 0 1px 0 var(--calm-hi), inset 0 -1px 0 var(--calm-lo);
+  --glass-dense: rgba(32, 25, 45, 0.97);
+  --glass-inset: rgba(30, 22, 43, 0.7);
+  --glass-light: linear-gradient(155deg, rgba(218, 189, 255, 0.045), transparent 65%);
+  --glass-raised: rgba(48, 38, 66, 0.94);
+  --glass-stroke: rgba(216, 188, 255, 0.12);
+  --glass-shadow:
+    0 20px 60px rgba(3, 1, 10, 0.5), 0 2px 9px rgba(3, 1, 10, 0.2), inset 0 1px 0 var(--calm-hi);
+  --seg-off: #bcb2cc;
+  --seg-well: rgba(0, 0, 0, 0.35);
+  --nav-pill-shadow: rgba(0, 0, 0, 0.3);
+  --lg-thumb: rgba(255, 255, 255, 0.15);
+  --lg-edge-lo: rgba(255, 255, 255, 0.09);
+  --lg-inner: rgba(255, 255, 255, 0.14);
+  --page-bg:
+    radial-gradient(ellipse 55% 43% at 90% 5%, rgba(118, 81, 188, 0.26), transparent 74%),
+    radial-gradient(ellipse 40% 36% at 8% 80%, rgba(92, 58, 150, 0.2), transparent 74%), #12101b;
+}
+:root {
+  font-family: var(--font);
+}
+@media (min-width: 761px) {
+  body {
+    background: var(--page-bg);
+  }
+  .app-shell {
+    background: transparent;
+  }
+  .panel {
+    background: var(--glass-light), var(--panel);
+    border-color: color-mix(in srgb, var(--line) 64%, var(--glass-stroke));
+    border-radius: 23px;
+    box-shadow: var(--panel-shadow);
+  }
+  .button-primary {
+    background: var(--btn-primary);
+    color: var(--btn-primary-ink);
+    box-shadow: var(--btn-primary-shadow);
+  }
+  .dialog {
+    border-radius: 24px;
+    border-color: color-mix(in srgb, var(--line) 60%, var(--glass-stroke));
+    background: var(--glass-light), var(--panel);
+    box-shadow: var(--glass-shadow);
+  }
+  .dialog input,
+  .dialog select,
+  .dialog textarea {
+    border-radius: 12px;
+    background: var(--field);
+  }
+
+  /* ---- sidebar ---- */
+  .ritm-glass {
+    --nav-surface: transparent;
+    --nav-light: none;
+    --nav-width: var(--sb-w);
+    --nav-offset: 0px;
+    --nav-gap: 0px;
+  }
+  .ritm-glass .sidebar {
+    inset: 0 auto 0 0;
+    width: var(--sb-w);
+    max-height: none;
+    padding: 22px 14px 18px;
+    transform: none;
+    border: 0;
+    border-right: 1px solid color-mix(in srgb, var(--line) 64%, var(--glass-stroke));
+    border-radius: 0;
+    background: color-mix(in srgb, var(--panel) 55%, transparent);
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    z-index: 45;
+  }
+  .ritm-glass .sidebar .brand-button {
+    display: flex;
+    justify-content: flex-start;
+    width: auto;
+    height: 44px;
+    min-height: 0;
+    margin: 0 0 22px;
+    padding: 0 12px;
+    border-radius: 12px;
+  }
+  .ritm-glass .sidebar .brand {
+    gap: 10px;
+  }
+  .ritm-glass .sidebar .brand-mark {
+    width: 29px;
+    height: 29px;
+    border-radius: 10px;
+  }
+  .ritm-glass .sidebar .brand-name {
+    display: inline;
+    font-size: 22px;
+    font-weight: 650;
+    letter-spacing: -0.045em;
+    color: var(--text);
+  }
+  .ritm-glass .sidebar-nav {
+    gap: 4px;
+  }
+  .ritm-glass .sidebar-nav > button {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    height: 46px;
+    min-height: 46px;
+    padding: 0 14px;
+    margin: 0;
+    border-radius: 16px;
+    font-size: 14px;
+    font-weight: 550;
+    letter-spacing: -0.01em;
+    text-align: left;
+    white-space: nowrap;
+    transition:
+      color 0.2s,
+      background 0.2s,
+      transform 0.13s var(--ease);
+  }
+  .ritm-glass .sidebar-nav .nav-button-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .ritm-glass .sidebar-nav .nav-button-content > svg {
+    width: 22px;
+    height: 22px;
+  }
+  .ritm-glass .sidebar-nav .nav-label {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+  }
+  .ritm-glass .sidebar-nav > button:hover {
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+  .ritm-glass .sidebar-nav > button:active {
+    transform: scale(0.98);
+  }
+  .ritm-glass .sidebar-nav > button.is-active,
+  .ritm-glass.sidebar-light .sidebar-nav > button.is-active {
+    font-weight: 650;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent) 22%, var(--lg-thumb)),
+      var(--lg-thumb)
+    );
+    box-shadow:
+      inset 0 6px 14px -10px var(--lg-inner),
+      inset 0 0 0 1px var(--lg-edge-lo),
+      0 4px 12px -6px var(--nav-pill-shadow);
+  }
+  .ritm-glass .sidebar-nav > button[data-tooltip]::after,
+  .ritm-glass .profile-button[data-tooltip]::after {
+    display: none;
+  }
+  .ritm-glass .sidebar-bottom {
+    margin-top: auto;
+    padding-top: 0;
+  }
+  .ritm-glass .sidebar-bottom::before {
+    display: none;
+  }
+  .ritm-glass .sidebar .profile-button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    height: auto;
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--glass-light), var(--panel);
+    color: var(--text);
+    text-align: left;
+  }
+  .ritm-glass .sidebar .avatar {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 32px;
+    height: 32px;
+    background: linear-gradient(130deg, #e5d7ff, #c4abeb);
+    color: #34234c;
+    font-weight: 650;
+    font-size: 14px;
+  }
+  .ritm-glass .profile-button > span:nth-child(2) {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: hidden;
+    clip-path: none;
+    min-width: 0;
+    flex: 1;
+  }
+  .ritm-glass .profile-button strong {
+    display: block;
+    font-size: 13.5px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ritm-glass .profile-button small,
+  .ritm-glass .profile-button > svg {
+    display: none;
+  }
+
+  /* ---- main column + top bar ---- */
+  .ritm-glass .main-content {
+    margin-left: var(--sb-w);
+    padding-inline: 32px;
+  }
+  .ritm-glass .skip-link {
+    left: calc(var(--sb-w) + 10px);
+  }
+  .ritm-glass .main-content .workspace-top,
+  .ritm-glass .main-content:has(.page-container[data-page]) .workspace-top {
+    position: relative;
+    z-index: 44;
+    height: var(--dtop-h);
+    max-width: 1240px;
+    gap: 12px;
+  }
+  .ritm-glass .main-content:has(.page-container[data-page='calendar']) .workspace-top {
+    max-width: none;
+  }
+  .ritm-glass .workspace-top .workspace-brand,
+  .ritm-glass .workspace-top > span {
+    display: none;
+  }
+  .ritm-glass .workspace-top .dtop-title {
+    flex: 1 1 0;
+    min-width: 0;
+    margin: 0;
+    font-size: 28px;
+    line-height: 1.3;
+    font-weight: 600;
+    letter-spacing: -0.055em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ritm-glass .main-content:has(.page-container[data-page]) .workspace-top .theme-switch {
+    position: static;
+    flex: none;
+  }
+  .page-container[data-page]:not([data-page='day'])
+    .page-heading
+    :is(h1, .page-eyebrow, .page-description) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    margin: 0;
+  }
+}
+@media (min-width: 761px) and (max-width: 1099px) {
+  :root {
+    --sb-w: 76px;
+  }
+  .ritm-glass .sidebar {
+    align-items: center;
+    padding: 22px 12px 18px;
+  }
+  .ritm-glass .sidebar .brand-button {
+    padding: 0;
+  }
+  .ritm-glass .sidebar .brand-name,
+  .ritm-glass .sidebar-nav .nav-label,
+  .ritm-glass .profile-button > span:nth-child(2) {
+    display: none;
+  }
+  .ritm-glass .sidebar-nav {
+    width: 52px;
+  }
+  .ritm-glass .sidebar-nav > button {
+    justify-content: center;
+    padding: 0;
+  }
+  .ritm-glass .sidebar .profile-button {
+    width: auto;
+    padding: 8px;
+    border: 0;
+    border-radius: 50%;
+    background: none;
+  }
+  .ritm-glass .main-content {
+    padding-inline: 24px;
+  }
+}
+
+/* ---- calendar skin (desktop) ---- */
+@media (min-width: 761px) {
+  .cal-page {
+    --cal-topbar: var(--dtop-h);
+    gap: 10px;
+  }
+  .cal-page .cal-toolbar-title {
+    display: none;
+  }
+  .cal-page .cal-toolbar {
+    padding-right: 0;
+    gap: 8px;
+  }
+  .cal-page .cal-icon-button {
+    width: 44px;
+    height: 44px;
+    border-radius: 11px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--muted);
+  }
+  .cal-page .cal-today,
+  .cal-page .cal-now {
+    border-radius: 13px;
+    border: 1px solid color-mix(in srgb, var(--line) 64%, var(--glass-stroke));
+    background: var(--glass-raised);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .cal-page .cal-period h2 {
+    font-size: 17px;
+    font-weight: 650;
+    letter-spacing: -0.035em;
+    text-align: center;
+  }
+  .cal-page .cal-segment {
+    --n: 3;
+    --i: 1;
+    position: relative;
+    isolation: isolate;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    padding: 4px;
+    border: 0;
+    border-radius: 999px;
+    overflow: hidden;
+    background: var(--glass-inset);
+    box-shadow: inset 0 1px 3px var(--seg-well);
+  }
+  .cal-page .cal-segment::before {
+    content: '';
+    position: absolute;
+    z-index: 0;
+    top: 4px;
+    bottom: 4px;
+    left: 4px;
+    width: calc((100% - 8px) / var(--n));
+    border-radius: 999px;
+    pointer-events: none;
+    transform: translateX(calc(var(--i) * 100%));
+    transition: transform 0.3s var(--ease);
+    background: var(--btn-primary);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  }
+  .cal-page .cal-segment button,
+  .cal-page .cal-segment .cal-selected {
+    position: relative;
+    z-index: 1;
+    min-height: 44px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 999px;
+    background: none;
+    box-shadow: none;
+    color: var(--seg-off);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .cal-page .cal-segment .cal-selected {
+    color: var(--btn-primary-ink);
+    font-weight: 650;
+  }
+  .cal-page .cal-toolbar-add {
+    border: 0;
+    border-radius: 13px;
+    background: var(--btn-primary);
+    color: var(--btn-primary-ink);
+    box-shadow: var(--btn-primary-shadow);
+    font-weight: 600;
+  }
+  .cal-page .cal-calendar-panel,
+  .cal-page .cal-month-panel {
+    background: var(--glass-light), var(--panel);
+    border: 1px solid color-mix(in srgb, var(--line) 64%, var(--glass-stroke));
+    border-bottom-width: 0;
+    border-radius: 23px 23px 0 0;
+    box-shadow: var(--panel-shadow);
+  }
+  .cal-page .cal-grid-header,
+  .cal-page .cal-overlap-row,
+  .cal-page .cal-all-day {
+    border-bottom-color: var(--line);
+  }
+  .cal-page .cal-month-cell {
+    background: var(--panel);
+    border-color: var(--line);
+    border-radius: 14px;
+  }
+  .cal-page .cal-month-cell.cal-other-month {
+    background: var(--bg);
+  }
+  .cal-page .cal-month-cell.cal-date-today {
+    background: color-mix(in srgb, var(--soft) 60%, var(--panel));
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  }
+  .cal-page .cal-month-cell:hover {
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  }
+  .cal-page .cal-grid-event strong {
+    color: var(--text);
+  }
+}
+@media (min-width: 761px) and (max-width: 1199px) {
+  .cal-page .cal-toolbar {
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 760px) {
+  .workspace-top .dtop-title {
+    display: none;
+  }
+}
