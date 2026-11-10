@@ -11,6 +11,7 @@ import type { Language } from '../../shared/types';
 export type { Language } from '../../shared/types';
 import { coreEnglish } from '../locales/core';
 import { settingsAssistantEnglish } from '../locales/settings-assistant';
+import { settingsPageEnglish } from '../locales/settings-page';
 import { calendarEnglish } from '../locales/calendar';
 import { financeEnglish } from '../locales/finance';
 import { habitsEnglish } from '../locales/habits';
@@ -37,6 +38,7 @@ export function getLanguage(): Language {
 const english: Record<string, string> = {
   ...coreEnglish,
   ...settingsAssistantEnglish,
+  ...settingsPageEnglish,
   ...calendarEnglish,
   ...financeEnglish,
   ...habitsEnglish,

@@ -195,7 +195,7 @@ export const api = {
   restoreTask: (task: Task) => request<Task>('/tasks/restore', 'POST', { task }),
   transferTaskToGoogle: (id: string) =>
     request<GoogleTransferResult>(`/tasks/${encodeURIComponent(id)}/google`, 'POST', {}),
-  saveSettings: (settings: Settings) => request<Settings>('/settings', 'PATCH', settings),
+  saveSettings: (settings: Partial<Settings>) => request<Settings>('/settings', 'PATCH', settings),
   configureAI: (apiKey: string, model: string) =>
     request<AiStatus>('/settings/openai', 'POST', { apiKey, model }),
   disconnectAI: () => request<AiStatus>('/settings/openai', 'DELETE'),

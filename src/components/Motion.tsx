@@ -268,7 +268,7 @@ export function MotionPage({ name, children }: { name: string; children: ReactNo
     const stages = [
       '.page-heading, .cal-toolbar',
       '.overview-grid > .panel, .habits-analytics-top, .finance-hero, .finance-summary-tile',
-      '.day-work-grid > .panel, .habits-analytics-graphs, .finance-chart-card, .assistant-history, .assistant-chat, .settings-card',
+      '.day-work-grid > .panel, .habits-analytics-graphs, .finance-chart-card, .assistant-history, .assistant-chat, .st-group',
       '.dashboard-habits, .dashboard-bottom, .finance-records, .habits-list-heading',
     ];
     const reveal = (returning = false, scope: Element = root) => {

@@ -36,6 +36,12 @@ import { revealTheme } from './lib/theme-reveal';
 import { addDays, getDayOccurrences, isTimedOccurrence } from './features/calendar-utils';
 import { CalendarPage } from './features/CalendarPage';
 import { SettingsPage } from './features/SettingsPage';
+import {
+  applySettingsPatch,
+  createSerialQueue,
+  rollbackSettingsPatch,
+  type SettingsPatch,
+} from './features/settings/settings-logic';
 import { AssistantPage } from './features/AssistantPage';
 import { DashboardPage } from './components/DashboardPage';
 import { FinancePage } from './features/FinancePage';
@@ -260,11 +266,16 @@ export default function App() {
   }, [data?.settings.notifications]);
   const theme = data?.settings.theme;
   const themeShown = useRef(false);
+  /** The control that changed the theme, so the circular reveal grows from it. */
+  const themeTrigger = useRef<Element | null>(null);
+  /** Newest theme asked for; an older reveal that finishes late must not undo it. */
+  const themeTarget = useRef<'light' | 'dark'>('light');
   const applyTheme = useCallback((next: 'light' | 'dark', trigger?: Element | null) => {
     const root = document.documentElement;
+    themeTarget.current = next;
     const apply = () => {
-      root.dataset.theme = next;
-      setResolvedTheme(next);
+      root.dataset.theme = themeTarget.current;
+      setResolvedTheme(themeTarget.current);
     };
     const changed = themeShown.current && root.dataset.theme !== next;
     themeShown.current = true;
@@ -291,7 +302,8 @@ export default function App() {
       }
       const resolved =
         selected === 'dark' || (selected === 'system' && media.matches) ? 'dark' : 'light';
-      applyTheme(resolved);
+      applyTheme(resolved, themeTrigger.current);
+      themeTrigger.current = null;
     };
     update();
     media.addEventListener('change', update);
@@ -635,6 +647,25 @@ export default function App() {
   const saveSettings = async (settings: Settings) => {
     const saved = await api.saveSettings(settings);
     setData((old) => (old ? { ...old, settings: saved } : old));
+  };
+  const settingsQueue = useRef(createSerialQueue());
+  /** Autosave from Settings: show the change at once, send it in order, undo it if the server refuses. */
+  const saveSettingsPatch = async (patch: SettingsPatch, trigger?: Element | null) => {
+    const before = data?.settings;
+    if (!before) return;
+    if (patch.theme) themeTrigger.current = trigger ?? null;
+    setData((old) => (old ? { ...old, settings: applySettingsPatch(old.settings, patch) } : old));
+    await settingsQueue.current(async () => {
+      try {
+        await api.saveSettings(patch);
+      } catch (failure) {
+        if (patch.theme) themeTrigger.current = trigger ?? null;
+        setData((old) =>
+          old ? { ...old, settings: rollbackSettingsPatch(old.settings, patch, before) } : old,
+        );
+        throw failure;
+      }
+    });
   };
   const ai = useCallback(
     (initial?: string) => {
@@ -1082,7 +1113,7 @@ export default function App() {
                   onGoogleConfigured={async () => {
                     await google.refreshStatus();
                   }}
-                  onSave={saveSettings}
+                  onSave={saveSettingsPatch}
                   onConfigureAI={async (key, model) => {
                     const aiStatus = await api.configureAI(key, model);
                     setData((old) => (old ? { ...old, aiStatus } : old));
