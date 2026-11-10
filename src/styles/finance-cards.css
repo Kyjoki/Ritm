@@ -1,0 +1,316 @@
+/* Finance: tokens, totals and the wallet stack (the active card sits in front, the rest peek out above it). */
+.fin {
+  --fin-income: #2a7f66;
+  --fin-income-bg: rgba(116, 189, 158, 0.16);
+  --fin-expense: #a4506c;
+  --fin-expense-bg: rgba(217, 145, 165, 0.18);
+  --fin-grid: rgba(112, 101, 119, 0.22);
+  --fin-pb: color-mix(in srgb, var(--line) 64%, var(--glass-stroke));
+  --fin-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --fin-mv: 1;
+  --fin-c0: #9c77db;
+  --fin-c1: #d798bc;
+  --fin-c2: #77a6d4;
+  --fin-c3: #79b8a7;
+  --fin-c4: #d7ad76;
+  --fin-c5: #b79cb6;
+  --fin-on-card: #fff;
+  --fin-on-card-2: rgba(255, 255, 255, 0.84);
+  --fin-card-stroke: rgba(255, 255, 255, 0.3);
+  --fin-card-ico: rgba(255, 255, 255, 0.2);
+  --fin-wave: rgba(255, 255, 255, 0.34);
+  --fin-wave-fill: rgba(255, 255, 255, 0.1);
+  --fin-sheen: radial-gradient(
+    circle at 94% 0%,
+    rgba(255, 255, 255, 0.3),
+    rgba(255, 255, 255, 0) 46%
+  );
+  --fin-badge-bg: #fff;
+  --fin-badge-ink: #5c37b0;
+  --fin-card-drop: rgba(44, 24, 72, 0.3);
+  --fin-k-violet: linear-gradient(140deg, #55309f, #6d46c2 60%, #8860da);
+  --fin-g-violet: rgba(123, 82, 208, 0.55);
+  --fin-k-indigo: linear-gradient(140deg, #263891, #4058bd 60%, #5e78e0);
+  --fin-g-indigo: rgba(74, 99, 204, 0.55);
+  --fin-k-plum: linear-gradient(140deg, #66217f, #96418f 60%, #bb5fa8);
+  --fin-g-plum: rgba(160, 72, 154, 0.5);
+  --fin-k-teal: linear-gradient(140deg, #08505a, #1c7d6e 60%, #2c9580);
+  --fin-g-teal: rgba(42, 150, 132, 0.5);
+  --fin-k-graphite: linear-gradient(140deg, #232f48, #44588a 60%, #6279ae);
+  --fin-g-graphite: rgba(78, 101, 146, 0.55);
+  --fin-k-rose: linear-gradient(140deg, #7d1f45, #ae3f6b 60%, #cf6a8f);
+  --fin-g-rose: rgba(190, 75, 115, 0.5);
+  --fin-k-forest: linear-gradient(140deg, #123f28, #236a46 60%, #388a5c);
+  --fin-g-forest: rgba(50, 135, 90, 0.5);
+}
+:root[data-theme='dark'] .fin {
+  --fin-income: #86d4b6;
+  --fin-expense: #eda2b9;
+  --fin-expense-bg: rgba(217, 145, 165, 0.16);
+  --fin-grid: rgba(170, 160, 186, 0.22);
+  --fin-card-drop: rgba(0, 0, 0, 0.55);
+}
+@media (prefers-reduced-motion: reduce) {
+  .fin {
+    --fin-mv: 0;
+  }
+}
+
+/* ---- totals ---- */
+.fin-totals {
+  display: grid;
+  gap: 2px;
+}
+.fin-totals-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.fin-totals-values {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 10px;
+  font-variant-numeric: tabular-nums;
+}
+.fin-totals-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.fin-total-main {
+  font-size: 34px;
+  font-weight: 650;
+  letter-spacing: -0.055em;
+  line-height: 1.12;
+}
+.fin-total-sub {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  color: var(--muted);
+}
+.fin-totals-sep {
+  font-size: 22px;
+  color: var(--muted);
+}
+.fin-totals-note {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ---- stack ---- */
+.fin-stack {
+  position: relative;
+  isolation: isolate;
+  padding-top: calc((var(--n) - 1) * 44px);
+  margin-top: 4px;
+  padding-bottom: 16px;
+}
+.fin-stack::before {
+  content: '';
+  display: block;
+  aspect-ratio: 85.6 / 54;
+}
+.fin-card {
+  --kbg: var(--fin-k-violet);
+  --kglow: var(--fin-g-violet);
+  position: absolute;
+  inset: 0 0 auto;
+  display: block;
+  width: 100%;
+  aspect-ratio: 85.6 / 54;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--fin-card-stroke);
+  border-radius: 24px;
+  background: var(--kbg);
+  color: var(--fin-on-card);
+  text-align: left;
+  font: inherit;
+  overflow: hidden;
+  cursor: pointer;
+  transform-origin: 50% 0;
+  transform: translate3d(0, var(--ty, 0), 0) scale(var(--s, 1));
+  filter: brightness(var(--br, 1));
+  box-shadow: 0 16px 30px -16px var(--fin-card-drop);
+  transition:
+    transform calc(var(--fin-mv) * 380ms + 1ms) var(--fin-ease),
+    filter 0.3s ease,
+    box-shadow 0.3s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.fin-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--fin-sheen);
+  pointer-events: none;
+}
+.fin-card.is-violet {
+  --kbg: var(--fin-k-violet);
+  --kglow: var(--fin-g-violet);
+}
+.fin-card.is-indigo {
+  --kbg: var(--fin-k-indigo);
+  --kglow: var(--fin-g-indigo);
+}
+.fin-card.is-plum {
+  --kbg: var(--fin-k-plum);
+  --kglow: var(--fin-g-plum);
+}
+.fin-card.is-teal {
+  --kbg: var(--fin-k-teal);
+  --kglow: var(--fin-g-teal);
+}
+.fin-card.is-graphite {
+  --kbg: var(--fin-k-graphite);
+  --kglow: var(--fin-g-graphite);
+}
+.fin-card.is-rose {
+  --kbg: var(--fin-k-rose);
+  --kglow: var(--fin-g-rose);
+}
+.fin-card.is-forest {
+  --kbg: var(--fin-k-forest);
+  --kglow: var(--fin-g-forest);
+}
+.fin-card.is-sel {
+  box-shadow:
+    0 24px 46px -16px var(--kglow),
+    0 0 36px -6px var(--kglow);
+}
+.fin-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.fin-card-wave {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.fin-card-wave path {
+  fill: none;
+  stroke: var(--fin-wave);
+  stroke-width: 1.3;
+}
+.fin-card-wave path.is-fill {
+  fill: var(--fin-wave-fill);
+  stroke: none;
+}
+.fin-card-face,
+.fin-card-strip {
+  position: absolute;
+  inset: 0 0 auto;
+  transition: opacity 0.22s ease;
+}
+.fin-card-face {
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 22px;
+}
+.fin-card-top {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-right: 40px;
+}
+.fin-card-name {
+  overflow: hidden;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fin-card-sub {
+  font-size: 12px;
+  color: var(--fin-on-card-2);
+}
+.fin-card-balance {
+  margin-top: 10px;
+  font-size: 32px;
+  font-weight: 650;
+  letter-spacing: -0.055em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fin-card-bottom {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.fin-card-icon {
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  border-radius: 999px;
+  background: var(--fin-card-ico);
+}
+.fin-card-meta {
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--fin-on-card-2);
+}
+.fin-card-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  height: 44px;
+  padding: 0 22px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  opacity: 0;
+}
+.fin-card-strip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fin-card-strip-sum {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fin-card:not(.is-front) .fin-card-face {
+  opacity: 0;
+}
+.fin-card:not(.is-front) .fin-card-strip {
+  opacity: 1;
+}
+.fin-card-check {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--fin-badge-bg);
+  color: var(--fin-badge-ink);
+  opacity: 0;
+  transform: scale(calc(1 - 0.8 * var(--fin-mv)));
+  transition:
+    transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1),
+    opacity 0.2s;
+}
+.fin-card.is-sel .fin-card-check {
+  opacity: 1;
+  transform: scale(1);
+  transition-delay: 0.18s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fin-card,
+  .fin-card-check {
+    transition-duration: 1ms;
+    transition-delay: 0s;
+  }
+}
