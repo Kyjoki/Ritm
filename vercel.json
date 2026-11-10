@@ -14,7 +14,8 @@
       "claude/ritm-workout-live-edit": false,
       "claude/ritm-habits-native": false,
       "claude/ritm-card-operations-server": false,
-      "claude/ritm-web-habits": false
+      "claude/ritm-web-habits": false,
+      "claude/ritm-web-workouts": false
     }
   },
   "framework": "vite",

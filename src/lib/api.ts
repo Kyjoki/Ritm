@@ -18,6 +18,9 @@ import type {
   Settings,
   Task,
   TaskInput,
+  WorkoutDoc,
+  WorkoutKind,
+  WorkoutsSnapshot,
 } from '../../shared/types';
 import { getLanguage, translate } from './i18n';
 import type { TelegramStatus } from '../../shared/types';
@@ -46,6 +49,8 @@ export class ApiError extends Error {
     public status: number,
     public code?: string,
     public retryAfterSeconds?: number,
+    /** The stored document the server sent with a 409 on /api/workouts. */
+    public current?: unknown,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -95,6 +100,7 @@ async function request<T>(
       response.status === 429 && Number.isInteger(delay) && delay! > 0 && delay! <= 3600
         ? delay
         : undefined,
+      data?.current,
     );
   }
   if (response.status === 204) return undefined as T;
@@ -164,6 +170,23 @@ export const api = {
     request<{ deleted: true }>(`/finance/${encodeURIComponent(id)}`, 'DELETE', {
       expectedUpdatedAt,
     }),
+  workouts: (signal?: AbortSignal) =>
+    request<WorkoutsSnapshot>('/workouts', 'GET', undefined, signal),
+  putWorkout: (
+    kind: WorkoutKind,
+    id: string,
+    data: Record<string, unknown>,
+    expectedUpdatedAt: string | null,
+  ) =>
+    request<WorkoutDoc>(`/workouts/${kind}/${encodeURIComponent(id)}`, 'PUT', {
+      data,
+      expectedUpdatedAt,
+    }),
+  deleteWorkout: (kind: WorkoutKind, id: string, expectedUpdatedAt: string) =>
+    request<void>(
+      `/workouts/${kind}/${encodeURIComponent(id)}?expectedUpdatedAt=${encodeURIComponent(expectedUpdatedAt)}`,
+      'DELETE',
+    ),
   createTask: (task: TaskInput) => request<Task>('/tasks', 'POST', task),
   updateTask: (id: string, task: Partial<TaskInput> & { occurrenceDate?: string }) =>
     request<Task>(`/tasks/${encodeURIComponent(id)}`, 'PATCH', task),

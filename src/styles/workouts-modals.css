@@ -1,0 +1,449 @@
+/* ---- modals (they live in the shell's #sheet) ---- */
+.wkm-note {
+  margin: 2px 0 16px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.wkm-btns {
+  display: grid;
+  gap: 8px;
+}
+.wkm-sub {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 4px 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.wk-mchs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.wk-mch {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--glass-inset);
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.wk-mch.on {
+  background: color-mix(in srgb, var(--mc, var(--accent)) 26%, transparent);
+  color: color-mix(in srgb, var(--mc, var(--accent)) 72%, var(--text));
+  box-shadow: inset 0 0 0 1px var(--mc, var(--accent));
+}
+.wk-srch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
+  padding: 0 14px;
+  border-radius: 14px;
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.wk-srch .wk-i {
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+}
+.wk-srch input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  outline: 0;
+  font-size: 15px;
+}
+.wk-srch:focus-within {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.wk-gchips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 12px 0;
+}
+.wk-gch {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--glass-inset);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.wk-gch.on {
+  background: var(--btn-primary);
+  color: var(--btn-primary-ink);
+  box-shadow: none;
+}
+.wkp-list {
+  max-height: min(380px, 42vh);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+.wkp-r {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 50px;
+  border-bottom: 1px solid var(--line);
+}
+.wkp-r .nm {
+  flex: 1;
+  min-height: 50px;
+  padding: 0 6px;
+  font-size: 14.5px;
+  font-weight: 550;
+  text-align: left;
+  border-radius: 10px;
+}
+.wkp-r .nm:hover:not(:disabled) {
+  color: var(--accent);
+}
+.wkp-r.taken .nm {
+  opacity: 0.5;
+  cursor: default;
+}
+.wkp-r .note {
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.7;
+}
+.wk-addg {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.wk-mcb {
+  border-radius: 999px;
+}
+.wkp-new {
+  padding: 16px 0 6px;
+}
+.wkp-new .btn {
+  margin-top: 12px;
+}
+.wk-opt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  text-align: left;
+  transition: background 0.15s;
+}
+.wk-opt + .wk-opt {
+  margin-top: 4px;
+}
+.wk-opt:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.wk-opt.on {
+  background: var(--soft);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.wk-opt .st {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background: var(--glass-inset);
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.wk-opt .st .wk-i {
+  width: 17px;
+  height: 17px;
+}
+.wk-opt .tx {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.wk-opt .tx b {
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.wk-opt .tx small {
+  font-size: 12px;
+  color: var(--muted);
+}
+.wk-opt .ck {
+  color: var(--accent);
+  width: 20px;
+  height: 20px;
+}
+.wk-nstep {
+  display: grid;
+  grid-template-columns: 76px 1fr 76px;
+  gap: 8px;
+}
+.wk-nstep button {
+  height: 50px;
+  border-radius: 16px;
+  background: var(--soft);
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.wk-nstep button:hover {
+  background: var(--hover);
+}
+.dialog.wkm {
+  --dialog-max-width: 520px;
+}
+.dialog.wkm.wk-bare {
+  --dialog-padding-x: 0px;
+  --dialog-padding-y: 0px;
+  padding: 0 0 4px;
+  overflow-x: hidden;
+}
+.dialog.wkm.wk-bare .dialog-head .page-eyebrow {
+  display: none;
+}
+.wkp-tag {
+  padding: 4px 6px 12px;
+}
+.wk-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: center;
+  padding: 40px 16px;
+  flex-direction: column;
+}
+.wk-state .wk-i {
+  width: 20px;
+  height: 20px;
+}
+.dialog.wkm.wk-bare .dialog-head {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+  min-height: 0;
+  background: none;
+}
+.dialog.wkm.wk-bare .dialog-head h2 {
+  display: none;
+}
+.dialog.wkm.wk-bare .dialog-head .icon-button {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: none;
+  width: 38px;
+  height: 38px;
+}
+.wkf-hd {
+  position: relative;
+  overflow: hidden;
+  padding: 24px 24px 20px;
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+.wkf-hd::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--wk-sheen);
+  pointer-events: none;
+}
+.wkf-hd > * {
+  position: relative;
+}
+.wkf-hd .top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-right: 44px;
+}
+.wkf-hd .tl {
+  width: 50px;
+  height: 50px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.2);
+  display: grid;
+  place-items: center;
+  font-size: 21px;
+  font-weight: 700;
+  flex: none;
+}
+.wkf-hd h2 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+.wkf-hd .top span {
+  font-size: 13px;
+  opacity: 0.86;
+}
+.wkf-hd .tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 18px;
+}
+.wkf-hd .tiles div {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 16px;
+  padding: 10px 12px;
+  min-width: 0;
+}
+.wkf-hd .tiles b {
+  display: block;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+}
+.wkf-hd .tiles small {
+  font-size: 11px;
+  opacity: 0.86;
+}
+.wkf-body {
+  display: grid;
+  gap: 12px;
+  padding: 16px 20px 20px;
+}
+.wkx {
+  padding: 14px;
+  border-radius: 22px;
+}
+.wkx .hd {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 8px;
+}
+.wkx .hd > div:first-child {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.wkx .hd b {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.wkx .vl {
+  text-align: right;
+}
+.wkx .vl b {
+  display: block;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.wkx .vl small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.wkr {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0 10px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.wkr .n {
+  min-width: 22px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.wkr.best {
+  background: var(--soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+  font-weight: 700;
+}
+.wkr.best .n {
+  color: var(--accent);
+}
+.wkr .rec {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--wk-gold);
+  background: color-mix(in srgb, var(--wk-gold) 18%, transparent);
+}
+.wkr .rec .wk-i {
+  width: 12px;
+  height: 12px;
+}
+.wkf-hab {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 18px;
+}
+.wkf-hab .st {
+  width: 32px;
+  height: 32px;
+  border-radius: 11px;
+  background: var(--wk-income-bg);
+  color: var(--wk-income);
+  display: grid;
+  place-items: center;
+}
+.wkf-hab .st .wk-i {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2.8;
+}
+.wkf-hab b {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dialog.wkm .wk-srch input {
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  outline: 0;
+  min-height: 0;
+}
+.dialog.wkm .wk-inp,
+.dialog.wkm select.wk-inp {
+  min-height: 50px;
+  border: 0;
+}

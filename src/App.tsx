@@ -4,6 +4,7 @@ import {
   CalendarDays,
   Check,
   CircleAlert,
+  Dumbbell,
   LayoutDashboard,
   ListChecks,
   LoaderCircle,
@@ -38,6 +39,7 @@ import { AssistantPage } from './features/AssistantPage';
 import { DashboardPage } from './components/DashboardPage';
 import { FinancePage } from './features/FinancePage';
 import { HabitsPage } from './features/HabitsPage';
+import { WorkoutsPage } from './features/WorkoutsPage';
 import { TaskDialog } from './components/TaskDialog';
 import { LoginPage } from './features/LoginPage';
 import { GoogleEventDialog } from './components/GoogleEventDialog';
@@ -57,14 +59,31 @@ import {
 
 const EMPTY_GOOGLE_EVENTS: GoogleCalendarEvent[] = [];
 
-type Page = 'day' | 'calendar' | 'habits' | 'assistant' | 'finance' | 'settings' | 'login-preview';
-const SIDEBAR_ORDER = ['day', 'calendar', 'habits', 'finance', 'assistant', 'settings'] as const;
+type Page =
+  | 'day'
+  | 'calendar'
+  | 'habits'
+  | 'assistant'
+  | 'finance'
+  | 'workouts'
+  | 'settings'
+  | 'login-preview';
+const SIDEBAR_ORDER = [
+  'day',
+  'calendar',
+  'habits',
+  'finance',
+  'assistant',
+  'workouts',
+  'settings',
+] as const;
 const navigation = [
   { id: 'day' as const, label: 'Мой день', icon: LayoutDashboard },
   { id: 'calendar' as const, label: 'Календарь', icon: CalendarDays },
   { id: 'habits' as const, label: 'Привычки', icon: ListChecks },
   { id: 'assistant' as const, label: 'ИИ-помощник', icon: Sparkles },
   { id: 'finance' as const, label: 'Финансы', icon: WalletCards },
+  { id: 'workouts' as const, label: 'Тренировки', icon: Dumbbell },
   { id: 'settings' as const, label: 'Настройки', icon: Settings2 },
 ];
 function currentPage(): Page {
@@ -1021,6 +1040,18 @@ export default function App() {
               </MotionPage>
             )}
           </Activity>
+          <Activity mode={page === 'workouts' ? 'visible' : 'hidden'}>
+            {(page === 'workouts' || visitedPages.current.has('workouts')) && (
+              <MotionPage name="workouts">
+                <WorkoutsPage
+                  active={page === 'workouts'}
+                  timeZone={data.settings.timeZone}
+                  today={today}
+                  onNotify={notify}
+                />
+              </MotionPage>
+            )}
+          </Activity>
           <Activity mode={page === 'settings' ? 'visible' : 'hidden'}>
             {(page === 'settings' || visitedPages.current.has('settings')) && (
               <MotionPage name="settings">
@@ -1136,7 +1167,9 @@ export default function App() {
 function MobileNavigation({ page, onNavigate }: { page: Page; onNavigate: (page: Page) => void }) {
   const { t: tr } = useI18n();
   const [moreOpen, setMoreOpen] = useState(false);
-  const overflowItems = navigation.filter(({ id }) => id === 'finance' || id === 'settings');
+  const overflowItems = navigation.filter(
+    ({ id }) => id === 'finance' || id === 'workouts' || id === 'settings',
+  );
   const currentOverflow = overflowItems.find(({ id }) => id === page);
   useEffect(() => {
     setMoreOpen(false);

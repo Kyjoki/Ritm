@@ -1,0 +1,175 @@
+/* ---- phone: one column, the title is part of the page, no left list ---- */
+@media (max-width: 759px) {
+  h1.wk-ptitle {
+    display: block;
+    margin: 6px 4px 16px;
+    font-size: 30px;
+    line-height: 1.2;
+  }
+  .wk-next .row .wk-glassw:nth-child(2) {
+    display: none;
+  }
+
+  .wk-pc .ed span {
+    display: none;
+  }
+  .wk-pc .ed {
+    width: 38px;
+    padding: 0;
+    justify-content: center;
+  }
+  .wk-pc {
+    grid-template-columns: 44px minmax(0, 1fr) auto auto;
+    gap: 10px;
+  }
+  .wk-hero-main {
+    gap: 14px;
+  }
+  .wk-ring {
+    width: 84px;
+    height: 84px;
+  }
+  .wk-rh {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .wk-rt {
+    flex: 1;
+  }
+  .wk-rpg {
+    order: 5;
+    flex: 1 1 100%;
+    max-width: none;
+    margin: 0;
+  }
+  .wk-rh > .btn {
+    order: 6;
+    flex: 1;
+  }
+  .wk-mw {
+    order: 4;
+  }
+  .wk-rl {
+    display: none;
+  }
+  .wk-listbtn {
+    display: inline-flex;
+  }
+  .wk-menu .narrow-only {
+    display: flex;
+  }
+  .wk-tb {
+    grid-template-columns: 26px minmax(0, 1fr) 78px 64px 44px;
+    gap: 6px;
+    padding: 0 2px;
+  }
+  .wk-v {
+    font-size: 16px;
+  }
+  .wk-xc .hd h2 {
+    font-size: 19px;
+  }
+  .wk-st button {
+    min-width: 84px;
+  }
+  .wk-rm .wk-rest {
+    order: -1;
+    flex-direction: row;
+    justify-content: space-between;
+    padding: 12px 14px;
+  }
+  .wk-rest .wk-ring {
+    width: 76px;
+    height: 76px;
+  }
+  .wk-rest .wk-ring .mid b {
+    font-size: 19px;
+  }
+  .wk-rest .wk-ring .mid small {
+    display: none;
+  }
+  .wk-phero {
+    position: static;
+    margin-bottom: 6px;
+  }
+  .wk-phero h1 {
+    font-size: 26px;
+  }
+  .wk-r > .wk-sh:first-child {
+    margin-top: 26px;
+  }
+  .wk-recs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .wkf-hd .tiles b {
+    font-size: 15px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wk,
+  .wk *,
+  .wkm,
+  .wkm * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+.wk .btn,
+.wkm .btn {
+  min-height: 48px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, var(--glass-stroke));
+  background: var(--glass-light), var(--glass-raised);
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 650;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition:
+    transform 0.13s var(--ease),
+    background 0.2s;
+  text-wrap: balance;
+  cursor: pointer;
+}
+.wk .btn:active,
+.wkm .btn:active {
+  transform: scale(0.97);
+}
+.wk .btn.primary,
+.wkm .btn.primary {
+  background: var(--btn-primary);
+  color: var(--btn-primary-ink);
+  border-color: transparent;
+  box-shadow: var(--btn-primary-shadow);
+}
+.wk .btn.danger,
+.wkm .btn.danger {
+  color: var(--danger);
+}
+.wk .btn.wide,
+.wkm .btn.wide {
+  width: 100%;
+}
+.wk .btn.sm,
+.wkm .btn.sm {
+  min-height: 44px;
+  padding: 0 14px;
+  font-size: 12px;
+}
+.wk .btn:disabled,
+.wkm .btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.wk button,
+.wkm button {
+  cursor: pointer;
+}
+.wk-tiny {
+  width: 20px;
+  height: 20px;
+}
