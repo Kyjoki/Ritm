@@ -205,17 +205,4 @@ extension View {
   func habitSwap(key: String, direction: CGFloat = 0) -> some View {
     modifier(HabitSwap(key: key, direction: direction))
   }
-
-  /// `pop`: the tile, button or badge that was just toggled swells to 110 % and settles.
-  func habitPop<Trigger: Equatable>(_ trigger: Trigger, reduceMotion: Bool) -> some View {
-    keyframeAnimator(initialValue: 1.0, trigger: reduceMotion ? nil : trigger) { content, scale in
-      content.scaleEffect(scale)
-    } keyframes: { _ in
-      KeyframeTrack {
-        LinearKeyframe(0.8, duration: 0.001)
-        CubicKeyframe(1.1, duration: 0.2)
-        CubicKeyframe(1.0, duration: 0.14)
-      }
-    }
-  }
 }

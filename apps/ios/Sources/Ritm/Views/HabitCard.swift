@@ -96,8 +96,7 @@ struct HabitCard: View, Equatable {
           .foregroundStyle(HabitPalette.ink)
           .frame(width: 26, height: 26)
           .background(tint.base, in: Circle())
-          .habitPop(done, reduceMotion: reduceMotion)
-          .transition(reduceMotion ? .opacity : .scale(scale: 0.6).combined(with: .opacity))
+          .transition(.opacity)
           .accessibilityLabel(store.text("Выполнено", "Done"))
       }
     }
@@ -174,18 +173,13 @@ struct HabitDoneButton: View {
   let action: () -> Void
   @Environment(RitmStore.self) private var store
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  /// The pop plays for the user's own tap, not when another day flips `done` under the card.
-  @State private var taps = 0
 
   var body: some View {
-    Button {
-      taps += 1
-      action()
-    } label: {
+    Button(action: action) {
       HStack(spacing: 7) {
         if done {
           RitmSymbol("checkmark").font(.system(size: 15, weight: .bold)).foregroundStyle(tint.base)
-            .transition(reduceMotion ? .opacity : .scale(scale: 0.5).combined(with: .opacity))
+            .transition(.opacity)
         }
         Text(done ? store.text("Выполнено", "Done") : store.text("Выполнить", "Complete"))
           .ritmFont(13.5, weight: .semibold, tracking: -0.01)
@@ -194,12 +188,11 @@ struct HabitDoneButton: View {
       .frame(maxWidth: .infinity, minHeight: height)
       .background(done ? tint.buttonDone : tint.button, in: Capsule())
       .overlay { Capsule().strokeBorder(tint.buttonRim, lineWidth: 1) }
-      .habitPop(taps, reduceMotion: reduceMotion)
       .contentShape(Capsule())
     }
     .buttonStyle(RitmPressStyle(scale: 0.98))
     .disabled(busy || !canWrite)
-    .animation(reduceMotion ? nil : RitmMotion.inflate(0.3), value: done)
+    .animation(reduceMotion ? nil : RitmMotion.easeOut(0.25), value: done)
     .accessibilityAddTraits(done ? .isSelected : [])
   }
 }
@@ -357,7 +350,6 @@ struct HabitWeekStrip: View {
           isToday: date == today, isSelected: date == day && date != today, radius: 12
         )
         .frame(height: 38)
-        .habitPop(state == .done, reduceMotion: reduceMotion)
       }
       .buttonStyle(RitmPressStyle())
       .disabled(!canMark || busy || !store.canWrite)
