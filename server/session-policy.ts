@@ -7,10 +7,17 @@ export const MAX_DEVICE_NAME = 60;
 
 export const sessionPolicy: Record<SessionClient, { slidingMs: number; absoluteMs: number }> = {
   web: { slidingMs: 12 * HOUR, absoluteMs: 7 * DAY },
+  // «Запомнить этот компьютер»: stays signed in while used at least every two months, and is
+  // asked for the password again after a year at the latest.
+  'web-remembered': { slidingMs: 60 * DAY, absoluteMs: 365 * DAY },
   // The owner's iPhone stays signed in while it is used at least once a year; it ends only by
   // signing out or «Выйти на всех других устройствах».
   ios: { slidingMs: 365 * DAY, absoluteMs: 3650 * DAY },
 };
+
+/** The stored client value of a session row; anything unknown is a plain web session. */
+export const parseSessionClient = (value: unknown): SessionClient =>
+  value === 'ios' || value === 'web-remembered' ? value : 'web';
 
 /** Sliding expiry never exceeds the absolute limit. */
 export const slidingExpiry = (client: SessionClient, now: number, absoluteExpiresAt: number) =>

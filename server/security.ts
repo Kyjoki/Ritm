@@ -38,6 +38,8 @@ export interface LoginInput {
   totp?: string;
   recoveryCode?: string;
   client?: SessionClient;
+  /** Web only: keep this computer signed in for months. */
+  remember?: boolean;
   deviceName?: string;
 }
 const maxPasswordChecks = 4;
@@ -342,7 +344,8 @@ export class Security {
         await this.twoFactor.verify({ code: input.totp, recoveryCode: input.recoveryCode });
       });
       await this.throttle.recordSuccess();
-      const client: SessionClient = input.client ?? 'web';
+      const client: SessionClient =
+        input.client === 'ios' ? 'ios' : input.remember ? 'web-remembered' : 'web';
       const now = Date.now(),
         policy = sessionPolicy[client],
         absolute = now + policy.absoluteMs;
@@ -401,7 +404,7 @@ export class Security {
       ...(await this.twoFactor.status()),
       sessions: records.map((record) => ({
         id: record.hash.slice(this.sessionPrefix.length),
-        client: record.client,
+        client: record.client === 'ios' ? 'ios' : 'web',
         deviceName: record.deviceName || 'Неизвестное устройство',
         createdAt: isoSeconds(
           record.createdAt ||

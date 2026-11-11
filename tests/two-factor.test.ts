@@ -123,6 +123,10 @@ test('device names are bounded, cleaned and derived from the User-Agent', () => 
   assert.equal(deviceNameFromUserAgent(undefined), 'Неизвестное устройство');
   assert.deepEqual(sessionPolicy.web, { slidingMs: 12 * HOUR, absoluteMs: 7 * DAY });
   assert.deepEqual(sessionPolicy.ios, { slidingMs: 365 * DAY, absoluteMs: 3650 * DAY });
+  assert.deepEqual(sessionPolicy['web-remembered'], {
+    slidingMs: 60 * DAY,
+    absoluteMs: 365 * DAY,
+  });
 });
 
 async function fixture(t: TestContext, mockDate = false) {
@@ -328,6 +332,31 @@ test('web sessions slide for 12 hours inside a 7 day absolute limit', async (t) 
   assert.equal((await call('/api/security', 'GET', active)).status, 200);
   t.mock.timers.setTime(start + 7 * DAY + 60_000);
   assert.equal((await call('/api/security', 'GET', active)).status, 401, 'absolute limit');
+});
+
+test('a remembered computer slides for 60 days inside a 365 day limit and shows as web', async (t) => {
+  const { call, signedIn } = await fixture(t, true);
+  const idle = await signedIn({ remember: true });
+  const active = await signedIn({ remember: true });
+  const overview = await (await call('/api/security', 'GET', active)).json();
+  assert.ok(overview.sessions.every((session: { client: string }) => session.client === 'web'));
+  t.mock.timers.setTime(start + 59 * DAY);
+  assert.equal((await call('/api/security', 'GET', idle)).status, 200);
+  t.mock.timers.setTime(start + 59 * DAY + 60 * DAY + 60_000);
+  assert.equal((await call('/api/security', 'GET', idle)).status, 401, 'idle for over 60 days');
+  for (let visit = 1; visit <= 8; visit++) {
+    t.mock.timers.setTime(start + visit * 45 * DAY);
+    assert.equal((await call('/api/security', 'GET', active)).status, 200, 'used every 45 days');
+  }
+  t.mock.timers.setTime(start + 365 * DAY + 60_000);
+  assert.equal((await call('/api/security', 'GET', active)).status, 401, 'absolute limit');
+});
+
+test('without remember a plain web login keeps the short policy', async (t) => {
+  const { call, signedIn } = await fixture(t, true);
+  const plain = await signedIn({ remember: false });
+  t.mock.timers.setTime(start + 13 * HOUR);
+  assert.equal((await call('/api/security', 'GET', plain)).status, 401);
 });
 
 test('iOS sessions slide for a year and end only after a year without use', async (t) => {

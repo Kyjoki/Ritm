@@ -19,7 +19,8 @@
       "claude/ritm-web-finance": false,
       "claude/ritm-web-motion": false,
       "claude/ritm-web-finance-fixes": false,
-      "claude/ritm-web-sidebar-contrast": false
+      "claude/ritm-web-sidebar-contrast": false,
+      "claude/ritm-web-login": false
     }
   },
   "framework": "vite",

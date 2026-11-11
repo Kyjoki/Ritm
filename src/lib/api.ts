@@ -43,6 +43,10 @@ export interface LoginSecondFactor {
   totp?: string;
   recoveryCode?: string;
 }
+export interface LoginOptions extends LoginSecondFactor {
+  /** Keep this computer signed in for months. */
+  remember?: boolean;
+}
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -114,7 +118,7 @@ async function request<T>(
 }
 export const api = {
   session: () => request<{ authenticated: boolean; requiresLogin: boolean }>('/session'),
-  login: (login: string, password: string, factor: LoginSecondFactor = {}) =>
+  login: (login: string, password: string, factor: LoginOptions = {}) =>
     request('/login', 'POST', { login, password, client: 'web', ...factor }),
   security: () => request<SecurityOverview>('/security'),
   setupTotp: () => request<{ secret: string; otpauthUrl: string }>('/security/totp/setup', 'POST'),

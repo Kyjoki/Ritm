@@ -122,6 +122,7 @@ const loginSchema = z
     totp: totpCode.optional(),
     recoveryCode: recoveryCodeText.optional(),
     client: z.enum(['web', 'ios']).optional(),
+    remember: z.boolean().optional(),
     deviceName: z.string().max(200).optional(),
   })
   .strict();
