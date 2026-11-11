@@ -12,6 +12,16 @@ extension CalendarView {
   }
   var warning: Bool { failed || partial || needsReauth }
 
+  /// The short state beside «Google Calendar» in the side menu.
+  var googleState: String {
+    if loading && fetchedAt == nil { return store.text("Загрузка…", "Loading…") }
+    if failed { return store.text("Ошибка", "Error") }
+    if needsReauth { return store.text("Нужен вход", "Sign in") }
+    if partial { return store.text("Частично", "Partial") }
+    if connected { return store.text("Синхронизирован", "Synced") }
+    return store.text("Не подключён", "Not connected")
+  }
+
   var statusTitle: String {
     if loading && fetchedAt == nil { return store.text("Загружаем Google Calendar…", "Loading Google Calendar…") }
     if failed { return store.text("Google Calendar требует внимания", "Google Calendar needs attention") }

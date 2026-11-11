@@ -6,10 +6,15 @@ import SwiftUI
 /// column, vertical separators inside the hours only, overlaps side by side (or behind a per-day
 /// button in the narrow week), swipe to change the period and a long press that lifts an entry
 /// to move it (CalendarWeekDrag.swift). The hour grid is the only vertical scroll; the rows above
-/// it stay put.
-struct CalendarWeekGrid: View {
+/// it stay put. Below midnight the lines carry on for two hours and down to the screen's bottom
+/// edge, behind the tab bar, as in Google Calendar.
+///
+/// Equatable: the page redraws for many small things, the grid only when its days, data or
+/// scroll target change.
+struct CalendarWeekGrid: View, Equatable {
   let days: [String]
-  let entries: [String: [DayOccurrence]]
+  let dayModel: CalendarDayModel
+  let generation: Int
   let today: String
   let timeZoneLabel: String
   let jumpToNow: Int
@@ -31,31 +36,43 @@ struct CalendarWeekGrid: View {
 
   private let hour = CGFloat(CalendarPlan.hourHeight)
   private let timeColumn = CGFloat(CalendarPlan.timeColumn)
-  /// The room under the last hour, so it scrolls clear of the «+» button and the undated chip.
-  private let bottomClearance: CGFloat = 88
+  /// Empty hours under midnight, before the bottom inset (the tab bar's room) is added.
+  private let tailHours: CGFloat = 2
+
+  nonisolated static func == (left: CalendarWeekGrid, right: CalendarWeekGrid) -> Bool {
+    left.days == right.days && left.generation == right.generation && left.today == right.today
+      && left.timeZoneLabel == right.timeZoneLabel && left.jumpToNow == right.jumpToNow
+  }
 
   var body: some View {
     GeometryReader { proxy in
       let column = max(1, (proxy.size.width - timeColumn) / CGFloat(max(1, days.count)))
+      let bottomInset = proxy.safeAreaInsets.bottom
       VStack(spacing: 0) {
         CalendarGridHeader(
-          days: days, entries: entries, today: today, timeZoneLabel: timeZoneLabel,
-          column: column, swipeOffset: swipeOffset, canSelectDay: days.count > 1,
-          onSelectDay: onSelectDay, onOpen: onOpen, onPick: onPick)
-        grid(column: column, width: proxy.size.width)
+          days: days, model: dayModel, generation: generation, today: today,
+          timeZoneLabel: timeZoneLabel, column: column, swipeOffset: swipeOffset,
+          canSelectDay: days.count > 1, onSelectDay: onSelectDay, onOpen: onOpen, onPick: onPick)
+        grid(column: column, width: proxy.size.width, bottomInset: bottomInset)
       }
     }
   }
 
   // MARK: Hours
 
-  private func grid(column: CGFloat, width: CGFloat) -> some View {
-    GeometryReader { viewport in
+  /// The scroll content's height: the 24 hours, the tail, and the room of the tab bar.
+  private func contentHeight(bottomInset: CGFloat) -> CGFloat {
+    24 * hour + tailHours * hour + bottomInset
+  }
+
+  private func grid(column: CGFloat, width: CGFloat, bottomInset: CGFloat) -> some View {
+    let height = contentHeight(bottomInset: bottomInset)
+    return GeometryReader { viewport in
       ScrollViewReader { reader in
         ScrollView {
           HStack(alignment: .top, spacing: 0) {
-            hourColumn
-            dayArea(column: column)
+            hourColumn(height: height)
+            dayArea(column: column, height: height)
           }
           .overlay(alignment: .topLeading) {
             CalendarDragLayer(model: model, days: days, column: column)
@@ -63,7 +80,12 @@ struct CalendarWeekGrid: View {
           .background {
             CalendarGridTouches(
               model: model,
-              makeEnv: { environment(reader: reader, column: column, viewport: viewport.size) },
+              makeEnv: {
+                environment(
+                  reader: reader, column: column,
+                  viewport: CGSize(
+                    width: viewport.size.width, height: viewport.size.height - bottomInset))
+              },
               swipeLimit: width * 0.4,
               onSwipeChange: { if !sliding { swipeOffset = $0 } },
               onSwipeEnd: { dx, dy, elapsed in
@@ -76,7 +98,6 @@ struct CalendarWeekGrid: View {
         .onScrollGeometryChange(for: CGFloat.self) { max(0, $0.contentOffset.y + $0.contentInsets.top) } action: {
           _, offset in model.offset = offset
         }
-        .contentMargins(.bottom, bottomClearance, for: .scrollContent)
         .scrollIndicators(.hidden)
         .scrollDisabled(model.active)
         .overlay { CalendarEdgeCue(model: model) }
@@ -97,11 +118,13 @@ struct CalendarWeekGrid: View {
         }
       }
     }
+    // The lines run on behind the floating tab bar instead of stopping above it.
+    .ignoresSafeArea(.container, edges: .bottom)
   }
 
   /// The hour labels, centred on their lines (none at midnight); the clear `hour-N` rows are the
   /// anchors the grid scrolls to, and the `slot-N` rows the anchors auto-scroll moves to.
-  private var hourColumn: some View {
+  private func hourColumn(height: CGFloat) -> some View {
     ZStack(alignment: .topLeading) {
       VStack(spacing: 0) {
         ForEach(0..<24, id: \.self) { value in
@@ -119,7 +142,7 @@ struct CalendarWeekGrid: View {
           .offset(y: CGFloat(value) * hour - 7)
       }
     }
-    .frame(width: timeColumn, height: 24 * hour, alignment: .topLeading)
+    .frame(width: timeColumn, height: height, alignment: .topLeading)
     .overlay(alignment: .top) {
       VStack(spacing: 0) {
         ForEach(0..<WeekDragModel.slotCount, id: \.self) { slot in
@@ -135,63 +158,42 @@ struct CalendarWeekGrid: View {
 
   /// The columns with their separators, clipped to their own width so the slide of a period
   /// change never covers the time column.
-  private func dayArea(column: CGFloat) -> some View {
+  private func dayArea(column: CGFloat, height: CGFloat) -> some View {
     ZStack(alignment: .topLeading) {
       CalendarGridLines(hour: hour, column: column, columns: days.count, vertical: false)
         .stroke(RitmTheme.line, lineWidth: 1)
       CalendarGridLines(hour: hour, column: column, columns: days.count, vertical: true)
         .stroke(RitmTheme.line.opacity(0.75), lineWidth: 1)
       HStack(spacing: 0) {
-        ForEach(days, id: \.self) { day in dayColumn(day, column: column) }
+        ForEach(days, id: \.self) { day in dayColumn(day, column: column, height: height) }
       }
     }
     .offset(x: swipeOffset)
-    .frame(width: column * CGFloat(days.count), height: 24 * hour, alignment: .topLeading)
+    .frame(width: column * CGFloat(days.count), height: height, alignment: .topLeading)
     .clipped()
   }
 
-  /// One day's column. A single tap handler decides by position: a tap on a block opens it, a
-  /// tap on empty space adds an entry there (the blocks themselves take no touches, so the two
-  /// can never both fire).
-  private func dayColumn(_ day: String, column: CGFloat) -> some View {
-    ZStack(alignment: .topLeading) {
-      (day == today ? RitmTheme.soft.opacity(0.34) : Color.clear)
-      ForEach(CalendarPlan.layout(entries[day] ?? [])) { placed in
-        CalendarGridEvent(
-          placed: placed, column: column, hour: hour,
-          lifted: model.liftedKey == placed.entry.key,
-          hint: dragBlock(placed.entry)
-            ?? store.text(
-              "Удерживайте и перетащите запись на другое время или день.",
-              "Hold and drag the entry to another time or day."),
-          onOpen: { if model.tapsAllowed { onOpen(placed.entry) } })
-      }
-      if day == today { nowLine }
-    }
-    .frame(width: column, height: 24 * hour)
-    .contentShape(Rectangle())
-    .gesture(SpatialTapGesture().onEnded { value in tapped(day, column: column, at: value.location) })
-    .accessibilityElement(children: .contain)
-    .accessibilityLabel(FeatureDate.label(day, zone: store.timeZone, language: store.language, template: "EEEE d MMMM"))
-    .accessibilityAction(named: store.text("Добавить запись в 9 AM", "Add an entry at 9 AM")) {
-      onAdd(day, 540)
-    }
-  }
-
-  private var nowLine: some View {
-    TimelineView(.everyMinute) { context in
-      let minute = FeatureDate.calendar(store.timeZone).dateComponents([.hour, .minute], from: context.date)
-      CalendarNowLine()
-        .offset(y: CGFloat((minute.hour ?? 0) * 60 + (minute.minute ?? 0)) / 60 * hour - 1)
-    }
-    .allowsHitTesting(false)
+  private func dayColumn(_ day: String, column: CGFloat, height: CGFloat) -> some View {
+    CalendarDayColumn(
+      day: day, placed: dayModel.layout(day), column: column, height: height,
+      isToday: day == today, liftedKey: model.liftedKey, generation: generation,
+      hint: { entry in
+        dragBlock(entry)
+          ?? store.text(
+            "Удерживайте и перетащите запись на другое время или день.",
+            "Hold and drag the entry to another time or day.")
+      },
+      onOpen: { entry in if model.tapsAllowed { onOpen(entry) } },
+      onTap: { point in tapped(day, column: column, at: point) },
+      onAddMorning: { onAdd(day, 540) }
+    )
+    .equatable()
   }
 
   private func tapped(_ day: String, column: CGFloat, at point: CGPoint) {
     guard model.tapsAllowed else { return }
-    let placed = CalendarPlan.layout(entries[day] ?? [])
     if let hit = CalendarPlan.entry(
-      at: Double(point.x), y: Double(point.y), in: placed, column: Double(column),
+      at: Double(point.x), y: Double(point.y), in: dayModel.layout(day), column: Double(column),
       hourHeight: Double(hour))
     {
       onOpen(hit.entry)
@@ -223,11 +225,10 @@ struct CalendarWeekGrid: View {
     guard x >= 0 else { return .none }
     let index = Int(x / column)
     guard days.indices.contains(index) else { return .none }
-    let placed = CalendarPlan.layout(entries[days[index]] ?? [])
     guard
       let hit = CalendarPlan.entry(
-        at: Double(x - CGFloat(index) * column), y: Double(content.y), in: placed,
-        column: Double(column), hourHeight: Double(hour))
+        at: Double(x - CGFloat(index) * column), y: Double(content.y),
+        in: dayModel.layout(days[index]), column: Double(column), hourHeight: Double(hour))
     else { return .none }
     if let reason = dragBlock(hit.entry) { return .blocked(reason) }
     return .entry(
@@ -273,44 +274,5 @@ struct CalendarWeekGrid: View {
 
   private func settle() {
     withAnimation(reduceMotion ? nil : RitmMotion.easeOut(0.22)) { swipeOffset = 0 }
-  }
-}
-
-/// Whole-hour lines across the columns, or the separators between them.
-private struct CalendarGridLines: Shape {
-  let hour: CGFloat
-  let column: CGFloat
-  let columns: Int
-  let vertical: Bool
-
-  func path(in rect: CGRect) -> Path {
-    var path = Path()
-    if vertical {
-      for index in 0..<max(1, columns) {
-        let x = CGFloat(index) * column + 0.5
-        path.move(to: CGPoint(x: x, y: 0))
-        path.addLine(to: CGPoint(x: x, y: rect.height))
-      }
-    } else {
-      for index in 1..<24 {
-        let y = CGFloat(index) * hour + 0.5
-        path.move(to: CGPoint(x: 0, y: y))
-        path.addLine(to: CGPoint(x: rect.width, y: y))
-      }
-    }
-    return path
-  }
-}
-
-/// `.cal-now-line`: a 2 pt accent line with a dot at its start.
-private struct CalendarNowLine: View {
-  var body: some View {
-    Rectangle()
-      .fill(RitmTheme.danger)
-      .frame(height: 2)
-      .overlay(alignment: .leading) {
-        Circle().fill(RitmTheme.danger).frame(width: 10, height: 10).offset(x: -5)
-      }
-      .accessibilityHidden(true)
   }
 }

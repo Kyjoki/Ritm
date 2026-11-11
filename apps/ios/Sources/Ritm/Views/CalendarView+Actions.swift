@@ -41,11 +41,13 @@ extension CalendarView {
     await reload()
   }
 
+  /// A view picked in the side menu. The page switches at once, with no animation of its tree
+  /// (the month and the grid are heavy to move); the menu closes on its own animation.
   func choose(_ value: CalendarViewMode) {
-    withAnimation(reduceMotion ? nil : RitmMotion.ease(0.3)) {
-      mode = value
-      drawerOpen = false
-    }
+    var instant = Transaction()
+    instant.disablesAnimations = true
+    withTransaction(instant) { mode = value }
+    setDrawer(false)
   }
 
   /// The UTC offset in the corner above the time column: «UTC+5».
@@ -154,6 +156,13 @@ extension CalendarView {
 
   // MARK: Reading Google
 
+  /// Reads Google only when the page needs days that were not read yet: switching between the
+  /// views, or a swipe inside the neighbours already read, costs no request.
+  func reloadIfNeeded() async {
+    if CalendarViewMode.covers(fetchedRange, range) { return }
+    await reload()
+  }
+
   func reload() async {
     guard navigation.section == .calendar else { return }
     let ticket = UUID()
@@ -169,6 +178,7 @@ extension CalendarView {
         events = []
         partial = false
         failed = false
+        fetchedRange = (from, to)
       } else {
         failed = true
       }
@@ -182,6 +192,8 @@ extension CalendarView {
       if partial != result.partial { partial = result.partial }
       if fetchedAt != result.fetchedAt { fetchedAt = result.fetchedAt }
       if failed { failed = false }
+      fetchedRange = (from, to)
+      if filter.remember(result.events) { CalendarFilterStore.save(filter, email: email) }
     } else {
       failed = true
     }
@@ -197,11 +209,11 @@ extension CalendarView {
       let result = await store.read { try await $0.googleEvents(from: first, to: last, timeZone: zone) }
       fetched = result?.events ?? []
     }
-    return (0..<210).compactMap { offset -> (date: String, entries: [DayOccurrence])? in
-      guard let day = HabitSchedule.addDays(to: first, days: offset) else { return nil }
-      return (date: day, entries: DayPlan.occurrences(
-        tasks: store.bootstrap?.tasks ?? [], events: fetched, date: day, timeZone: store.timeZone,
-        language: store.language))
-    }
+    let dates = (0..<210).compactMap { HabitSchedule.addDays(to: first, days: $0) }
+    let read = DayPlan.occurrencesByDay(
+      tasks: CalendarSources.visible(store.bootstrap?.tasks ?? [], hidden: filter.hidden),
+      events: CalendarSources.visible(fetched, hidden: filter.hidden), dates: dates,
+      timeZone: store.timeZone, language: store.language)
+    return dates.map { (date: $0, entries: read[$0] ?? []) }
   }
 }

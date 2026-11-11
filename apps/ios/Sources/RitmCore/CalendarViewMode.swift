@@ -85,6 +85,15 @@ public enum CalendarViewMode: String, CaseIterable, Sendable, Equatable {
     return days.contains(today) ? today : anchor
   }
 
+  /// True when what was already read (`from` included, `to` excluded) holds everything `needed`
+  /// asks for, so changing the view does not need another Google read.
+  public static func covers(
+    _ read: (from: String, to: String)?, _ needed: (from: String, to: String)
+  ) -> Bool {
+    guard let read else { return false }
+    return read.from <= needed.from && read.to >= needed.to
+  }
+
   /// The day whose month names the page: the middle of the visible days.
   public func titleDay(anchor: String) -> String {
     let days = visibleDays(anchor: anchor)

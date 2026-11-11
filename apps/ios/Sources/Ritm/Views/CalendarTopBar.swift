@@ -6,7 +6,8 @@ import SwiftUI
 /// 48 pt tall; the hour grid takes everything below it.
 struct CalendarTopBar: View {
   let title: String
-  let miniOpen: Bool
+  /// Read here, not by the page: the chevron turns without the page redrawing.
+  let chrome: CalendarChrome
   let todayNumber: Int
   let initial: String
   let loading: Bool
@@ -22,6 +23,8 @@ struct CalendarTopBar: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   static let height: CGFloat = 48
+
+  private var miniOpen: Bool { chrome.miniOpen }
 
   var body: some View {
     HStack(spacing: 0) {

@@ -140,6 +140,46 @@ public enum DayPlan {
     }
   }
 
+  /// `occurrences` for many days at once, with the same result as calling it day by day. Each
+  /// event's wall-clock span is worked out once (instant parsing and a zone conversion are the
+  /// costly part), so a day only reads the events that touch it. Reading a month of events day
+  /// by day repeated that work for every event and every day.
+  public static func occurrencesByDay(
+    tasks: [RitmTask], events: [GoogleCalendarEvent], dates: [String], timeZone: String,
+    language: Language
+  ) -> [String: [DayOccurrence]] {
+    var touching: [String: [GoogleCalendarEvent]] = [:]
+    if let zone = TimeZone(identifier: timeZone) {
+      for event in events {
+        guard let span = wallSpan(event, zone: zone) else { continue }
+        for date in dates where date >= span.first && date <= span.last {
+          touching[date, default: []].append(event)
+        }
+      }
+    }
+    var result: [String: [DayOccurrence]] = [:]
+    for date in dates {
+      result[date] = occurrences(
+        tasks: tasks, events: touching[date] ?? [], date: date, timeZone: timeZone, language: language)
+    }
+    return result
+  }
+
+  /// The first and last wall-clock day an event can show on (an all-day end is exclusive, which
+  /// only makes this span one day wider than needed).
+  private static func wallSpan(_ event: GoogleCalendarEvent, zone: TimeZone)
+    -> (first: String, last: String)?
+  {
+    if event.allDay {
+      guard let start = event.start.date, let end = event.end.date else { return nil }
+      return (start, end)
+    }
+    guard let startInstant = CalendarEventPolicy.instant(event.start.dateTime),
+      let endInstant = CalendarEventPolicy.instant(event.end.dateTime), endInstant > startInstant
+    else { return nil }
+    return (wall(startInstant, zone: zone).date, wall(endInstant, zone: zone).date)
+  }
+
   /// Ritm calendar entries and Google events of one day; quick tasks stay out of the calendar.
   public static func occurrences(
     tasks: [RitmTask], events: [GoogleCalendarEvent], date: String, timeZone: String,

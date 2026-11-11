@@ -3,11 +3,13 @@ import SwiftUI
 
 /// The rows above the hours: weekday and date, the overlap buttons and the all-day chips. Only a
 /// hairline under the block separates it from the hours; the day separators are drawn by the
-/// hour grid itself, never here. Every row's day cells slide with `swipeOffset`, the time column
-/// stays put.
+/// hour grid itself, never here. The day cells slide with `swipeOffset`, the time column with
+/// the UTC label stays put. The cells are a separate, equatable view: a swipe moves them without
+/// building them again.
 struct CalendarGridHeader: View {
   let days: [String]
-  let entries: [String: [DayOccurrence]]
+  let model: CalendarDayModel
+  let generation: Int
   let today: String
   let timeZoneLabel: String
   let column: CGFloat
@@ -16,69 +18,80 @@ struct CalendarGridHeader: View {
   let onSelectDay: (String) -> Void
   let onOpen: (DayOccurrence) -> Void
   let onPick: (String, [DayOccurrence]) -> Void
-  @Environment(RitmStore.self) private var store
 
   private let timeColumn = CGFloat(CalendarPlan.timeColumn)
-  /// Under this column width side-by-side lanes are too thin to read: the day gets an overlap
-  /// button that opens the list instead.
-  private static let narrowColumn: CGFloat = 90
-
-  private var overlaps: [String: [DayOccurrence]] {
-    guard column < Self.narrowColumn else { return [:] }
-    return Dictionary(
-      uniqueKeysWithValues: days.map { day in
-        (day, CalendarPlan.overlapGroups(entries[day] ?? []).filter { $0.count > 1 }.flatMap { $0 })
-      })
-  }
-
-  private func untimed(_ day: String) -> [DayOccurrence] {
-    (entries[day] ?? []).filter { $0.start == nil }
-  }
+  static let dayRowHeight: CGFloat = 56
 
   var body: some View {
-    let overlapMap = overlaps
-    VStack(spacing: 0) {
-      dayRow
-      if overlapMap.values.contains(where: { !$0.isEmpty }) { overlapRow(overlapMap) }
-      if days.contains(where: { !untimed($0).isEmpty }) { allDayRow }
-    }
-    .padding(.bottom, 4)
-    .overlay(alignment: .bottom) { Rectangle().fill(RitmTheme.line).frame(height: 1) }
-  }
-
-  /// A row of day cells next to the fixed time column, sliding with the swipe.
-  private func row<Cells: View>(
-    gutter: some View, @ViewBuilder cells: () -> Cells
-  ) -> some View {
     HStack(alignment: .top, spacing: 0) {
-      gutter.frame(width: timeColumn)
-      cells()
-        .offset(x: swipeOffset)
-        .frame(width: column * CGFloat(days.count), alignment: .leading)
-        .clipped()
-    }
-  }
-
-  // MARK: Weekday and date
-
-  private var dayRow: some View {
-    row(
-      gutter: Text(timeZoneLabel)
+      // A fixed height: with `maxHeight: .infinity` the label took all the free vertical space
+      // and pushed the all-day row far below the dates.
+      Text(timeZoneLabel)
         .ritmFont(9.5, weight: .semibold)
         .foregroundStyle(RitmTheme.muted)
         .lineLimit(1)
         .minimumScaleFactor(0.7)
         .padding(.leading, 4)
         .padding(.bottom, 6)
-        // A fixed height: with `maxHeight: .infinity` the label took all the free vertical space
-        // and pushed the all-day row far below the dates.
-        .frame(maxWidth: .infinity, alignment: .bottomLeading)
-        .frame(height: 56, alignment: .bottomLeading)
-    ) {
-      HStack(spacing: 0) { ForEach(days, id: \.self) { dayCell($0) } }
+        .frame(width: timeColumn, height: Self.dayRowHeight, alignment: .bottomLeading)
+      CalendarHeaderCells(
+        days: days, model: model, generation: generation, today: today, column: column,
+        canSelectDay: canSelectDay, onSelectDay: onSelectDay, onOpen: onOpen, onPick: onPick
+      )
+      .equatable()
+      .offset(x: swipeOffset)
+      .frame(width: column * CGFloat(days.count), alignment: .leading)
+      .clipped()
     }
-    .frame(minHeight: 56)
+    .padding(.bottom, 4)
+    .overlay(alignment: .bottom) { Rectangle().fill(RitmTheme.line).frame(height: 1) }
   }
+}
+
+/// The weekday and date cells, the overlap buttons and the all-day chips of the visible days.
+struct CalendarHeaderCells: View, Equatable {
+  let days: [String]
+  let model: CalendarDayModel
+  let generation: Int
+  let today: String
+  let column: CGFloat
+  let canSelectDay: Bool
+  let onSelectDay: (String) -> Void
+  let onOpen: (DayOccurrence) -> Void
+  let onPick: (String, [DayOccurrence]) -> Void
+  @Environment(RitmStore.self) private var store
+
+  /// Under this column width side-by-side lanes are too thin to read: the day gets an overlap
+  /// button that opens the list instead.
+  private static let narrowColumn: CGFloat = 90
+
+  nonisolated static func == (left: CalendarHeaderCells, right: CalendarHeaderCells) -> Bool {
+    left.days == right.days && left.generation == right.generation && left.today == right.today
+      && left.column == right.column && left.canSelectDay == right.canSelectDay
+  }
+
+  private var overlaps: [String: [DayOccurrence]] {
+    guard column < Self.narrowColumn else { return [:] }
+    return Dictionary(
+      uniqueKeysWithValues: days.map { day in
+        (day, CalendarPlan.overlapGroups(model.entries(day)).filter { $0.count > 1 }.flatMap { $0 })
+      })
+  }
+
+  var body: some View {
+    let overlapMap = overlaps
+    let chips = days.map { day in model.entries(day).filter { $0.start == nil } }
+    VStack(spacing: 0) {
+      HStack(spacing: 0) { ForEach(days, id: \.self) { dayCell($0) } }
+        .frame(height: CalendarGridHeader.dayRowHeight)
+      if overlapMap.values.contains(where: { !$0.isEmpty }) {
+        overlapRow(overlapMap).padding(.top, 2)
+      }
+      if chips.contains(where: { !$0.isEmpty }) { allDayRow(chips) }
+    }
+  }
+
+  // MARK: Weekday and date
 
   private func dayCell(_ day: String) -> some View {
     let isToday = day == today
@@ -97,7 +110,7 @@ struct CalendarGridHeader: View {
             if isToday { Circle().fill(RitmTheme.accentColor) }
           }
       }
-      .frame(width: column, height: 56, alignment: .center)
+      .frame(width: column, height: CalendarGridHeader.dayRowHeight, alignment: .center)
       .contentShape(Rectangle())
     }
     .buttonStyle(RitmPressStyle())
@@ -116,19 +129,16 @@ struct CalendarGridHeader: View {
   // MARK: Overlaps
 
   private func overlapRow(_ groups: [String: [DayOccurrence]]) -> some View {
-    row(gutter: Color.clear.frame(height: 1)) {
-      HStack(spacing: 0) {
-        ForEach(days, id: \.self) { day in
-          let group = groups[day] ?? []
-          if group.isEmpty {
-            Color.clear.frame(width: column, height: 28)
-          } else {
-            overlapButton(day, group)
-          }
+    HStack(spacing: 0) {
+      ForEach(days, id: \.self) { day in
+        let group = groups[day] ?? []
+        if group.isEmpty {
+          Color.clear.frame(width: column, height: 28)
+        } else {
+          overlapButton(day, group)
         }
       }
     }
-    .padding(.top, 2)
   }
 
   private func overlapButton(_ day: String, _ group: [DayOccurrence]) -> some View {
@@ -156,10 +166,10 @@ struct CalendarGridHeader: View {
   // MARK: All-day chips
 
   /// Scrolls once it would grow past 96 pt, as `.cal-all-day` does.
-  @ViewBuilder private var allDayRow: some View {
-    let rows = days.map { untimed($0).count }.max() ?? 0
-    let content = row(gutter: Color.clear.frame(height: 1)) {
-      HStack(alignment: .top, spacing: 0) { ForEach(days, id: \.self) { chips($0) } }
+  @ViewBuilder private func allDayRow(_ chips: [[DayOccurrence]]) -> some View {
+    let rows = chips.map(\.count).max() ?? 0
+    let content = HStack(alignment: .top, spacing: 0) {
+      ForEach(Array(chips.enumerated()), id: \.offset) { _, list in chipColumn(list) }
     }
     if 4 + CGFloat(rows) * 22 > 96 {
       ScrollView { content }.frame(height: 96)
@@ -168,9 +178,9 @@ struct CalendarGridHeader: View {
     }
   }
 
-  private func chips(_ day: String) -> some View {
+  private func chipColumn(_ list: [DayOccurrence]) -> some View {
     VStack(spacing: 2) {
-      ForEach(untimed(day)) { entry in
+      ForEach(list) { entry in
         Button {
           onOpen(entry)
         } label: {

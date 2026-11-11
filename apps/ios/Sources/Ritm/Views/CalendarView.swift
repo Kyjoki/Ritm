@@ -26,6 +26,11 @@ struct CalendarPick: Identifiable {
 /// time grid or list below it, a «+» button and the undated-tasks chip above the bottom bar, and
 /// a side menu that switches between the schedule, one day, three days, the week and the month.
 /// The page opens on the week every time: the view used last is not remembered.
+///
+/// This body runs for every small change (a spinner, a sheet, a swipe), so it does no real work:
+/// the days are read once per change of data by `CalendarDayModel`, the grid, the month and their
+/// cells are equatable and skip unchanged redraws, and the two overlays keep their state in
+/// `CalendarChrome`, which this body never reads.
 struct CalendarView: View {
   @Environment(RitmStore.self) var store
   @Environment(RitmNavigation.self) var navigation
@@ -40,37 +45,48 @@ struct CalendarView: View {
   @State var loading = false
   @State var failed = false
   @State var fetchedAt: String?
+  /// The days the last Google read covered: changing the view inside them reads nothing again.
+  @State var fetchedRange: (from: String, to: String)?
   @State var readID = UUID()
   @State var sheet: CalendarSheet?
   @State var pick: CalendarPick?
   @State var nowJump = 0
-  @State var drawerOpen = false
-  @State var miniOpen = false
   @State var searchOpen = false
+  @State var filter = CalendarFilter()
+  @State var dayModel = CalendarDayModel()
+  @State var chrome = CalendarChrome()
 
   var selected: String { date.isEmpty ? store.today : date }
   var gridDays: [String] { mode.visibleDays(anchor: selected) }
   /// `calendarRange`: the Google read covers the visible period and its neighbours.
   var range: (from: String, to: String) { mode.fetchRange(anchor: selected, scheduleDays: scheduleDays) }
   var hourFormat: CalendarHourFormat { CalendarHourFormat(rawValue: storedHourFormat) ?? .default }
+  var email: String { store.bootstrap?.settings.email ?? "" }
   var undatedTasks: [RitmTask] {
     (store.bootstrap?.tasks ?? []).filter { $0.date == nil && !$0.completed }
   }
 
-  func entries(_ day: String) -> [DayOccurrence] {
-    DayPlan.occurrences(
-      tasks: store.bootstrap?.tasks ?? [], events: events, date: day, timeZone: store.timeZone, language: store.language)
+  func entries(_ day: String) -> [DayOccurrence] { dayModel.entries(day) }
+
+  /// The menu's calendars: the Google ones seen so far and the kinds of Ritm entry.
+  func sources() -> [CalendarSource] {
+    CalendarSources.list(
+      events: events, tasks: store.bootstrap?.tasks ?? [], filter: filter, email: email,
+      language: store.language)
   }
 
   var body: some View {
+    let generation = dayModel.sync(
+      tasks: store.bootstrap?.tasks ?? [], events: events, zone: store.timeZone,
+      language: store.language, hidden: filter.hidden)
     ZStack {
       RitmBackground()
       VStack(spacing: 0) {
         topBar.padding(.horizontal, 4).ritmPageReveal(index: 0)
         notices
-        content
+        content(generation)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .animation(reduceMotion ? nil : RitmMotion.ease(0.2), value: mode)
+          .overlay(alignment: .top) { hiddenNote }
           .ritmPageReveal(index: 1)
       }
       CalendarFloatingButtons(
@@ -84,14 +100,19 @@ struct CalendarView: View {
     }
     .environment(\.calendarHourFormat, hourFormat)
     .toolbar(.hidden, for: .navigationBar)
-    .task(id: range.from + range.to) { await reload() }
+    .task(id: email) { filter = CalendarFilterStore.load(email: email) }
+    .task(id: range.from + range.to) { await reloadIfNeeded() }
     .onChange(of: navigation.section) { _, section in
       if section == .calendar { Task { await reload() } }
     }
     .onChange(of: store.lastSyncedAt) { _, _ in
       if navigation.section == .calendar { Task { await reload() } }
     }
-    .onChange(of: mode) { _, _ in scheduleDays = CalendarViewMode.scheduleInitialDays }
+    .onChange(of: mode) { _, _ in
+      if scheduleDays != CalendarViewMode.scheduleInitialDays {
+        scheduleDays = CalendarViewMode.scheduleInitialDays
+      }
+    }
     .sheet(item: $sheet) { route in sheetContent(route) }
     .sheet(item: $pick) { value in
       CalendarOverlapPicker(
@@ -109,11 +130,11 @@ struct CalendarView: View {
   private var topBar: some View {
     CalendarTopBar(
       title: mode.title(anchor: selected, today: store.today, language: store.language).text,
-      miniOpen: miniOpen,
+      chrome: chrome,
       todayNumber: Int(store.today.suffix(2)) ?? 1,
       initial: initial, loading: loading, attention: warning, connected: connected,
       onMenu: { setDrawer(true) },
-      onTitle: { setMini(!miniOpen) },
+      onTitle: { setMini(!chrome.miniOpen) },
       onSearch: { searchOpen = true },
       onToday: goToday,
       onRefresh: { Task { await refreshGoogle() } },
@@ -133,34 +154,45 @@ struct CalendarView: View {
     if warning { warningStatus.padding(.horizontal, 12).padding(.bottom, 6) }
   }
 
-  @ViewBuilder private var content: some View {
+  /// One line when every calendar is hidden, with the way back.
+  @ViewBuilder private var hiddenNote: some View {
+    if !filter.hidden.isEmpty && CalendarSources.allHidden(sources(), hidden: filter.hidden) {
+      HStack(spacing: 8) {
+        Text(store.text("Все календари скрыты", "All calendars are hidden"))
+          .ritmFont(13).foregroundStyle(RitmTheme.muted)
+        Button(store.text("Показать все", "Show all")) { showAllSources() }
+          .ritmFont(13, weight: .semibold)
+          .foregroundStyle(RitmTheme.accentColor)
+          .frame(minHeight: 44)
+      }
+      .padding(.horizontal, 16)
+      .background(RitmTheme.panel, in: Capsule())
+      .overlay { Capsule().strokeBorder(RitmTheme.line, lineWidth: 1) }
+      .padding(.top, 70)
+    }
+  }
+
+  @ViewBuilder private func content(_ generation: Int) -> some View {
     switch mode {
-    case .day, .threeDays, .week: grid
+    case .day, .threeDays, .week: grid(generation)
     case .month:
       CalendarMonthView(
-        selected: selected, today: store.today, entries: entries(_:),
+        dayModel: dayModel, generation: generation, selected: selected, today: store.today,
         onSelect: { day in
           date = day
           mode = .day
         },
-        onStep: step)
-    case .schedule:
-      CalendarSchedule(
-        days: (0..<scheduleDays).compactMap { HabitSchedule.addDays(to: selected, days: $0) },
-        selected: selected, today: store.today, entries: entries(_:), uncertain: uncertain,
-        googleConnected: connected, onOpen: open,
-        onAddFree: { day, time, duration in addEntry(day, time: time, duration: duration) },
-        onMore: { scheduleDays += CalendarViewMode.scheduleStepDays },
-        onRefresh: refreshGoogle)
+        onStep: step
+      )
+      .equatable()
+    case .schedule: schedule
     }
   }
 
-  private var grid: some View {
-    let days = gridDays
-    return CalendarWeekGrid(
-      days: days,
-      entries: Dictionary(uniqueKeysWithValues: days.map { ($0, entries($0)) }),
-      today: store.today, timeZoneLabel: timeZoneLabel, jumpToNow: nowJump,
+  private func grid(_ generation: Int) -> some View {
+    CalendarWeekGrid(
+      days: gridDays, dayModel: dayModel, generation: generation, today: store.today,
+      timeZoneLabel: timeZoneLabel, jumpToNow: nowJump,
       dragBlock: dragBlock, onOpen: open,
       onPick: { day, group in pick = CalendarPick(date: day, keys: group.map(\.key)) },
       onAdd: { day, minute in addEntry(day, time: TaskSchedule.minuteTime(minute)) },
@@ -169,47 +201,69 @@ struct CalendarView: View {
         mode = .day
       },
       onMove: { entry, day, minute in await move(entry, to: day, minute: minute) },
-      onStep: step)
+      onStep: step
+    )
+    .equatable()
+  }
+
+  private var schedule: some View {
+    let days = (0..<scheduleDays).compactMap { HabitSchedule.addDays(to: selected, days: $0) }
+    dayModel.prepare(days)
+    return CalendarSchedule(
+      days: days, selected: selected, today: store.today, entries: entries(_:), uncertain: uncertain,
+      googleConnected: connected, onOpen: open,
+      onAddFree: { day, time, duration in addEntry(day, time: time, duration: duration) },
+      onMore: { scheduleDays += CalendarViewMode.scheduleStepDays },
+      onRefresh: refreshGoogle)
   }
 
   // MARK: Overlays: mini-month and side menu
 
-  @ViewBuilder private var overlays: some View {
-    if miniOpen {
-      ZStack(alignment: .topLeading) {
-        Color.clear.contentShape(Rectangle()).onTapGesture { setMini(false) }
-        CalendarMiniMonth(selected: selected, today: store.today, onPick: pickDay)
-          .padding(.top, CalendarTopBar.height + 2)
-          .padding(.horizontal, 12)
-          .transition(reduceMotion ? .opacity : .scale(scale: 0.92, anchor: .topLeading).combined(with: .opacity))
-      }
-    }
-    if drawerOpen {
-      CalendarDrawer(
-        mode: mode, hourFormat: hourFormatBinding, undatedCount: undatedTasks.count,
-        statusTitle: statusTitle, connected: connected, loading: loading,
-        onSelect: choose,
-        onUndated: {
+  private var overlays: some View {
+    CalendarOverlays(
+      chrome: chrome, selected: selected, today: store.today, onPickDay: pickDay,
+      onCloseMini: { setMini(false) }, onCloseDrawer: { setDrawer(false) },
+      closeLabel: store.text("Закрыть меню", "Close the menu"),
+      makeDrawer: drawer)
+  }
+
+  private func drawer(top: CGFloat, bottom: CGFloat) -> CalendarDrawer {
+    CalendarDrawer(
+      mode: mode, hourFormat: hourFormatBinding, sources: sources(), hidden: filter.hidden,
+      undatedCount: undatedTasks.count, timeZoneLabel: timeZoneLabel, googleState: googleState,
+      topPadding: top, bottomPadding: bottom,
+      onSelect: choose, onToggle: toggleSource,
+      onUndated: {
+        setDrawer(false)
+        sheet = CalendarSheet(backlog: true)
+      },
+      onTimeZone: {
+        setDrawer(false)
+        navigation.section = .settings
+      },
+      onGoogle: {
+        if connected {
+          Task { await refreshGoogle() }
+        } else {
           setDrawer(false)
-          sheet = CalendarSheet(backlog: true)
-        },
-        onRefresh: { Task { await refreshGoogle() } },
-        onSettings: { navigation.section = .settings },
-        onClose: { setDrawer(false) })
-    }
+          navigation.section = .settings
+        }
+      })
   }
 
   private var hourFormatBinding: Binding<CalendarHourFormat> {
     Binding(get: { hourFormat }, set: { storedHourFormat = $0.rawValue })
   }
 
-  private func setDrawer(_ open: Bool) {
-    if open { miniOpen = false }
-    withAnimation(reduceMotion ? RitmMotion.reducedFade : RitmMotion.ease(0.34)) { drawerOpen = open }
+  func setDrawer(_ open: Bool) {
+    if open { chrome.miniOpen = false }
+    withAnimation(reduceMotion ? RitmMotion.reducedFade : RitmMotion.easeOut(open ? 0.34 : 0.26)) {
+      chrome.drawerOpen = open
+    }
   }
 
   private func setMini(_ open: Bool) {
-    withAnimation(reduceMotion ? RitmMotion.reducedFade : RitmMotion.inflate()) { miniOpen = open }
+    withAnimation(reduceMotion ? RitmMotion.reducedFade : RitmMotion.inflate()) { chrome.miniOpen = open }
   }
 
   /// A day chosen in the mini-month: the month view opens that day, the others jump to it.
@@ -227,6 +281,16 @@ struct CalendarView: View {
       try? await Task.sleep(for: .milliseconds(450))
       open(hit.entry)
     }
+  }
+
+  func toggleSource(_ id: String) {
+    filter.toggle(id)
+    CalendarFilterStore.save(filter, email: email)
+  }
+
+  func showAllSources() {
+    filter.hidden = []
+    CalendarFilterStore.save(filter, email: email)
   }
 
   // MARK: Sheets

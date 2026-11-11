@@ -4,15 +4,21 @@ import SwiftUI
 /// «Месяц»: six rows of seven days filling the room above the bottom bar, each cell with the day
 /// number and up to a few solid mini bars (`+N` when more do not fit). A tap opens that day; a
 /// horizontal swipe slides to the next or previous month.
-struct CalendarMonthView: View {
+///
+/// Light by construction: the cells come ready from `CalendarDayModel` (read once per data
+/// change, never inside this body), the only measuring is the one geometry reader for the row
+/// height, and every cell is an equatable view, so a swipe or a changed day redraws only the
+/// cells whose data changed.
+struct CalendarMonthView: View, Equatable {
+  let dayModel: CalendarDayModel
+  let generation: Int
   let selected: String
   let today: String
-  let entries: (String) -> [DayOccurrence]
   let onSelect: (String) -> Void
   /// One month forward (1) or back (-1).
   let onStep: (Int) -> Void
-  @Environment(RitmStore.self) private var store
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(RitmStore.self) private var store
   @State private var offset: CGFloat = 0
   @State private var sliding = false
   @State private var touchStart: Date?
@@ -21,6 +27,10 @@ struct CalendarMonthView: View {
   private static let bottomClearance: CGFloat = 84
   private static let barHeight: CGFloat = 14
   private static let barSpacing: CGFloat = 2
+
+  nonisolated static func == (left: CalendarMonthView, right: CalendarMonthView) -> Bool {
+    left.generation == right.generation && left.selected == right.selected && left.today == right.today
+  }
 
   private var weekdays: [String] {
     store.language == .ru
@@ -31,6 +41,7 @@ struct CalendarMonthView: View {
     GeometryReader { proxy in
       let rowHeight = max(
         44, (proxy.size.height - Self.weekdayRow - Self.bottomClearance) / 6)
+      let limit = max(1, Int((rowHeight - 30) / (Self.barHeight + Self.barSpacing)))
       VStack(spacing: 0) {
         HStack(spacing: 0) {
           ForEach(weekdays, id: \.self) { day in
@@ -40,80 +51,32 @@ struct CalendarMonthView: View {
         }
         .frame(height: Self.weekdayRow)
         .accessibilityHidden(true)
-        weeks(rowHeight: rowHeight)
-          .offset(x: offset)
-          .frame(width: proxy.size.width)
-          .clipped()
-          .simultaneousGesture(swipe(width: proxy.size.width))
+        weeks(
+          dayModel.monthRows(anchor: selected, today: today, selected: selected, limit: limit),
+          rowHeight: rowHeight
+        )
+        .offset(x: offset)
+        .frame(width: proxy.size.width)
+        .clipped()
+        .simultaneousGesture(swipe(width: proxy.size.width))
         Spacer(minLength: 0)
       }
     }
   }
 
-  private func weeks(rowHeight: CGFloat) -> some View {
-    let days = CalendarPlan.monthDays(containing: selected)
-    return VStack(spacing: 0) {
-      if days.count == 42 {
-        ForEach(0..<6, id: \.self) { row in
-          HStack(spacing: 0) {
-            ForEach(0..<7, id: \.self) { column in
-              cell(days[row * 7 + column], rowHeight: rowHeight, column: column)
-            }
+  private func weeks(_ rows: [[CalendarMonthCell]], rowHeight: CGFloat) -> some View {
+    VStack(spacing: 0) {
+      ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+        HStack(spacing: 0) {
+          ForEach(Array(row.enumerated()), id: \.element.id) { column, cell in
+            CalendarMonthCellView(
+              cell: cell, column: column, rowHeight: rowHeight, onSelect: onSelect
+            )
+            .equatable()
           }
         }
       }
     }
-  }
-
-  private func cell(_ day: String, rowHeight: CGFloat, column: Int) -> some View {
-    let dayEntries = entries(day)
-    let inMonth = day.prefix(7) == selected.prefix(7)
-    let limit = max(1, Int((rowHeight - 30) / (Self.barHeight + Self.barSpacing)))
-    let bars = CalendarPlan.monthBars(dayEntries, limit: limit)
-    return Button {
-      onSelect(day)
-    } label: {
-      VStack(spacing: Self.barSpacing) {
-        number(day)
-        ForEach(bars.shown) { entry in
-          CalendarChip(entry: entry, fontSize: 10, height: Self.barHeight)
-        }
-        if bars.more > 0 {
-          Text("+\(bars.more)").ritmFont(10, weight: .semibold).foregroundStyle(RitmTheme.muted)
-        }
-        Spacer(minLength: 0)
-      }
-      .padding(.horizontal, 1)
-      .frame(maxWidth: .infinity, minHeight: rowHeight, maxHeight: rowHeight, alignment: .top)
-      .background(day == today ? RitmTheme.accentColor.opacity(0.07) : Color.clear)
-      .overlay(alignment: .top) { Rectangle().fill(RitmTheme.line).frame(height: 1) }
-      .overlay(alignment: .leading) {
-        if column > 0 { Rectangle().fill(RitmTheme.line.opacity(0.75)).frame(width: 1) }
-      }
-      .opacity(inMonth ? 1 : 0.42)
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(RitmPressStyle(scale: 0.98))
-    .accessibilityLabel(
-      FeatureDate.label(day, zone: store.timeZone, language: store.language, template: "d MMMM")
-        + store.text(", записей: \(dayEntries.count). Открыть день", ", entries: \(dayEntries.count). Open day"))
-  }
-
-  private func number(_ day: String) -> some View {
-    let isToday = day == today
-    return Text("\(Int(day.suffix(2)) ?? 0)")
-      .ritmFont(13, weight: isToday ? .bold : .semibold)
-      .monospacedDigit()
-      .foregroundStyle(isToday ? RitmTheme.accentInk : RitmTheme.text)
-      .frame(minWidth: 24, minHeight: 24)
-      .background {
-        if isToday {
-          Circle().fill(RitmTheme.accentColor)
-        } else if day == selected {
-          Circle().strokeBorder(RitmTheme.accentColor, lineWidth: 1.5)
-        }
-      }
-      .padding(.vertical, 2)
   }
 
   // MARK: Swipe between months
@@ -142,5 +105,69 @@ struct CalendarMonthView: View {
           sliding = false
         }
       }
+  }
+}
+
+/// One day of the month: its number, mini bars and the «+N» counter. Drawn again only when its
+/// own data changes.
+struct CalendarMonthCellView: View, Equatable {
+  let cell: CalendarMonthCell
+  let column: Int
+  let rowHeight: CGFloat
+  let onSelect: (String) -> Void
+  @Environment(RitmStore.self) private var store
+
+  private static let barHeight: CGFloat = 14
+  private static let barSpacing: CGFloat = 2
+
+  nonisolated static func == (left: CalendarMonthCellView, right: CalendarMonthCellView) -> Bool {
+    left.cell == right.cell && left.rowHeight == right.rowHeight
+  }
+
+  var body: some View {
+    Button {
+      onSelect(cell.day)
+    } label: {
+      VStack(spacing: Self.barSpacing) {
+        number
+        ForEach(cell.bars) { entry in
+          CalendarChip(entry: entry, fontSize: 10, height: Self.barHeight)
+        }
+        if cell.more > 0 {
+          Text("+\(cell.more)").ritmFont(10, weight: .semibold).foregroundStyle(RitmTheme.muted)
+        }
+        Spacer(minLength: 0)
+      }
+      .padding(.horizontal, 1)
+      .frame(maxWidth: .infinity, minHeight: rowHeight, maxHeight: rowHeight, alignment: .top)
+      .background(cell.isToday ? RitmTheme.accentColor.opacity(0.07) : Color.clear)
+      .overlay(alignment: .top) { Rectangle().fill(RitmTheme.line).frame(height: 1) }
+      .overlay(alignment: .leading) {
+        if column > 0 { Rectangle().fill(RitmTheme.line.opacity(0.75)).frame(width: 1) }
+      }
+      .opacity(cell.inMonth ? 1 : 0.42)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(RitmPressStyle(scale: 0.98))
+    .accessibilityLabel(
+      FeatureDate.label(cell.day, zone: store.timeZone, language: store.language, template: "d MMMM")
+        + store.text(
+          ", записей: \(cell.total). Открыть день", ", entries: \(cell.total). Open day"))
+  }
+
+  private var number: some View {
+    Text("\(cell.number)")
+      .ritmFont(13, weight: cell.isToday ? .bold : .semibold)
+      .monospacedDigit()
+      .foregroundStyle(cell.isToday ? RitmTheme.accentInk : RitmTheme.text)
+      .frame(minWidth: 24, minHeight: 24)
+      .background {
+        if cell.isToday {
+          Circle().fill(RitmTheme.accentColor)
+        } else if cell.isSelected {
+          Circle().strokeBorder(RitmTheme.accentColor, lineWidth: 1.5)
+        }
+      }
+      .padding(.vertical, 2)
   }
 }
