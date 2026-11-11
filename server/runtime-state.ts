@@ -2,9 +2,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { parseSessionClient } from './session-policy.ts';
 
 export type Awaitable<T> = T | Promise<T>;
-export type SessionClient = 'web' | 'ios';
+export type SessionClient = 'web' | 'web-remembered' | 'ios';
 export interface SessionMeta {
   client: SessionClient;
   deviceName: string;
@@ -94,7 +95,7 @@ export class SqliteRuntimeState implements RuntimeState {
     return {
       hash: String(row.hash),
       expiresAt: Number(row.expires),
-      client: row.client === 'ios' ? 'ios' : 'web',
+      client: parseSessionClient(row.client),
       deviceName: String(row.device_name),
       createdAt: Number(row.created_at),
       lastSeenAt: Number(row.last_seen_at),

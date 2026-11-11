@@ -24,6 +24,7 @@ export interface LoginCredentials {
   password: string;
   totp?: string;
   recoveryCode?: string;
+  remember?: boolean;
 }
 interface Props {
   onSubmit: (credentials: LoginCredentials) => Promise<void>;
@@ -38,7 +39,8 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
   const [visible, setVisible] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
-    [capsLock, setCapsLock] = useState(false);
+    [capsLock, setCapsLock] = useState(false),
+    [remember, setRemember] = useState(true);
   const [secondFactor, setSecondFactor] = useState<'none' | 'totp' | 'recovery'>('none'),
     [code, setCode] = useState('');
   const [documentVisible, setDocumentVisible] = useState(
@@ -74,6 +76,7 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
       await onSubmit({
         login: login.trim(),
         password,
+        remember,
         ...(secondFactor === 'totp' && trimmed ? { totp: trimmed } : {}),
         ...(secondFactor === 'recovery' && trimmed ? { recoveryCode: trimmed } : {}),
       });
@@ -289,6 +292,15 @@ export function LoginPage({ onSubmit, preview = false, onBack }: Props) {
                     </button>
                   </>
                 ) : null}
+                <label className="signin-remember">
+                  <input
+                    type="checkbox"
+                    checked={remember}
+                    onChange={(e) => setRemember(e.target.checked)}
+                  />
+                  <span className="signin-remember-box" aria-hidden="true" />
+                  {t('Запомнить этот компьютер')}
+                </label>
                 {capsLock ? (
                   <p className="signin-caps" id="signin-caps" role="status">
                     {t('Включён Caps Lock')}

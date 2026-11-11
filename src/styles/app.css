@@ -14,7 +14,8 @@ body {
     zoom: 0.8;
   }
   html .app-shell,
-  html .startup {
+  html .startup,
+  html .signin-page {
     min-height: 125dvh;
   }
 }

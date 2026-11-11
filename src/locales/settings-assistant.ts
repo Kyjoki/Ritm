@@ -185,6 +185,7 @@ export const settingsAssistantEnglish: Record<string, string> = {
   'Скрыть пароль': 'Hide password',
   'Включён Caps Lock': 'Caps Lock is on',
   'Войти в Ritm': 'Sign in to Ritm',
+  'Запомнить этот компьютер': 'Keep me signed in on this computer',
   'Входим…': 'Signing in…',
   'Личный аккаунт': 'Personal account',
   'Твои планы уже ждут тебя.': 'Your plans are waiting for you.',

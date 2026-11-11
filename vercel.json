@@ -21,7 +21,8 @@
       "claude/ritm-web-finance-fixes": false,
       "claude/ritm-web-sidebar-contrast": false,
       "claude/ritm-ios-settings": false,
-      "claude/ritm-ios-calendar": false
+      "claude/ritm-ios-calendar": false,
+      "claude/ritm-web-login": false
     }
   },
   "framework": "vite",

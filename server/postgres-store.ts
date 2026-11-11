@@ -57,6 +57,7 @@ import {
 import { localDate } from './store.ts';
 import type { SessionMeta, SessionRecord } from './runtime-state.ts';
 import { WORKOUT_TABLES, assertWorkoutDelete, assertWorkoutPut } from './workouts.ts';
+import { parseSessionClient } from './session-policy.ts';
 
 const { Pool } = pg;
 type Connection = Pick<PgPool | PoolClient, 'query'>;
@@ -1112,7 +1113,7 @@ export class PostgresStore implements WorkspaceRepository, RuntimeStateRepositor
     return {
       hash: String(row.id_hash),
       expiresAt: Number(row.expires_at),
-      client: row.client === 'ios' ? 'ios' : 'web',
+      client: parseSessionClient(row.client),
       deviceName: String(row.device_name ?? ''),
       createdAt: Number(row.created_at),
       lastSeenAt: Number(row.last_seen_at),
