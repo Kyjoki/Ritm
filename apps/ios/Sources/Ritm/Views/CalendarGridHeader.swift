@@ -69,8 +69,11 @@ struct CalendarGridHeader: View {
         .lineLimit(1)
         .minimumScaleFactor(0.7)
         .padding(.leading, 4)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         .padding(.bottom, 6)
+        // A fixed height: with `maxHeight: .infinity` the label took all the free vertical space
+        // and pushed the all-day row far below the dates.
+        .frame(maxWidth: .infinity, alignment: .bottomLeading)
+        .frame(height: 56, alignment: .bottomLeading)
     ) {
       HStack(spacing: 0) { ForEach(days, id: \.self) { dayCell($0) } }
     }
