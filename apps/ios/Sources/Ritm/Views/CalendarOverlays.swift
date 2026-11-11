@@ -17,11 +17,41 @@ struct CalendarOverlays: View {
   let makeDrawer: (_ top: CGFloat, _ bottom: CGFloat) -> CalendarDrawer
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var dragX: CGFloat = 0
+  /// 0 = the menu is off the left edge, 1 = fully in. The panel and the scrim are driven by this one
+  /// number, so the menu always slides in from the left (a `.transition` on children of a layer
+  /// that is itself being inserted does not run, which left only a fade).
+  @State private var progress: CGFloat = 0
+  /// The layer stays in the tree while it slides out, then goes away (nothing is built when closed).
+  @State private var rendered = false
 
   var body: some View {
     ZStack {
       if chrome.miniOpen { miniMonth }
-      if chrome.drawerOpen { drawerLayer }
+      if rendered { drawerLayer }
+    }
+    .onChange(of: chrome.drawerOpen) { _, open in slide(open) }
+  }
+
+  private func slide(_ open: Bool) {
+    if open {
+      dragX = 0
+      progress = 0
+      rendered = true
+      // One run-loop turn later, so the layer is first drawn off screen and then slides in.
+      Task { @MainActor in
+        withAnimation(reduceMotion ? RitmMotion.reducedFade : RitmMotion.easeOut(0.34)) { progress = 1 }
+      }
+    } else {
+      // Carry on from where a swipe left the panel: fold the drag into `progress` first.
+      let travel = CalendarDrawer.width + 24
+      let travelled = (progress - 1) * travel + dragX
+      progress = max(0, min(1, 1 + travelled / travel))
+      dragX = 0
+      withAnimation(reduceMotion ? RitmMotion.reducedFade : RitmMotion.easeOut(0.26)) {
+        progress = 0
+      } completion: {
+        if !chrome.drawerOpen { rendered = false }
+      }
     }
   }
 
@@ -46,16 +76,14 @@ struct CalendarOverlays: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(closeLabel)
-        .opacity(max(0, 1 + dragX / CalendarDrawer.width))
-        .transition(.opacity)
+        .opacity(progress * max(0, 1 + dragX / CalendarDrawer.width))
         makeDrawer(max(56, proxy.safeAreaInsets.top + 6), 24 + proxy.safeAreaInsets.bottom)
           .ignoresSafeArea(.container, edges: .vertical)
-          .offset(x: dragX)
+          .offset(x: reduceMotion ? dragX : (progress - 1) * (CalendarDrawer.width + 24) + dragX)
+          .opacity(reduceMotion ? progress : 1)
           .simultaneousGesture(closeSwipe)
-          .transition(reduceMotion ? .opacity : .move(edge: .leading))
       }
     }
-    .onAppear { dragX = 0 }
   }
 
   private var closeSwipe: some Gesture {
