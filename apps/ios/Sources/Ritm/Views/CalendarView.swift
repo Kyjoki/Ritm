@@ -1,74 +1,63 @@
 import RitmCore
 import SwiftUI
 
-private enum NativeCalendarMode: String, CaseIterable { case day, week, month }
-
-private struct CalendarSheet: Identifiable {
+struct CalendarSheet: Identifiable {
   let id = UUID()
   var event: GoogleCalendarEvent?
   var task: RitmTask?
   var draft: CalendarDraft?
-  /// The «Без даты» list, opened from the row under the week grid.
+  /// The «Без даты» list, opened from the chip above the bottom bar.
   var backlog = false
 }
 
-private struct CalendarDraft {
+struct CalendarDraft {
   let date: String
   let time: String?
   let duration: Int
 }
 
-private struct CalendarPick: Identifiable {
+struct CalendarPick: Identifiable {
   let date: String
   let keys: [String]
   var id: String { date + keys.joined() }
 }
 
-/// «Календарь» as the mobile web shows it (src/features/CalendarPage.tsx at 390 px).
+/// «Календарь» in the manner of Google Calendar on a phone (prototype A): a slim top bar, the
+/// time grid or list below it, a «+» button and the undated-tasks chip above the bottom bar, and
+/// a side menu that switches between the schedule, one day, three days, the week and the month.
+/// The page opens on the week every time: the view used last is not remembered.
 struct CalendarView: View {
-  @Environment(RitmStore.self) private var store
-  @Environment(RitmNavigation.self) private var navigation
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var date = ""
-  @State private var mode: NativeCalendarMode = .week
-  @State private var events: [GoogleCalendarEvent] = []
-  @State private var status: GoogleCalendarStatus?
-  @State private var partial = false
-  @State private var loading = false
-  @State private var failed = false
-  @State private var fetchedAt: String?
-  @State private var readID = UUID()
-  @State private var sheet: CalendarSheet?
-  @State private var pick: CalendarPick?
-  @State private var backlogOpen = false
-  @State private var nowJump = 0
+  @Environment(RitmStore.self) var store
+  @Environment(RitmNavigation.self) var navigation
+  @Environment(\.accessibilityReduceMotion) var reduceMotion
+  @AppStorage("ritm.calendar.hourFormat") private var storedHourFormat = CalendarHourFormat.default.rawValue
+  @State var date = ""
+  @State var mode = CalendarViewMode.launch
+  @State var scheduleDays = CalendarViewMode.scheduleInitialDays
+  @State var events: [GoogleCalendarEvent] = []
+  @State var status: GoogleCalendarStatus?
+  @State var partial = false
+  @State var loading = false
+  @State var failed = false
+  @State var fetchedAt: String?
+  @State var readID = UUID()
+  @State var sheet: CalendarSheet?
+  @State var pick: CalendarPick?
+  @State var nowJump = 0
+  @State var drawerOpen = false
+  @State var miniOpen = false
+  @State var searchOpen = false
 
-  private var selected: String { date.isEmpty ? store.today : date }
-  private var weekDays: [String] { HabitSchedule.week(containing: selected) }
-  private var periodDays: [String] { mode == .week ? weekDays : [selected] }
-  /// `calendarRange`: the Google read covers the visible period.
-  private var range: (from: String, to: String) {
-    switch mode {
-    case .day: return (selected, HabitSchedule.addDays(to: selected, days: 1) ?? selected)
-    case .week:
-      let start = weekDays.first ?? selected
-      return (start, HabitSchedule.addDays(to: start, days: 7) ?? start)
-    case .month:
-      let start = CalendarPlan.monthDays(containing: selected).first ?? selected
-      return (start, HabitSchedule.addDays(to: start, days: 42) ?? start)
-    }
-  }
-  private var connected: Bool { status?.status == .connected }
-  private var needsReauth: Bool { status?.status == .reauthRequired }
-  private var uncertain: Bool {
-    (loading && fetchedAt == nil) || failed || partial || needsReauth || (connected && fetchedAt == nil)
-  }
-  private var warning: Bool { failed || partial || needsReauth }
-  private var undatedTasks: [RitmTask] {
+  var selected: String { date.isEmpty ? store.today : date }
+  var gridDays: [String] { mode.visibleDays(anchor: selected) }
+  /// `calendarRange`: the Google read covers the visible period and its neighbours.
+  var range: (from: String, to: String) { mode.fetchRange(anchor: selected, scheduleDays: scheduleDays) }
+  var hourFormat: CalendarHourFormat { CalendarHourFormat(rawValue: storedHourFormat) ?? .default }
+  var undatedTasks: [RitmTask] {
     (store.bootstrap?.tasks ?? []).filter { $0.date == nil && !$0.completed }
   }
 
-  private func entries(_ day: String) -> [DayOccurrence] {
+  func entries(_ day: String) -> [DayOccurrence] {
     DayPlan.occurrences(
       tasks: store.bootstrap?.tasks ?? [], events: events, date: day, timeZone: store.timeZone, language: store.language)
   }
@@ -77,10 +66,23 @@ struct CalendarView: View {
     ZStack {
       RitmBackground()
       VStack(spacing: 0) {
-        toolbar.padding(.horizontal, 12).ritmPageReveal(index: 0)
-        if mode == .week { weekPage } else { listPage }
+        topBar.padding(.horizontal, 4).ritmPageReveal(index: 0)
+        notices
+        content
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .animation(reduceMotion ? nil : RitmMotion.ease(0.2), value: mode)
+          .ritmPageReveal(index: 1)
       }
+      CalendarFloatingButtons(
+        undatedCount: undatedTasks.count,
+        onAdd: { addEntry(mode.focusDay(anchor: selected, today: store.today)) },
+        onUndated: { sheet = CalendarSheet(backlog: true) }
+      )
+      .frame(maxHeight: .infinity, alignment: .bottom)
+      .ritmPageReveal(index: 2)
+      overlays
     }
+    .environment(\.calendarHourFormat, hourFormat)
     .toolbar(.hidden, for: .navigationBar)
     .task(id: range.from + range.to) { await reload() }
     .onChange(of: navigation.section) { _, section in
@@ -89,319 +91,75 @@ struct CalendarView: View {
     .onChange(of: store.lastSyncedAt) { _, _ in
       if navigation.section == .calendar { Task { await reload() } }
     }
-    .sheet(item: $sheet) { route in
-      if let event = route.event {
-        CalendarEventDetail(event: event) { await reload() }
-      } else if let task = route.task {
-        NativeTaskEditor(task: task, initialDate: selected, occurrenceDate: nil) { await reload() }
-      } else if let draft = route.draft {
-        CalendarEventEditor(
-          initialDate: draft.date, initialTime: draft.time, initialDuration: draft.duration
-        ) { await reload() }
-      } else {
-        backlogSheet.presentationDetents([.medium, .large])
-      }
-    }
+    .onChange(of: mode) { _, _ in scheduleDays = CalendarViewMode.scheduleInitialDays }
+    .sheet(item: $sheet) { route in sheetContent(route) }
     .sheet(item: $pick) { value in
       CalendarOverlapPicker(
         date: value.date, entries: entries(value.date).filter { value.keys.contains($0.key) }
       ) { entry in open(entry) }
       .presentationDetents([.medium, .large])
     }
-  }
-
-  // MARK: Toolbar
-
-
-  /// `.cal-top`, `.cal-nav` and `.cal-row`: paddings 10/6, 6/6 and 6/10 around three 44 pt rows.
-  private var toolbar: some View {
-    RitmGlassGroup(spacing: 8) { toolbarRows }
-  }
-
-  private var toolbarRows: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      HStack(alignment: .center, spacing: 8) {
-        Text(store.text("Календарь", "Calendar"))
-          .ritmFont(21, weight: .bold, tracking: -0.045)
-          .foregroundStyle(RitmTheme.text)
-          .lineLimit(1)
-          .minimumScaleFactor(0.8)
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .accessibilityAddTraits(.isHeader)
-        addButton
-      }
-      .padding(.top, 10)
-      .padding(.bottom, 6)
-      HStack(spacing: 5) {
-        iconButton(.leftIcon, store.text("Предыдущий период", "Previous period")) { shift(-1) }
-        Text(periodLabel)
-          .ritmFont(13, weight: .semibold, tracking: -0.025)
-          .foregroundStyle(RitmTheme.text)
-          .lineLimit(1)
-          .truncationMode(.tail)
-          .frame(maxWidth: .infinity)
-          .accessibilityAddTraits(.updatesFrequently)
-        iconButton(.rightIcon, store.text("Следующий период", "Next period")) { shift(1) }
-        Button(store.text("Сегодня", "Today")) { date = store.today }
-          .buttonStyle(CalendarSecondaryStyle())
-        if mode == .week {
-          Button {
-            date = store.today
-            nowJump += 1
-          } label: {
-            RitmSymbol("clock").font(.system(size: 18))
-          }
-          .buttonStyle(CalendarSecondaryStyle(square: true))
-          .accessibilityLabel(store.text("Показать текущее время", "Show the current time"))
-        }
-      }
-      .padding(.vertical, 6)
-      HStack(spacing: 8) {
-        segment
-        if !warning && (status != nil || loading) { compactStatus }
-      }
-      .padding(.top, 6)
-      .padding(.bottom, 10)
-      if warning { warningStatus.padding(.bottom, 10) }
+    .sheet(isPresented: $searchOpen) {
+      CalendarSearchSheet(load: searchDays, onPick: pickSearchHit)
     }
   }
 
-  /// `.cal-cta`: the prominent glass capsule with a plus and the label.
-  private var addButton: some View {
-    Button {
-      addEntry(selected)
-    } label: {
-      HStack(spacing: 8) {
-        RitmSymbol("plus").font(.system(size: 18, weight: .semibold))
-        Text(store.text("Добавить запись", "Add entry")).ritmFont(14, weight: .semibold).lineLimit(1)
-      }
-      .foregroundStyle(RitmTheme.ctaInk)
-      .padding(.horizontal, 14)
-      .frame(minHeight: 44)
-      .ritmGlass(in: Capsule(), prominent: true, interactive: true)
-      .contentShape(Capsule())
+  // MARK: Pieces
+
+  private var topBar: some View {
+    CalendarTopBar(
+      title: mode.title(anchor: selected, today: store.today, language: store.language).text,
+      miniOpen: miniOpen,
+      todayNumber: Int(store.today.suffix(2)) ?? 1,
+      initial: initial, loading: loading, attention: warning, connected: connected,
+      onMenu: { setDrawer(true) },
+      onTitle: { setMini(!miniOpen) },
+      onSearch: { searchOpen = true },
+      onToday: goToday,
+      onRefresh: { Task { await refreshGoogle() } },
+      onSettings: { navigation.section = .settings })
+  }
+
+  private var initial: String {
+    let name = (store.bootstrap?.settings.displayName ?? "").trimmingCharacters(in: .whitespaces)
+    return name.first.map { String($0).uppercased() } ?? "Р"
+  }
+
+  @ViewBuilder private var notices: some View {
+    if let message = store.errorMessage {
+      RitmErrorBanner(message: message).padding(.horizontal, 12).padding(.bottom, 8)
     }
-    .buttonStyle(RitmGlassButtonStyle())
-    .accessibilityLabel(store.text("Добавить запись", "Add entry"))
+    MutationRecoveryView().padding(.horizontal, 12)
+    if warning { warningStatus.padding(.horizontal, 12).padding(.bottom, 6) }
   }
 
-  private func iconButton(_ symbol: RitmIconName, _ label: String, action: @escaping () -> Void)
-    -> some View
-  {
-    Button(action: action) {
-      RitmIcon(symbol)
-        .font(.system(size: 18, weight: .medium))
-        .foregroundStyle(RitmTheme.muted)
-        .frame(width: 44, height: 44)
-        .ritmGlass(in: Circle(), interactive: true)
-        .contentShape(Circle())
-    }
-    .buttonStyle(RitmGlassButtonStyle())
-    .accessibilityLabel(label)
-  }
-
-  private var segment: some View {
-    RitmSegmentedControl(
-      label: store.text("Вид календаря", "Calendar view"), values: NativeCalendarMode.allCases,
-      title: modeTitle, selection: $mode, fontSize: 14)
-  }
-
-  /// `.cal-sync-footer` without a warning: an icon and the refresh or settings action.
-  private var compactStatus: some View {
-    HStack(spacing: 5) {
-      Group {
-        if loading {
-          ProgressView().controlSize(.small).tint(RitmTheme.accentColor)
-        } else {
-          RitmIcon(.calCalendar).font(.system(size: 20)).foregroundStyle(RitmTheme.accentColor)
-        }
-      }
-      .frame(width: 22)
-      .accessibilityLabel(statusTitle)
-      if connected {
-        Button {
-          Task { await refreshGoogle() }
-        } label: {
-          RitmIcon(.refreshCalendar).font(.system(size: 18))
-        }
-        .buttonStyle(CalendarSecondaryStyle(square: true))
-        .disabled(loading)
-        .accessibilityLabel(store.text("Обновить", "Refresh"))
-      } else {
-        settingsLink
-      }
-    }
-  }
-
-  private var warningStatus: some View {
-    HStack(alignment: .top, spacing: 5) {
-      RitmSymbol("exclamationmark.circle")
-        .font(.system(size: 15))
-        .foregroundStyle(RitmTheme.accentColor)
-        .padding(.top, 2)
-        .accessibilityHidden(true)
-      VStack(alignment: .leading, spacing: 4) {
-        Text(statusTitle).ritmFont(13, weight: .semibold).foregroundStyle(RitmTheme.text)
-        Text(statusMessage).ritmFont(11, lineSpacing: 6).foregroundStyle(RitmTheme.muted)
-        if let fetched = fetchedLabel {
-          Text(store.text("Последнее обновление: ", "Last updated: ") + fetched)
-            .ritmFont(10)
-            .foregroundStyle(RitmTheme.muted)
-        }
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      if connected || failed {
-        Button {
-          Task { await refreshGoogle() }
-        } label: {
-          Label { Text(store.text("Обновить", "Refresh")) } icon: { RitmIcon(.refreshCalendar) }
-        }
-        .buttonStyle(CalendarSecondaryStyle())
-        .disabled(loading)
-      } else {
-        settingsLink
-      }
-    }
-    .padding(.vertical, 4)
-    .padding(.horizontal, 8)
-    .frame(minHeight: 38)
-    .background(
-      RitmTheme.mix(RitmTheme.soft, 0.6, into: RitmTheme.panel),
-      in: RoundedRectangle(cornerRadius: 10, style: .circular)
-    )
-    .overlay {
-      RoundedRectangle(cornerRadius: 10, style: .circular)
-        .strokeBorder(RitmTheme.mix(RitmTheme.accentColor, 0.4, into: RitmTheme.line), lineWidth: 1)
-    }
-    .accessibilityElement(children: .contain)
-  }
-
-  private var settingsLink: some View {
-    Button {
-      navigation.section = .settings
-    } label: {
-      HStack(spacing: 4) {
-        Text(store.text("Настройки", "Settings"))
-        RitmIcon(.rightIcon).font(.system(size: 12, weight: .semibold))
-      }
-    }
-    .buttonStyle(RitmTextButtonStyle())
-  }
-
-  private var statusTitle: String {
-    if loading && fetchedAt == nil { return store.text("Загружаем Google Calendar…", "Loading Google Calendar…") }
-    if failed { return store.text("Google Calendar требует внимания", "Google Calendar needs attention") }
-    if needsReauth { return store.text("Подключи Google Calendar заново", "Reconnect Google Calendar") }
-    if partial { return store.text("Загружена часть событий Google", "Some Google events loaded") }
-    if connected { return store.text("Календарь синхронизирован", "Calendar synced") }
-    return store.text("Google Calendar пока не подключён", "Google Calendar is not connected yet")
-  }
-
-  private var statusMessage: String {
-    if failed {
-      return store.text(
-        "Не удалось обновить события. Показанные события могут быть неактуальны.",
-        "Could not refresh events. The events shown may be out of date.")
-    }
-    if partial {
-      return store.text(
-        "Часть событий не загружена. Свободное время нужно уточнить в Google Calendar.",
-        "Some events did not load. Check free time in Google Calendar.")
-    }
-    return store.text(
-      "Разрешение нужно обновить в настройках.", "The permission needs to be renewed in Settings.")
-  }
-
-  private var fetchedLabel: String? {
-    guard let fetchedAt, let instant = FeatureDate.instant(fetchedAt) else { return nil }
-    let key = HabitSchedule.dateKey(instant, timeZone: store.timeZone)
-    let time = FeatureDate.time(instant, zone: store.timeZone)
-    return FeatureDate.label(key, zone: store.timeZone, language: store.language, template: "d MMM")
-      + " · " + FeatureDate.clock(time)
-  }
-
-  private func modeTitle(_ value: NativeCalendarMode) -> String {
-    switch value {
-    case .day: store.text("День", "Day")
-    case .week: store.text("Неделя", "Week")
-    case .month: store.text("Месяц", "Month")
-    }
-  }
-
-  private var periodLabel: String {
-    let label: String
+  @ViewBuilder private var content: some View {
     switch mode {
+    case .day, .threeDays, .week: grid
     case .month:
-      label = FeatureDate.label(selected, zone: store.timeZone, language: store.language, template: "LLLL yyyy")
-    case .day:
-      label = FeatureDate.label(selected, zone: store.timeZone, language: store.language, template: "EEE d MMMM")
-    case .week:
-      let first = weekDays.first ?? selected
-      let last = weekDays.last ?? selected
-      label =
-        FeatureDate.label(first, zone: store.timeZone, language: store.language, template: "d MMM")
-        + " — "
-        + FeatureDate.label(last, zone: store.timeZone, language: store.language, template: "d MMM yyyy")
-    }
-    return CalendarText.capitalizedWords(label)
-  }
-
-  // MARK: Panel
-
-  /// «Неделя»: the toolbar stays put and the panel takes exactly the room left above the bottom
-  /// bar, so the hour grid is the only vertical scroll and its last hour ends above the bar.
-  private var weekPage: some View {
-    VStack(spacing: 0) {
-      if let message = store.errorMessage {
-        RitmErrorBanner(message: message).padding(.horizontal, 12).padding(.bottom, 8)
-      }
-      MutationRecoveryView().padding(.horizontal, 12)
-      weekPanel
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .ritmPageReveal(index: 1)
-      backlogRow(chevronOpen: false) { sheet = CalendarSheet(backlog: true) }
-        .padding(.horizontal, 12)
-        .padding(.top, 6)
-        .padding(.bottom, 12)
-        .ritmPageReveal(index: 2)
+      CalendarMonthView(
+        selected: selected, today: store.today, entries: entries(_:),
+        onSelect: { day in
+          date = day
+          mode = .day
+        },
+        onStep: step)
+    case .schedule:
+      CalendarSchedule(
+        days: (0..<scheduleDays).compactMap { HabitSchedule.addDays(to: selected, days: $0) },
+        selected: selected, today: store.today, entries: entries(_:), uncertain: uncertain,
+        googleConnected: connected, onOpen: open,
+        onAddFree: { day, time, duration in addEntry(day, time: time, duration: duration) },
+        onMore: { scheduleDays += CalendarViewMode.scheduleStepDays },
+        onRefresh: refreshGoogle)
     }
   }
 
-  /// «День» and «Месяц»: one page that scrolls, the panel at its natural height.
-  private var listPage: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 0) {
-        if let message = store.errorMessage {
-          RitmErrorBanner(message: message).padding(.bottom, 8)
-        }
-        MutationRecoveryView()
-        listPanel.ritmPageReveal(index: 1)
-        VStack(alignment: .leading, spacing: 13) {
-          backlogRow(chevronOpen: backlogOpen) {
-            withAnimation(reduceMotion ? nil : RitmMotion.ease(0.2)) { backlogOpen.toggle() }
-          }
-          if backlogOpen {
-            paceCard
-            backlogCard
-          }
-        }
-        .padding(.top, 6)
-        .ritmPageReveal(index: 2)
-      }
-      .padding(.horizontal, 12)
-      .padding(.bottom, 24)
-    }
-    .scrollIndicators(.hidden)
-    .refreshable {
-      await store.refresh()
-      await reload()
-    }
-  }
-
-  private var weekPanel: some View {
-    CalendarWeekGrid(
-      days: weekDays,
-      entries: Dictionary(uniqueKeysWithValues: weekDays.map { ($0, entries($0)) }),
+  private var grid: some View {
+    let days = gridDays
+    return CalendarWeekGrid(
+      days: days,
+      entries: Dictionary(uniqueKeysWithValues: days.map { ($0, entries($0)) }),
       today: store.today, timeZoneLabel: timeZoneLabel, jumpToNow: nowJump,
       dragBlock: dragBlock, onOpen: open,
       onPick: { day, group in pick = CalendarPick(date: day, keys: group.map(\.key)) },
@@ -411,341 +169,91 @@ struct CalendarView: View {
         mode = .day
       },
       onMove: { entry, day, minute in await move(entry, to: day, minute: minute) },
-      onSwipe: shift
-    )
-    .padding(.top, 7)
-    .padding(.horizontal, 3)
-    .clipShape(RoundedRectangle(cornerRadius: 20, style: .circular))
-    .background { RitmPanelBackground(radius: 20) }
-    .padding(.horizontal, 8)
+      onStep: step)
   }
 
-  @ViewBuilder private var listPanel: some View {
-    if mode == .day {
-      CalendarAgenda(
-        date: selected, entries: entries(selected), uncertain: uncertain, googleConnected: connected,
-        onOpen: open, onAdd: { day, time, duration in addEntry(day, time: time, duration: duration) }
-      )
-      .background { RitmPanelBackground() }
+  // MARK: Overlays: mini-month and side menu
+
+  @ViewBuilder private var overlays: some View {
+    if miniOpen {
+      ZStack(alignment: .topLeading) {
+        Color.clear.contentShape(Rectangle()).onTapGesture { setMini(false) }
+        CalendarMiniMonth(selected: selected, today: store.today, onPick: pickDay)
+          .padding(.top, CalendarTopBar.height + 2)
+          .padding(.horizontal, 12)
+          .transition(reduceMotion ? .opacity : .scale(scale: 0.92, anchor: .topLeading).combined(with: .opacity))
+      }
+    }
+    if drawerOpen {
+      CalendarDrawer(
+        mode: mode, hourFormat: hourFormatBinding, undatedCount: undatedTasks.count,
+        statusTitle: statusTitle, connected: connected, loading: loading,
+        onSelect: choose,
+        onUndated: {
+          setDrawer(false)
+          sheet = CalendarSheet(backlog: true)
+        },
+        onRefresh: { Task { await refreshGoogle() } },
+        onSettings: { navigation.section = .settings },
+        onClose: { setDrawer(false) })
+    }
+  }
+
+  private var hourFormatBinding: Binding<CalendarHourFormat> {
+    Binding(get: { hourFormat }, set: { storedHourFormat = $0.rawValue })
+  }
+
+  private func setDrawer(_ open: Bool) {
+    if open { miniOpen = false }
+    withAnimation(reduceMotion ? RitmMotion.reducedFade : RitmMotion.ease(0.34)) { drawerOpen = open }
+  }
+
+  private func setMini(_ open: Bool) {
+    withAnimation(reduceMotion ? RitmMotion.reducedFade : RitmMotion.inflate()) { miniOpen = open }
+  }
+
+  /// A day chosen in the mini-month: the month view opens that day, the others jump to it.
+  private func pickDay(_ day: String) {
+    date = day
+    if mode == .month { mode = .day }
+    setMini(false)
+  }
+
+  private func pickSearchHit(_ hit: CalendarSearchHit) {
+    searchOpen = false
+    date = hit.date
+    if mode == .month { mode = .day }
+    Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(450))
+      open(hit.entry)
+    }
+  }
+
+  // MARK: Sheets
+
+  @ViewBuilder private func sheetContent(_ route: CalendarSheet) -> some View {
+    if let event = route.event {
+      CalendarEventDetail(event: event) { await reload() }
+    } else if let task = route.task {
+      NativeTaskEditor(task: task, initialDate: selected, occurrenceDate: nil) { await reload() }
+    } else if let draft = route.draft {
+      CalendarEventEditor(
+        initialDate: draft.date, initialTime: draft.time, initialDuration: draft.duration
+      ) { await reload() }
     } else {
-      CalendarMonthGrid(selected: selected, today: store.today, entries: entries) { day in
-        date = day
-        mode = .day
-      }
-      .background { RitmPanelBackground() }
+      CalendarBacklogSheet(
+        tasks: undatedTasks, plannedCount: plannedCount, uncertain: uncertain
+      ) { task in sheet = CalendarSheet(task: task) }
+      .presentationDetents([.medium, .large])
     }
   }
 
-  /// `.cal-sech`: «Твой темп · Без даты (N)», a 44 pt row under the calendar.
-  private func backlogRow(chevronOpen: Bool, action: @escaping () -> Void) -> some View {
-    Button(action: action) {
-      HStack {
-        Text(
-          store.text("Твой темп", "Your pace") + " · " + store.text("Без даты", "No date")
-            + " (\(undatedTasks.count))")
-        Spacer()
-        RitmSymbol("chevron.down")
-          .font(.system(size: 14, weight: .semibold))
-          .foregroundStyle(RitmTheme.accentColor)
-          .rotationEffect(.degrees(chevronOpen ? 180 : 0))
-      }
-      .ritmFont(12)
-      .foregroundStyle(RitmTheme.muted)
-      .padding(.horizontal, 10)
-      .frame(minHeight: 44)
-      .background(RitmTheme.panel, in: RoundedRectangle(cornerRadius: 10, style: .circular))
-      .overlay {
-        RoundedRectangle(cornerRadius: 10, style: .circular).strokeBorder(RitmTheme.line, lineWidth: 1)
-      }
-      .contentShape(Rectangle())
+  /// How many entries the pace note counts: the visible days, or the chosen day in the month and
+  /// the schedule.
+  private var plannedCount: Int {
+    switch mode {
+    case .month, .schedule: entries(selected).count
+    case .day, .threeDays, .week: gridDays.reduce(0) { $0 + entries($1).count }
     }
-    .buttonStyle(RitmPressStyle(scale: 0.97))
-    .accessibilityAddTraits(chevronOpen ? .isSelected : [])
-  }
-
-  /// The week's «Без даты» list, a sheet because the week page has no room for it inline.
-  private var backlogSheet: some View {
-    ZStack {
-      RitmBackground()
-      ScrollView {
-        backlogCard.padding(.horizontal, 16).padding(.vertical, 24)
-      }
-    }
-  }
-
-  private var paceCard: some View {
-    let count =
-      mode == .month ? entries(selected).count : periodDays.reduce(0) { $0 + entries($1).count }
-    return RitmCard(padding: 20) {
-      VStack(alignment: .leading, spacing: 13) {
-        HStack {
-          Label { Text(store.text("Твой темп", "Your pace")) } icon: { RitmSymbol("sparkles") }
-            .ritmFont(14, weight: .semibold, tracking: -0.02)
-            .foregroundStyle(RitmTheme.text)
-          Spacer()
-          Text(store.text("Выбранный день", "Selected day")).ritmFont(11).foregroundStyle(RitmTheme.muted)
-        }
-        Group {
-          if count > 0 {
-            Text(
-              (uncertain ? store.text("Показано", "Shown") : store.text("В плане", "Planned"))
-                + " \(count) " + CalendarPlan.recordWord(count, language: store.language)
-                + store.text(". Оставь немного времени для себя.", ". Leave some time for yourself."))
-          } else if uncertain {
-            Text(store.text("Обновляем расписание. Дождись синхронизации.", "Updating the schedule. Wait for sync."))
-          } else {
-            Text(
-              store.text(
-                "Пока всё свободно. Начни с одного важного дела.",
-                "Everything is free for now. Start with one important thing."))
-          }
-        }
-        .ritmFont(13, lineSpacing: 8)
-        .foregroundStyle(RitmTheme.muted)
-        Text(
-          store.text(
-            "При редактировании повторения изменится только выбранная запись.",
-            "Editing a repeat changes only the selected entry.")
-        )
-        .ritmFont(10)
-        .foregroundStyle(RitmTheme.muted)
-      }
-    }
-  }
-
-  private var backlogCard: some View {
-    RitmCard(padding: 20) {
-      VStack(alignment: .leading, spacing: 0) {
-        HStack {
-          Text(store.text("Без даты", "No date"))
-            .ritmFont(14, weight: .semibold, tracking: -0.02)
-            .foregroundStyle(RitmTheme.text)
-          Spacer()
-          Text("\(undatedTasks.count)").ritmFont(11).foregroundStyle(RitmTheme.muted)
-        }
-        if undatedTasks.isEmpty {
-          Text(
-            store.text(
-              "Все дела уже нашли своё место в расписании.", "Everything already has its place.")
-          )
-          .ritmFont(13, lineSpacing: 8)
-          .foregroundStyle(RitmTheme.muted)
-          .padding(.vertical, 13)
-        }
-        ForEach(undatedTasks.prefix(4)) { task in
-          Button {
-            sheet = CalendarSheet(task: task)
-          } label: {
-            HStack(spacing: 10) {
-              Text(task.title).ritmFont(12).multilineTextAlignment(.leading)
-              Spacer(minLength: 0)
-              RitmIcon(.rightIcon).font(.system(size: 13)).foregroundStyle(RitmTheme.muted)
-                .accessibilityHidden(true)
-            }
-            .foregroundStyle(RitmTheme.text)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-          }
-          .buttonStyle(RitmPressStyle(scale: 0.97))
-          .overlay(alignment: .bottom) { Rectangle().fill(RitmTheme.line).frame(height: 1) }
-        }
-        if undatedTasks.count > 4 {
-          Text(
-            store.text(
-              "Ещё \(undatedTasks.count - 4) в разделе «Мой день»",
-              "\(undatedTasks.count - 4) more in My day")
-          )
-          .ritmFont(10)
-          .foregroundStyle(RitmTheme.muted)
-          .padding(.top, 10)
-        }
-      }
-    }
-  }
-
-  // MARK: Actions
-
-  /// `addEntry`: a slot gives a time (60 minutes by default), the main button an all-day event.
-  private func addEntry(_ day: String, time: String? = nil, duration: Int = 60) {
-    guard connected else {
-      store.errorMessage = store.text(
-        "Подключи Google Calendar в настройках, чтобы добавить запись.",
-        "Connect Google Calendar in Settings to add an entry.")
-      navigation.section = .settings
-      return
-    }
-    let bounded = time.flatMap(TaskSchedule.timeMinutes).map { min(duration, 1440 - $0) } ?? duration
-    sheet = CalendarSheet(draft: CalendarDraft(date: day, time: time, duration: bounded))
-  }
-
-  private func open(_ entry: DayOccurrence) {
-    if let event = entry.event {
-      sheet = CalendarSheet(event: event)
-    } else if let task = entry.task?.task {
-      sheet = CalendarSheet(task: task)
-    }
-  }
-
-  /// `canDragEntry`, with the reason: a whole, editable Google event that is not a task, or a
-  /// timed one-off Ritm task. Everything else stays put and says why when it is held.
-  private func dragBlock(_ entry: DayOccurrence) -> String? {
-    if let reason = movePolicy(entry) { return reason }
-    guard store.canWrite else {
-      return store.text(
-        "Сейчас нельзя сохранять изменения. Подожди и попробуй ещё раз.",
-        "Changes cannot be saved right now. Wait a moment and try again.")
-    }
-    return nil
-  }
-
-  private func movePolicy(_ entry: DayOccurrence) -> String? {
-    guard entry.start != nil, !entry.allDay else { return Self.notMovable(store) }
-    if entry.continued {
-      return store.text(
-        "Продолжение записи с прошлого дня переносится вместе с основной записью.",
-        "The part that continues from yesterday moves with the main entry.")
-    }
-    if let event = entry.event {
-      if event.googleTask != nil || event.taskLink == true {
-        return store.text(
-          "Задачи Google переносятся в Google Tasks. Открой запись, чтобы изменить её.",
-          "Google tasks are moved in Google Tasks. Open the entry to change it.")
-      }
-      if event.readOnly {
-        return store.text(
-          "Это событие только для просмотра: перенести его нельзя.",
-          "This event is view-only and cannot be moved.")
-      }
-      if !CalendarEventPolicy.canEdit(event, timeZone: store.timeZone) {
-        return store.text(
-          "Это событие нельзя перенести здесь: оно повторяется, идёт несколько дней или меняет часы. Открой его, чтобы изменить.",
-          "This event cannot be moved here: it repeats, spans days or crosses a clock change. Open it to edit.")
-      }
-      return nil
-    }
-    if let task = entry.task?.task {
-      if task.repeat != .none {
-        return store.text(
-          "Повторяющуюся задачу нельзя перенести отдельно: изменится вся серия. Открой её, чтобы изменить.",
-          "A repeating task cannot be moved on its own: the whole series would change. Open it to edit.")
-      }
-      if entry.completed {
-        return store.text(
-          "Выполненную задачу нельзя перенести.", "A completed task cannot be moved.")
-      }
-      if let start = entry.start, start + task.duration > 1440 {
-        return store.text(
-          "Задача заканчивается после полуночи: перенести её можно только через редактор.",
-          "The task ends after midnight: move it from the editor.")
-      }
-      return nil
-    }
-    return Self.notMovable(store)
-  }
-
-  private static func notMovable(_ store: RitmStore) -> String {
-    store.text("Эту запись нельзя перенести.", "This entry cannot be moved.")
-  }
-
-  /// `onGoogleMove`: saved at once with the same duration, no confirmation. A Ritm task keeps its
-  /// duration too. An ETag conflict or a failed write is reported by `store.write`, and the
-  /// reload below shows the server's version.
-  private func move(_ entry: DayOccurrence, to day: String, minute: Int) async {
-    guard movePolicy(entry) == nil else {
-      store.errorMessage = store.text(
-        "Эту запись нельзя перетащить. Открой её для просмотра.",
-        "This entry cannot be dragged. Open it to view it.")
-      return
-    }
-    let time = TaskSchedule.minuteTime(minute)
-    var saved = false
-    if let event = entry.event, var input = CalendarEventPolicy.draft(event, timeZone: store.timeZone) {
-      input.date = day
-      input.time = time
-      saved = await store.write { try await $0.updateGoogleEvent(id: event.id, event: input, etag: event.etag) } != nil
-    } else if let task = entry.task?.task {
-      let patch = TaskPatch(date: .value(day), time: .value(time))
-      saved = await store.write { try await $0.updateTask(id: task.id, patch: patch) } != nil
-    }
-    if saved {
-      store.toasts.show(store.text("Перенесено", "Moved"))
-    } else if store.errorMessage == nil {
-      store.errorMessage = store.text(
-        "Не удалось перенести запись. Попробуй ещё раз.", "Could not move the entry. Try again.")
-    }
-    await reload()
-  }
-
-  private func shift(_ amount: Int) {
-    let next =
-      mode == .month
-      ? TaskSchedule.addMonths(to: selected, months: amount)
-      : HabitSchedule.addDays(to: selected, days: amount * (mode == .week ? 7 : 1))
-    if let next { date = next }
-  }
-
-  private func refreshGoogle() async {
-    await store.refresh()
-    await reload()
-  }
-
-  private var timeZoneLabel: String {
-    let seconds = FeatureDate.calendar(store.timeZone).timeZone.secondsFromGMT(
-      for: FeatureDate.date(selected, zone: store.timeZone))
-    let minutes = abs(seconds / 60)
-    return "UTC" + (seconds >= 0 ? "+" : "-") + String(minutes / 60)
-      + (minutes % 60 == 0 ? "" : String(format: ":%02d", minutes % 60))
-  }
-
-  private func reload() async {
-    guard navigation.section == .calendar else { return }
-    let ticket = UUID()
-    readID = ticket
-    loading = true
-    defer { if ticket == readID { loading = false } }
-    let (from, to) = range
-    let currentStatus = await store.read { try await $0.googleStatus() }
-    guard ticket == readID, !Task.isCancelled else { return }
-    if let currentStatus, currentStatus != status { status = currentStatus }
-    guard currentStatus?.status == .connected else {
-      if currentStatus != nil {
-        events = []
-        partial = false
-        failed = false
-      } else {
-        failed = true
-      }
-      return
-    }
-    let zone = store.timeZone
-    let result = await store.read { try await $0.googleEvents(from: from, to: to, timeZone: zone) }
-    guard ticket == readID, !Task.isCancelled else { return }
-    if let result {
-      if events != result.events { events = result.events }
-      if partial != result.partial { partial = result.partial }
-      if fetchedAt != result.fetchedAt { fetchedAt = result.fetchedAt }
-      if failed { failed = false }
-    } else {
-      failed = true
-    }
-  }
-}
-
-/// The calendar's secondary buttons: Liquid Glass, accent label, 44 pt tall.
-private struct CalendarSecondaryStyle: ButtonStyle {
-  var square = false
-  @Environment(\.isEnabled) private var isEnabled
-
-  func makeBody(configuration: Configuration) -> some View {
-    configuration.label
-      .ritmFont(14, weight: .semibold)
-      .lineLimit(1)
-      .foregroundStyle(RitmTheme.accentColor)
-      .padding(.horizontal, square ? 0 : 12)
-      .frame(minWidth: 44, minHeight: 44)
-      .frame(width: square ? 44 : nil)
-      .ritmGlass(in: Capsule(), interactive: true)
-      .opacity(isEnabled ? 1 : 0.6)
-      .environment(\.ritmGlassPressed, configuration.isPressed)
   }
 }

@@ -293,6 +293,7 @@ struct CalendarDragLayer: View {
   let days: [String]
   let column: CGFloat
   @Environment(RitmStore.self) private var store
+  @Environment(\.calendarHourFormat) private var format
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private let hour = CGFloat(CalendarPlan.hourHeight)
@@ -317,7 +318,7 @@ struct CalendarDragLayer: View {
   }
 
   private func preview(_ drag: WeekDrag) -> some View {
-    let shape = RoundedRectangle(cornerRadius: 5, style: .circular)
+    let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
     let above = drag.target.minutes >= 30
     return shape
       .fill(RitmTheme.accentColor.opacity(0.14))
@@ -326,7 +327,7 @@ struct CalendarDragLayer: View {
           RitmTheme.accentColor, style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
       }
       .frame(width: column - 2, height: drag.height)
-      .overlay(alignment: drag.target.dayIndex >= 4 ? .topTrailing : .topLeading) {
+      .overlay(alignment: days.count > 3 && drag.target.dayIndex >= days.count - 3 ? .topTrailing : .topLeading) {
         timeLabel(drag)
           .offset(y: above ? -24 : drag.height + 4)
       }
@@ -343,7 +344,7 @@ struct CalendarDragLayer: View {
       FeatureDate.label(day, zone: store.timeZone, language: store.language, template: "EEE"))
     let end = drag.target.minutes + drag.duration
     return Text(
-      weekday + " · " + DayPlan.clock(drag.target.minutes) + "–" + DayPlan.clock(end)
+      weekday + " · " + format.clock(drag.target.minutes) + "–" + format.clock(end)
     )
     .ritmFont(11, weight: .semibold)
     .monospacedDigit()
@@ -357,7 +358,7 @@ struct CalendarDragLayer: View {
   private func ghost(_ drag: WeekDrag) -> some View {
     CalendarEventCard(entry: drag.entry, width: drag.width, height: drag.height)
       .overlay {
-        RoundedRectangle(cornerRadius: 4, style: .circular)
+        RoundedRectangle(cornerRadius: 7, style: .continuous)
           .strokeBorder(RitmTheme.accentColor.opacity(0.7), lineWidth: 1.5)
       }
       .scaleEffect(reduceMotion ? 1 : 1.06)

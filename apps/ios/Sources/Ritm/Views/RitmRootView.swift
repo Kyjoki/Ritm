@@ -5,7 +5,8 @@ import UIKit
 
 @MainActor @Observable
 final class RitmNavigation {
-  var section: RitmSection = .day {
+  /// The app opens on the calendar: it is the page used most often.
+  var section: RitmSection = .calendar {
     didSet { if section != oldValue { leaving = oldValue } }
   }
   /// The page being left: it stays alive, fading on top of the new one, for the length of the
@@ -42,9 +43,10 @@ enum RitmSection: String, CaseIterable, Hashable {
     case .settings: "slider.horizontal.3"
     }
   }
-  /// Pages whose header scrolls with the content, as on the web. The other pages still keep
-  /// their actions in the navigation bar, so their header stays pinned for now.
-  var embedsHeader: Bool { [.day, .habits, .workouts, .settings].contains(self) }
+  /// Pages that bring their own header, so the shell's big one is not drawn above them: the
+  /// calendar's slim bar, and the pages whose header scrolls with the content, as on the web. The
+  /// other pages still keep their actions in the navigation bar, so their header stays pinned.
+  var embedsHeader: Bool { [.day, .calendar, .habits, .workouts, .settings].contains(self) }
   /// Tabs shown in the bottom bar, left to right; the last slot is «Ещё».
   static let barSections: [RitmSection] = [.day, .calendar, .habits, .finance]
   /// Pages reached through the «Ещё» panel.

@@ -233,6 +233,8 @@ extension FinanceNoticeCenter {
 struct FinanceBellButton: View {
   @Environment(RitmStore.self) private var store
   @Environment(\.ritmPageActive) private var pageActive
+  /// The calendar's slim bar draws the bell without its glass disc, like its other icons.
+  var plain = false
 
   var body: some View {
     let center = store.notices
@@ -240,12 +242,17 @@ struct FinanceBellButton: View {
     Button {
       center.togglePopover()
     } label: {
-      RitmIcon(.bell)
-        .font(.system(size: 20))
-        .foregroundStyle(center.isOpen ? RitmTheme.accentColor : RitmTheme.muted)
+      let icon = RitmIcon(.bell)
+        .font(.system(size: plain ? 21 : 20))
+        .foregroundStyle(
+          center.isOpen ? RitmTheme.accentColor : plain ? RitmTheme.text : RitmTheme.muted
+        )
         .frame(width: 44, height: 44)
-        .ritmFloatingGlass(in: Circle(), interactive: true)
-        .contentShape(Circle())
+      if plain {
+        icon.contentShape(Circle())
+      } else {
+        icon.ritmFloatingGlass(in: Circle(), interactive: true).contentShape(Circle())
+      }
     }
     .buttonStyle(RitmGlassButtonStyle())
     .background { frameReader }
@@ -255,6 +262,7 @@ struct FinanceBellButton: View {
       ZStack {
         if unread > 0 {
           badge(unread)
+            .offset(x: plain ? -8 : 0, y: plain ? 8 : 0)
             .id(unread)
             .transition(.scale(scale: 0.5).combined(with: .opacity))
         }

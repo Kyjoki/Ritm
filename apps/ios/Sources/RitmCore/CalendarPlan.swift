@@ -17,8 +17,9 @@ public struct FreeInterval: Sendable, Equatable {
 
 /// Rules behind the calendar screen (CalendarPage.tsx and its helpers).
 public enum CalendarPlan {
-  /// `CALENDAR_GRID_METRICS.mobile`.
-  public static let hourHeight = 48.0
+  /// `CALENDAR_GRID_METRICS.mobile`, with the taller hour of the Google-style grid (56 pt) so a
+  /// block has room for a wrapped title and its time.
+  public static let hourHeight = 56.0
   public static let timeColumn = 40.0
   public static let initialHour = 9
 
