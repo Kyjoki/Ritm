@@ -68,9 +68,10 @@ struct CalendarDrawer: View {
 
   private var brand: some View {
     HStack(spacing: 10) {
-      Text("Р")
-        .ritmFont(16, weight: .heavy)
-        .foregroundStyle(Color(rgb: 0x34234C))
+      // The app's own mark, the same as in the page header.
+      RitmMark()
+        .fill(Color(rgb: 0x34234C))
+        .frame(width: 20, height: 20)
         .frame(width: 32, height: 32)
         .background(
           RitmTheme.linear(
