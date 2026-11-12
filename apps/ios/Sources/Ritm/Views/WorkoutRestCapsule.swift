@@ -48,6 +48,8 @@ struct WorkoutRestCapsule: View {
         progress: remaining / max(1, rest.totalLength), lineWidth: 4.6, tint: RitmTheme.accentColor
       )
       .frame(width: 38, height: 38)
+      // Only the ring is animated; the capsule around it stays a still picture.
+      .animation(.linear(duration: 1), value: Int(remaining.rounded(.up)))
       VStack(alignment: .leading, spacing: 0) {
         Text(mmss(remaining))
           .ritmFont(19, weight: .bold, tracking: -0.04).monospacedDigit()
@@ -84,11 +86,14 @@ struct WorkoutRestCapsule: View {
     }
     .padding(.leading, 9).padding(.trailing, 7).padding(.vertical, 7)
     // A flat surface, not live glass: the capsule redraws every second and a blur behind it
-    // made every tick stutter.
-    .background(RitmTheme.glassDense, in: Capsule())
+    // made every tick stutter. The shadow belongs to the plain fill only: a shadow around the
+    // whole capsule is blurred again every frame the ring moves, while a shadow of the fill is
+    // drawn once.
+    .background {
+      Capsule().fill(RitmTheme.glassDense)
+        .shadow(color: RitmTheme.panelShadow, radius: 8, y: 4)
+    }
     .overlay { Capsule().strokeBorder(RitmTheme.panelBorder, lineWidth: 1) }
-    .shadow(color: RitmTheme.panelShadow, radius: 8, y: 4)
-    .animation(.linear(duration: 1), value: Int(remaining.rounded(.up)))
   }
 
   private func mmss(_ remaining: TimeInterval) -> String {

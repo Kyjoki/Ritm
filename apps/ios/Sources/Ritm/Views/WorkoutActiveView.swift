@@ -7,8 +7,8 @@ import UIKit
 /// comes from the stored start timestamp and the whole state is saved on every change, so the
 /// workout survives the app being closed. Leaving the screen keeps it running.
 struct WorkoutActiveView: View {
-  /// A workout younger than this can be dropped with one tap on «Отменить».
-  private static let quickCancelWindow: TimeInterval = 120
+  /// How long after a move the neighbouring cards wait before they are built: the slide is over.
+  private static let settleDelay: Duration = .milliseconds(520)
 
   private static let haptic = UIImpactFeedbackGenerator(style: .light)
 
@@ -16,8 +16,9 @@ struct WorkoutActiveView: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   let go: (WorkoutScreen) -> Void
   let finished: (WorkoutRecord) -> Void
-  @State private var current = 0
-  @State private var forward = true
+  /// The exercise on screen and the cards that are built around it.
+  @State private var pager = WorkoutPagerWindow()
+  @State private var settleTask: Task<Void, Never>?
   @State private var selection: WorkoutSetSelection?
   @State private var sheet: Sheet?
   @State private var confirmingFinish = false
@@ -62,6 +63,7 @@ struct WorkoutActiveView: View {
   }
 
   private var workouts: WorkoutStore { store.workouts }
+  private var current: Int { pager.current }
 
   var body: some View {
     WorkoutPage(
@@ -77,7 +79,11 @@ struct WorkoutActiveView: View {
         }
       }
     }
-    .onAppear { current = firstOpen(workouts.session) }
+    .onAppear {
+      pager.reset(to: firstOpen(workouts.session))
+      settleSoon()
+    }
+    .onDisappear { settleTask?.cancel() }
     .onChange(of: workouts.systemInput?.id, initial: true) { _, _ in
       guard let request = workouts.systemInput, let session = workouts.session,
         request.target.workoutID == session.id,
@@ -173,7 +179,7 @@ struct WorkoutActiveView: View {
         VStack(spacing: 0) {
           Text(session.programName).ritmFont(16, weight: .bold, tracking: -0.03)
             .foregroundStyle(RitmTheme.text).lineLimit(1)
-          clock(session)
+          WorkoutElapsedClock(startedAt: session.startedAt) { confirmingCancel = true }.equatable()
         }
         .frame(maxWidth: .infinity)
         WorkoutRoundButton(symbol: "ellipsis", label: store.text("Меню тренировки", "Workout menu")) {
@@ -186,53 +192,16 @@ struct WorkoutActiveView: View {
     .padding(.bottom, 10)
   }
 
-  /// «mm:ss · Отменить»: the quick cancel lives only for the first two minutes.
-  private func clock(_ session: WorkoutSession) -> some View {
-    TimelineView(.periodic(from: session.startedAt, by: 1)) { context in
-      HStack(spacing: 4) {
-        Text(WorkoutClock.elapsed(from: session.startedAt, now: context.date)).monospacedDigit()
-        if context.date.timeIntervalSince(session.startedAt) < Self.quickCancelWindow {
-          Text("·")
-          Button(store.text("Отменить", "Cancel")) { confirmingCancel = true }
-            .ritmFont(12.5, weight: .bold).foregroundStyle(RitmTheme.accentColor)
-            .underline()
-            .frame(minHeight: 44)
-        }
-      }
-      .ritmFont(12.5).foregroundStyle(RitmTheme.muted)
-    }
-    .frame(height: 20)
-  }
-
-  /// `.w-seg`: one bar per exercise, filled by its done sets; tap to jump.
+  /// `.w-seg`: one bar per exercise; the strip is its own Equatable view.
   private func segments(_ session: WorkoutSession) -> some View {
-    HStack(spacing: 5) {
-      ForEach(Array(session.items.enumerated()), id: \.element.id) { index, item in
-        let share = item.sets.isEmpty ? 0 : Double(item.doneCount) / Double(item.sets.count)
-        Button {
-          show(index)
-        } label: {
-          Capsule().fill(RitmTheme.ringTrack)
-            .frame(height: 6)
-            .overlay(alignment: .leading) {
-              Capsule()
-                .fill(share >= 1 ? AnyShapeStyle(WorkoutColors.income) : AnyShapeStyle(WorkoutPalette.progressGradient))
-                .scaleEffect(x: max(share, 0.0001), anchor: .leading)
-                .animation(reduceMotion ? nil : RitmMotion.easeOut(0.4), value: share)
-            }
-            .overlay {
-              if index == current { Capsule().strokeBorder(RitmTheme.accentColor, lineWidth: 1.5).padding(-1.5) }
-            }
-            .scaleEffect(y: index == current ? 1.5 : 1)
-            .frame(maxWidth: .infinity, minHeight: 22)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(store.text("Упражнение \(index + 1)", "Exercise \(index + 1)"))
-        .accessibilityValue("\(item.doneCount) / \(item.sets.count)")
-      }
-    }
-    .padding(.horizontal, 4)
+    WorkoutProgressStrip(
+      segments: session.items.map {
+        WorkoutStripSegment(id: $0.id, done: $0.doneCount, total: $0.sets.count)
+      },
+      current: min(current, max(0, session.items.count - 1)),
+      select: { show($0) }
+    )
+    .equatable()
   }
 
   // MARK: Content
@@ -241,20 +210,9 @@ struct WorkoutActiveView: View {
     let index = min(current, max(0, session.items.count - 1))
     let all = session.items.allSatisfy { $0.sets.allSatisfy(\.done) }
     return VStack(spacing: 0) {
-      if session.items.indices.contains(index) {
-        WorkoutExerciseCard(
-          itemID: session.items[index].id, selection: $selection,
-          ticked: { ticked($0, session: session) },
-          options: { sheet = .options(session.items[index].id) }
-        )
-        .id(session.items[index].id)
-        .transition(
-          reduceMotion
-            ? .opacity
-            : .asymmetric(
-              insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
-              removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity)))
-        .simultaneousGesture(swipe(count: session.items.count))
+      if !session.items.isEmpty {
+        WorkoutExercisePager(items: session.items, window: pager) { card($0) }
+          .simultaneousGesture(swipe())
       }
       nav(session, index: index)
       Button {
@@ -301,7 +259,7 @@ struct WorkoutActiveView: View {
   }
 
   /// A horizontal swipe changes the exercise; a vertical one still scrolls the page.
-  private func swipe(count: Int) -> some Gesture {
+  private func swipe() -> some Gesture {
     DragGesture(minimumDistance: 24).onEnded { value in
       let dx = value.translation.width
       guard abs(dx) > 60, abs(dx) > abs(value.translation.height) * 1.5 else { return }
@@ -313,18 +271,43 @@ struct WorkoutActiveView: View {
 
   private func show(_ index: Int) {
     guard let count = workouts.session?.items.count, (0..<count).contains(index), index != current else { return }
-    forward = index > current
     selection = nil
     UIApplication.shared.sendAction(
       #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    withAnimation(reduceMotion ? RitmMotion.reducedFade : RitmMotion.easeOut(0.38)) { current = index }
+    var next = pager
+    next.move(to: index, reduceMotion: reduceMotion)
+    // A slide animates the position of cards that are already built; a far jump or Reduce Motion
+    // cross-fades through the transition of the cards themselves, so the page itself is not animated.
+    withAnimation(next.fade ? nil : RitmMotion.easeOut(0.38)) { pager = next }
+    settleSoon()
+  }
+
+  /// Builds the neighbours of the current card once the slide is over, never while it runs.
+  private func settleSoon() {
+    settleTask?.cancel()
+    settleTask = Task { @MainActor in
+      try? await Task.sleep(for: Self.settleDelay)
+      guard !Task.isCancelled else { return }
+      pager.settle()
+    }
+  }
+
+  /// One exercise card. Equatable: a card whose exercise did not change is not built again.
+  private func card(_ item: WorkoutSessionItem) -> some View {
+    WorkoutExerciseCard(
+      item: item, muscle: workouts.library.muscle(of: item.exerciseID),
+      selection: selection?.itemID == item.id ? selection : nil,
+      select: { selection = $0 }, ticked: { ticked($0) },
+      options: { sheet = .options(item.id) }
+    )
+    .equatable()
   }
 
   private func firstOpen(_ session: WorkoutSession?) -> Int {
     session?.items.firstIndex { $0.sets.contains { !$0.done } } ?? 0
   }
 
-  private func ticked(_ result: WorkoutSessionItem.TickResult, session: WorkoutSession) {
+  private func ticked(_ result: WorkoutSessionItem.TickResult) {
     switch result {
     case .done:
       Self.haptic.impactOccurred()
@@ -489,11 +472,9 @@ struct WorkoutActiveView: View {
     let id = currentItemID
     change()
     guard let items = workouts.session?.items else { return }
-    if let id, let index = items.firstIndex(where: { $0.id == id }) {
-      current = index
-    } else {
-      current = min(current, max(0, items.count - 1))
-    }
+    let index = id.flatMap { id in items.firstIndex { $0.id == id } } ?? min(current, max(0, items.count - 1))
+    pager.reset(to: index)
+    pager.settle()
   }
 }
 

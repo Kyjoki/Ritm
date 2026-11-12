@@ -239,32 +239,22 @@ struct WorkoutExerciseOptionsSheet: View {
       }
     }
     .background(RitmTheme.background)
-    .presentationDetents([.medium, .large])
+    .presentationDetents([.fraction(0.82), .large])
     .ritmSheetGrabber()
   }
 
-  /// Three tiles side by side, one under another when the text is large.
+  /// Sets, reps and rest as three rows with big values: nothing is squeezed or cut off.
   private func steppers(_ item: WorkoutSessionItem) -> some View {
-    let sets = tile(item, .sets, title: store.text("Подходы", "Sets"), value: "\(item.sets.count)")
-    let reps = tile(item, .reps, title: store.text("Повторы", "Reps"), value: "\(item.plannedReps)")
-    let rest = tile(
-      item, .rest, title: store.text("Отдых", "Rest"),
-      value: "\(item.restSeconds)" + store.text(" с", " s"))
-    return ViewThatFits(in: .horizontal) {
-      HStack(spacing: 8) { sets; reps; rest }
-      VStack(spacing: 8) { sets; reps; rest }
-    }
+    WorkoutPlanSteppers(
+      sets: item.sets.count, reps: item.plannedReps, rest: item.restSeconds,
+      canStep: { item.canStep($0, direction: $1) }, step: { step($0, $1) })
   }
 
-  private func tile(
-    _ item: WorkoutSessionItem, _ field: WorkoutProgramDraft.Field, title: String, value: String
-  ) -> some View {
-    WorkoutPlanStepper(
-      title: title, value: value, canDecrease: item.canStep(field, direction: -1),
-      canIncrease: item.canStep(field, direction: 1),
-      step: { direction in
-        withAnimation(RitmMotion.easeOut(0.2)) { workouts.step(field, direction: direction, item: itemID) }
-      })
+  /// One step of a plan value; reads the item again so a held button sees the latest value.
+  private func step(_ field: WorkoutProgramDraft.Field, _ direction: Int) -> Bool {
+    guard let item = workouts.item(itemID), item.canStep(field, direction: direction) else { return false }
+    withAnimation(RitmMotion.easeOut(0.2)) { workouts.step(field, direction: direction, item: itemID) }
+    return true
   }
 
   private func actionButton(symbol: String, title: String, danger: Bool, action: @escaping () -> Void)
@@ -281,45 +271,5 @@ struct WorkoutExerciseOptionsSheet: View {
       .contentShape(Capsule())
     }
     .buttonStyle(RitmGlassButtonStyle())
-  }
-}
-
-/// A caption, `−`, the value and `+`: the stepper of one plan value.
-struct WorkoutPlanStepper: View {
-  let title: String
-  let value: String
-  let canDecrease: Bool
-  let canIncrease: Bool
-  let step: (Int) -> Void
-
-  var body: some View {
-    VStack(spacing: 4) {
-      Text(title).ritmFont(10.5, weight: .semibold).foregroundStyle(RitmTheme.muted)
-      HStack(spacing: 0) {
-        button("−", enabled: canDecrease, label: title + " −") { step(-1) }
-        Text(value).ritmFont(15, weight: .bold).monospacedDigit().foregroundStyle(RitmTheme.text)
-          .frame(maxWidth: .infinity).minimumScaleFactor(0.8).lineLimit(1)
-        button("+", enabled: canIncrease, label: title + " +") { step(1) }
-      }
-      .padding(3)
-      .background(WorkoutPalette.inset, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-      .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(WorkoutPalette.stroke, lineWidth: 1) }
-    }
-    .frame(maxWidth: .infinity)
-    .accessibilityElement(children: .contain)
-  }
-
-  private func button(_ symbol: String, enabled: Bool, label: String, action: @escaping () -> Void)
-    -> some View
-  {
-    Button(action: action) {
-      Text(symbol).ritmFont(18, weight: .bold).foregroundStyle(RitmTheme.accentColor)
-        .frame(width: 40, height: 44)
-        .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .contentShape(Rectangle())
-    }
-    .buttonStyle(RitmPressStyle(scale: 0.92))
-    .disabled(!enabled).opacity(enabled ? 1 : 0.35)
-    .accessibilityLabel(label)
   }
 }

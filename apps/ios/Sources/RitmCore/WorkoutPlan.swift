@@ -100,8 +100,14 @@ public enum WorkoutCatalog {
     all(custom: custom, language: language).first { $0.id == id }?.name
   }
 
+  /// The group of every built-in exercise by id. The screen of a running workout asks for it on
+  /// every render, so it is a lookup, not a rebuilt list of exercises.
+  private static let builtinMuscles: [String: WorkoutMuscle] = Dictionary(
+    uniqueKeysWithValues: builtinNames.map { (builtinID($0.id), $0.muscle) })
+
   public static func muscle(of id: String, custom: [WorkoutExercise]) -> WorkoutMuscle? {
-    all(custom: custom, language: .ru).first { $0.id == id }?.muscle
+    if let muscle = builtinMuscles[id] { return muscle }
+    return custom.first { $0.id == id }?.muscle
   }
 
   /// The exercises that match the search text and muscle group (any when `nil`).
@@ -367,6 +373,25 @@ public enum WorkoutFormat {
     var text = rounded == rounded.rounded() ? String(Int(rounded)) : String(rounded)
     if text.contains("."), text.hasSuffix("0") { text.removeLast() }
     return comma ? text.replacingOccurrences(of: ".", with: ",") : text
+  }
+
+  /// A rest as a clock, «3:00», «0:45», «15:00»: the way the rest capsule shows it.
+  public static func restClock(seconds: Int) -> String {
+    let total = max(0, seconds)
+    let rest = total % 60
+    return "\(total / 60):" + (rest < 10 ? "0" : "") + "\(rest)"
+  }
+
+  /// A rest in words for VoiceOver: «3 мин», «45 с», «2 мин 30 с».
+  public static func restSpoken(seconds: Int, russian: Bool) -> String {
+    let total = max(0, seconds)
+    let minutes = total / 60
+    let rest = total % 60
+    let minuteUnit = russian ? "мин" : "min"
+    let secondUnit = russian ? "с" : "s"
+    if minutes == 0 { return "\(rest) \(secondUnit)" }
+    if rest == 0 { return "\(minutes) \(minuteUnit)" }
+    return "\(minutes) \(minuteUnit) \(rest) \(secondUnit)"
   }
 
   /// «+2,5 кг · −1 повт.», or the `same` text when nothing changed.
