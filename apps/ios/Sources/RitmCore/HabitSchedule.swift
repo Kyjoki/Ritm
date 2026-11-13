@@ -66,7 +66,7 @@ public enum HabitSchedule {
     return daysFromCivil(year, month, day)
   }
 
-  private static func daysInMonth(_ year: Int, _ month: Int) -> Int {
+  static func daysInMonth(_ year: Int, _ month: Int) -> Int {
     switch month {
     case 2: return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 ? 29 : 28
     case 4, 6, 9, 11: return 30
@@ -75,7 +75,7 @@ public enum HabitSchedule {
   }
 
   /// Howard Hinnant's `days_from_civil` for the proleptic Gregorian calendar.
-  private static func daysFromCivil(_ year: Int, _ month: Int, _ day: Int) -> Int {
+  static func daysFromCivil(_ year: Int, _ month: Int, _ day: Int) -> Int {
     let y = month <= 2 ? year - 1 : year
     let era = (y >= 0 ? y : y - 399) / 400
     let yearOfEra = y - era * 400
@@ -85,7 +85,7 @@ public enum HabitSchedule {
   }
 
   /// The inverse of `daysFromCivil` (`civil_from_days`).
-  private static func civilFromDays(_ days: Int) -> (year: Int, month: Int, day: Int) {
+  static func civilFromDays(_ days: Int) -> (year: Int, month: Int, day: Int) {
     let z = days + 719_468
     let era = (z >= 0 ? z : z - 146_096) / 146_097
     let dayOfEra = z - era * 146_097
@@ -98,7 +98,7 @@ public enum HabitSchedule {
     return (year, month, day)
   }
 
-  private static func key(forDays days: Int) -> String? {
+  static func key(forDays days: Int) -> String? {
     let parts = civilFromDays(days)
     guard (1...9999).contains(parts.year) else { return nil }
     let year = String(parts.year)

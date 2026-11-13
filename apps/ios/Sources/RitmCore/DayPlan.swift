@@ -136,54 +136,69 @@ public enum DayPlan {
   ) -> [DayOccurrence] {
     guard let zone = TimeZone(identifier: timeZone) else { return [] }
     return events.compactMap { event in
-      event.allDay ? allDayOccurrence(event, date: date) : timedOccurrence(event, date: date, zone: zone)
+      if event.allDay { return allDayOccurrence(event, date: date) }
+      guard let span = timedSpan(event, zone: zone) else { return nil }
+      return timedOccurrence(
+        event, date: date, span: span, startDate: span.start.date, endDate: span.end.date)
     }
   }
 
   /// `occurrences` for many days at once, with the same result as calling it day by day. Each
-  /// event's wall-clock span is worked out once (instant parsing and a zone conversion are the
-  /// costly part), so a day only reads the events that touch it. Reading a month of events day
-  /// by day repeated that work for every event and every day.
+  /// event's instants, wall-clock span and clock-change check are worked out once, so a day only
+  /// builds the entries of the events that touch it. Reading a week day by day repeated that work
+  /// for every event and every day, and it was the main cost of changing the period.
   public static func occurrencesByDay(
     tasks: [RitmTask], events: [GoogleCalendarEvent], dates: [String], timeZone: String,
     language: Language
   ) -> [String: [DayOccurrence]] {
-    var touching: [String: [GoogleCalendarEvent]] = [:]
-    if let zone = TimeZone(identifier: timeZone) {
-      for event in events {
-        guard let span = wallSpan(event, zone: zone) else { continue }
-        for date in dates where date >= span.first && date <= span.last {
-          touching[date, default: []].append(event)
-        }
-      }
-    }
+    let google = googleByDay(events, dates: dates, timeZone: timeZone)
     var result: [String: [DayOccurrence]] = [:]
     for date in dates {
-      result[date] = occurrences(
-        tasks: tasks, events: touching[date] ?? [], date: date, timeZone: timeZone, language: language)
+      result[date] = merged(tasks: tasks, google: google[date] ?? [], date: date, language: language)
     }
     return result
   }
 
-  /// The first and last wall-clock day an event can show on (an all-day end is exclusive, which
-  /// only makes this span one day wider than needed).
-  private static func wallSpan(_ event: GoogleCalendarEvent, zone: TimeZone)
-    -> (first: String, last: String)?
-  {
-    if event.allDay {
-      guard let start = event.start.date, let end = event.end.date else { return nil }
-      return (start, end)
+  /// The Google entries of each of `dates`, in the order of `events`.
+  private static func googleByDay(
+    _ events: [GoogleCalendarEvent], dates: [String], timeZone: String
+  ) -> [String: [DayOccurrence]] {
+    guard let zone = TimeZone(identifier: timeZone) else { return [:] }
+    var result: [String: [DayOccurrence]] = [:]
+    for event in events {
+      if event.allDay {
+        guard let first = event.start.date, let last = event.end.date else { continue }
+        for date in dates where date >= first && date <= last {
+          if let entry = allDayOccurrence(event, date: date) { result[date, default: []].append(entry) }
+        }
+        continue
+      }
+      guard let span = timedSpan(event, zone: zone) else { continue }
+      let startDate = span.start.date
+      let endDate = span.end.date
+      for date in dates where date >= startDate && date <= endDate {
+        if let entry = timedOccurrence(
+          event, date: date, span: span, startDate: startDate, endDate: endDate)
+        {
+          result[date, default: []].append(entry)
+        }
+      }
     }
-    guard let startInstant = CalendarEventPolicy.instant(event.start.dateTime),
-      let endInstant = CalendarEventPolicy.instant(event.end.dateTime), endInstant > startInstant
-    else { return nil }
-    return (wall(startInstant, zone: zone).date, wall(endInstant, zone: zone).date)
+    return result
   }
 
   /// Ritm calendar entries and Google events of one day; quick tasks stay out of the calendar.
   public static func occurrences(
     tasks: [RitmTask], events: [GoogleCalendarEvent], date: String, timeZone: String,
     language: Language
+  ) -> [DayOccurrence] {
+    merged(
+      tasks: tasks, google: googleOccurrences(events, date: date, timeZone: timeZone), date: date,
+      language: language)
+  }
+
+  private static func merged(
+    tasks: [RitmTask], google: [DayOccurrence], date: String, language: Language
   ) -> [DayOccurrence] {
     let local = TaskSchedule.dayOccurrences(
       tasks.filter { $0.calendarEntry != false }, date: date, language: language
@@ -196,7 +211,7 @@ public enum DayPlan {
         source: .ritm(entry))
     }
     let locale = Locale(identifier: language.rawValue)
-    return (local + googleOccurrences(events, date: date, timeZone: timeZone)).sorted { a, b in
+    return (local + google).sorted { a, b in
       if a.allDay != b.allDay { return a.allDay }
       if (a.start ?? 1441) != (b.start ?? 1441) { return (a.start ?? 1441) < (b.start ?? 1441) }
       let order = a.title.compare(b.title, options: [], locale: locale)
@@ -253,35 +268,31 @@ public enum DayPlan {
 
   // MARK: - Google segments
 
-  private struct WallTime {
-    let date: String
-    let minute: Int
-    let seconds: Int
+  /// What one timed event needs on every day it touches, worked out once.
+  private struct TimedSpan {
+    let startInstant: Date
+    let endInstant: Date
+    let start: CalendarInstants.Wall
+    let end: CalendarInstants.Wall
+    let exact: Double
+    let clockChange: Bool
   }
 
-  private static func wall(_ instant: Date, zone: TimeZone) -> WallTime {
-    var calendar = Calendar(identifier: .gregorian)
-    calendar.locale = Locale(identifier: "en_US_POSIX")
-    calendar.timeZone = zone
-    let parts = calendar.dateComponents(
-      [.year, .month, .day, .hour, .minute, .second], from: instant)
-    let hour = parts.hour ?? 0
-    let minute = parts.minute ?? 0
-    return WallTime(
-      date: String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0),
-      minute: hour * 60 + minute, seconds: (hour * 60 + minute) * 60 + (parts.second ?? 0))
-  }
-
-  /// Wall-clock minutes since the epoch, ignoring the zone offset (the web's `…Z` trick).
-  private static func wallMinutes(_ value: WallTime) -> Int? {
-    let parts = value.date.split(separator: "-").compactMap { Int($0) }
-    guard parts.count == 3 else { return nil }
-    var calendar = Calendar(identifier: .gregorian)
-    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-    guard
-      let day = calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+  private static func timedSpan(_ event: GoogleCalendarEvent, zone: TimeZone) -> TimedSpan? {
+    guard let startInstant = CalendarEventPolicy.instant(event.start.dateTime),
+      let endInstant = CalendarEventPolicy.instant(event.end.dateTime), endInstant > startInstant
     else { return nil }
-    return Int(day.timeIntervalSince1970 / 60) + value.minute
+    let start = CalendarInstants.wall(startInstant, zone: zone)
+    let end = CalendarInstants.wall(endInstant, zone: zone)
+    let exact = endInstant.timeIntervalSince(startInstant) / 60
+    let wallDuration = end.epochMinutes - start.epochMinutes
+    let clockChange =
+      abs(Double(wallDuration) - exact) >= 1
+      || CalendarEventPolicy.isAmbiguous(startInstant, zone: zone)
+      || CalendarEventPolicy.isAmbiguous(endInstant, zone: zone)
+    return TimedSpan(
+      startInstant: startInstant, endInstant: endInstant, start: start, end: end, exact: exact,
+      clockChange: clockChange)
   }
 
   private static func allDayOccurrence(_ event: GoogleCalendarEvent, date: String)
@@ -299,36 +310,29 @@ public enum DayPlan {
   }
 
   private static func timedOccurrence(
-    _ event: GoogleCalendarEvent, date: String, zone: TimeZone
+    _ event: GoogleCalendarEvent, date: String, span: TimedSpan, startDate: String, endDate: String
   ) -> DayOccurrence? {
-    guard let startInstant = CalendarEventPolicy.instant(event.start.dateTime),
-      let endInstant = CalendarEventPolicy.instant(event.end.dateTime), endInstant > startInstant
-    else { return nil }
-    let start = wall(startInstant, zone: zone)
-    let end = wall(endInstant, zone: zone)
-    if start.date > date || end.date < date || (end.date == date && end.seconds == 0) {
+    let start = span.start
+    let end = span.end
+    if startDate > date || endDate < date || (endDate == date && end.secondOfDay == 0) {
       return nil
     }
-    let continued = start.date < date
-    let startMinute = continued ? 0 : start.seconds / 60
-    let endMinute = end.date > date ? 1440 : (end.seconds + 59) / 60
-    let exact = endInstant.timeIntervalSince(startInstant) / 60
-    let wallDuration = (wallMinutes(end) ?? 0) - (wallMinutes(start) ?? 0)
-    let clockChange =
-      abs(Double(wallDuration) - exact) >= 1
-      || CalendarEventPolicy.isAmbiguous(startInstant, zone: zone)
-      || CalendarEventPolicy.isAmbiguous(endInstant, zone: zone)
+    let continued = startDate < date
+    let startMinute = continued ? 0 : start.secondOfDay / 60
+    let endMinute = endDate > date ? 1440 : (end.secondOfDay + 59) / 60
     // A backward clock change may put the wall-clock end before the start. Draw a positive
     // segment while keeping the actual endpoint labels.
     let drawnEnd = min(
       1440,
-      max(startMinute + 1, endMinute > startMinute ? endMinute : startMinute + Int(exact.rounded(.up))))
+      max(
+        startMinute + 1,
+        endMinute > startMinute ? endMinute : startMinute + Int(span.exact.rounded(.up))))
     return DayOccurrence(
       key: "google:\(event.calendarId):\(event.id):\(date)", date: date, title: event.title,
       start: startMinute, end: drawnEnd, completed: event.googleTask?.status == "completed",
-      allDay: false, busy: event.busy, continued: continued, duration: Int(exact.rounded()),
+      allDay: false, busy: event.busy, continued: continued, duration: Int(span.exact.rounded()),
       startLabel: continued ? clock(0) : clock(start.minute),
-      endLabel: end.date > date ? clock(1440) : clock(end.minute), clockChange: clockChange,
+      endLabel: endDate > date ? clock(1440) : clock(end.minute), clockChange: span.clockChange,
       source: .google(event))
   }
 }

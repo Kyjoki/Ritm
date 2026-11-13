@@ -237,9 +237,7 @@ public enum CalendarPlan {
   /// colour is used as is, and nil means the accent colour.
   public static func entryHex(_ id: String?) -> String? {
     guard let id else { return nil }
-    if id.range(of: #"^#[0-9a-fA-F]{6}$"#, options: .regularExpression) != nil {
-      return id.dropFirst().lowercased()
-    }
+    if isHexColor(id) { return id.dropFirst().lowercased() }
     return softColors[id]
   }
 

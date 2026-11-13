@@ -7,10 +7,18 @@ extension CalendarPlan {
   /// Unlike `entryHex` these are the full-strength swatches the solid blocks are filled with.
   public static func solidHex(_ id: String?) -> String? {
     guard let id else { return nil }
-    if id.range(of: #"^#[0-9a-fA-F]{6}$"#, options: .regularExpression) != nil {
-      return id.dropFirst().lowercased()
-    }
+    if isHexColor(id) { return id.dropFirst().lowercased() }
     return solidColors[id]
+  }
+
+  /// `#rrggbb`, checked byte by byte: this runs for every block on every redraw, and a regular
+  /// expression is compiled each time it is used this way.
+  static func isHexColor(_ id: String) -> Bool {
+    let bytes = id.utf8
+    guard bytes.count == 7, bytes.first == 35 else { return false }
+    return bytes.dropFirst().allSatisfy {
+      (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0)
+    }
   }
 
   private static let solidColors = [

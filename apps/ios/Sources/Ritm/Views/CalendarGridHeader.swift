@@ -3,17 +3,16 @@ import SwiftUI
 
 /// The rows above the hours: weekday and date, the overlap buttons and the all-day chips. Only a
 /// hairline under the block separates it from the hours; the day separators are drawn by the
-/// hour grid itself, never here. The day cells slide with `swipeOffset`, the time column with
-/// the UTC label stays put. The cells are a separate, equatable view: a swipe moves them without
-/// building them again.
+/// hour grid itself, never here. The day cells are pages of the same strip as the hours and slide with
+/// them, the time column with the UTC label stays put. The cells are a separate, equatable view:
+/// a swipe moves them without building them again.
 struct CalendarGridHeader: View {
-  let days: [String]
+  let window: CalendarPagerWindow
+  let pager: CalendarPagerPosition
   let model: CalendarDayModel
-  let generation: Int
   let today: String
   let timeZoneLabel: String
   let column: CGFloat
-  let swipeOffset: CGFloat
   let canSelectDay: Bool
   let onSelectDay: (String) -> Void
   let onOpen: (DayOccurrence) -> Void
@@ -34,17 +33,21 @@ struct CalendarGridHeader: View {
         .padding(.leading, 4)
         .padding(.bottom, 6)
         .frame(width: timeColumn, height: Self.dayRowHeight, alignment: .bottomLeading)
-      CalendarHeaderCells(
-        days: days, model: model, generation: generation, today: today, column: column,
-        canSelectDay: canSelectDay, onSelectDay: onSelectDay, onOpen: onOpen, onPick: onPick
-      )
-      .equatable()
-      .offset(x: swipeOffset)
-      .frame(width: column * CGFloat(days.count), alignment: .leading)
+      CalendarPageStrip(position: pager, window: window) { cells(slot: $0) }
+      .frame(width: column * CGFloat(window.currentDays.count), alignment: .leading)
       .clipped()
     }
     .padding(.bottom, 4)
     .overlay(alignment: .bottom) { Rectangle().fill(RitmTheme.line).frame(height: 1) }
+  }
+
+  private func cells(slot: Int) -> some View {
+    let days = window.days(slot: slot)
+    return CalendarHeaderCells(
+      days: days, model: model, stamps: model.stamps(days), today: today, column: column,
+      canSelectDay: canSelectDay, onSelectDay: onSelectDay, onOpen: onOpen, onPick: onPick
+    )
+    .equatable()
   }
 }
 
@@ -52,7 +55,7 @@ struct CalendarGridHeader: View {
 struct CalendarHeaderCells: View, Equatable {
   let days: [String]
   let model: CalendarDayModel
-  let generation: Int
+  let stamps: [Int]
   let today: String
   let column: CGFloat
   let canSelectDay: Bool
@@ -66,7 +69,7 @@ struct CalendarHeaderCells: View, Equatable {
   private static let narrowColumn: CGFloat = 90
 
   nonisolated static func == (left: CalendarHeaderCells, right: CalendarHeaderCells) -> Bool {
-    left.days == right.days && left.generation == right.generation && left.today == right.today
+    left.days == right.days && left.stamps == right.stamps && left.today == right.today
       && left.column == right.column && left.canSelectDay == right.canSelectDay
   }
 

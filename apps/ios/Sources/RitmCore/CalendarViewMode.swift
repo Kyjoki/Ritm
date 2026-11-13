@@ -53,8 +53,9 @@ public enum CalendarViewMode: String, CaseIterable, Sendable, Equatable {
     }
   }
 
-  /// The Google read for the page, `from` included and `to` excluded. The hour grid and the month
-  /// also cover the neighbouring periods, so a swipe lands on events that are already loaded.
+  /// The least the page needs, `from` included and `to` excluded: the hour grid also covers the
+  /// neighbouring periods, so a swipe lands on events that are already loaded; the month needs its
+  /// own days.
   public func fetchRange(anchor: String, scheduleDays: Int = CalendarViewMode.scheduleInitialDays)
     -> (from: String, to: String)
   {
@@ -62,11 +63,12 @@ public enum CalendarViewMode: String, CaseIterable, Sendable, Equatable {
     case .schedule:
       return (anchor, HabitSchedule.addDays(to: anchor, days: scheduleDays) ?? anchor)
     case .month:
-      let before = CalendarPlan.monthDays(containing: stepped(anchor: anchor, by: -1))
-      let after = CalendarPlan.monthDays(containing: stepped(anchor: anchor, by: 1))
-      let from = before.first ?? anchor
-      let last = after.last ?? anchor
-      return (from, HabitSchedule.addDays(to: last, days: 1) ?? last)
+      // The days of the month itself. The grid around it (6 weeks) is read by `loadRange`, which
+      // stays within the 93 days the server accepts per read, so three whole grids do not fit.
+      let dates = TaskSchedule.monthDates(containing: anchor)
+      let first = dates.first ?? anchor
+      let last = dates.last ?? anchor
+      return (first, HabitSchedule.addDays(to: last, days: 1) ?? last)
     case .day, .threeDays, .week:
       let days = visibleDays(anchor: anchor)
       let first = days.first ?? anchor

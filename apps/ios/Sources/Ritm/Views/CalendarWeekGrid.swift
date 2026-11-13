@@ -9,15 +9,24 @@ import SwiftUI
 /// it stay put. Below midnight the lines carry on for two hours and down to the screen's bottom
 /// edge, behind the tab bar, as in Google Calendar.
 ///
+/// The visible period and its two neighbours are built as pages and kept (`CalendarPagerWindow`),
+/// so a swipe only moves pages that already exist. The finger and the slide write one number
+/// (`CalendarPagerPosition`) that only the strips of pages read; this view is not drawn again
+/// for them (CalendarWeekGrid+Swipe.swift). When the slide ends the period is committed with a
+/// single state write and the neighbour ahead is built a moment later, on data the phone has
+/// read in the background.
+///
 /// Equatable: the page redraws for many small things, the grid only when its days, data or
 /// scroll target change.
 struct CalendarWeekGrid: View, Equatable {
   let days: [String]
+  let mode: CalendarViewMode
   let dayModel: CalendarDayModel
   let generation: Int
   let today: String
   let timeZoneLabel: String
   let jumpToNow: Int
+  let pager: CalendarPagerPosition
   /// Why an entry cannot be moved, or nil when it can.
   let dragBlock: (DayOccurrence) -> String?
   let onOpen: (DayOccurrence) -> Void
@@ -27,34 +36,56 @@ struct CalendarWeekGrid: View, Equatable {
   let onMove: (DayOccurrence, String, Int) async -> Void
   /// One period forward (1) or back (-1).
   let onStep: (Int) -> Void
-  @Environment(RitmStore.self) private var store
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(RitmStore.self) var store
+  @Environment(\.accessibilityReduceMotion) var reduceMotion
   @Environment(\.calendarHourFormat) private var format
-  @State private var swipeOffset: CGFloat = 0
-  @State private var sliding = false
-  @State private var model = WeekDragModel()
+  @State var window = CalendarPagerWindow(mode: .week, days: [])
+  @State var model = WeekDragModel()
 
-  private let hour = CGFloat(CalendarPlan.hourHeight)
-  private let timeColumn = CGFloat(CalendarPlan.timeColumn)
+  let hour = CGFloat(CalendarPlan.hourHeight)
+  let timeColumn = CGFloat(CalendarPlan.timeColumn)
   /// Empty hours under midnight, before the bottom inset (the tab bar's room) is added.
   private let tailHours: CGFloat = 2
 
   nonisolated static func == (left: CalendarWeekGrid, right: CalendarWeekGrid) -> Bool {
-    left.days == right.days && left.generation == right.generation && left.today == right.today
-      && left.timeZoneLabel == right.timeZoneLabel && left.jumpToNow == right.jumpToNow
+    left.days == right.days && left.mode == right.mode && left.generation == right.generation
+      && left.today == right.today && left.timeZoneLabel == right.timeZoneLabel
+      && left.jumpToNow == right.jumpToNow
+  }
+
+  /// The window the page draws: the kept one, or a new one when the days were changed from
+  /// outside (today, a date picked, another view) instead of by a swipe.
+  var shown: CalendarPagerWindow {
+    // The first window of a grid that was just created starts where the pager rests.
+    window.aligned(mode: mode, days: days, slot: window.epoch == 0 ? pager.restSlot : nil)
+  }
+
+  /// `shown`, with the days of every built page read in one go: three separate reads would parse
+  /// the events three times when the data has just changed.
+  private func preparedWindow() -> CalendarPagerWindow {
+    let window = shown
+    dayModel.prepare(window.slots.flatMap { window.days(slot: $0) })
+    return window
   }
 
   var body: some View {
+    let shown = preparedWindow()
     GeometryReader { proxy in
       let column = max(1, (proxy.size.width - timeColumn) / CGFloat(max(1, days.count)))
       let bottomInset = proxy.safeAreaInsets.bottom
       VStack(spacing: 0) {
         CalendarGridHeader(
-          days: days, model: dayModel, generation: generation, today: today,
-          timeZoneLabel: timeZoneLabel, column: column, swipeOffset: swipeOffset,
-          canSelectDay: days.count > 1, onSelectDay: onSelectDay, onOpen: onOpen, onPick: onPick)
-        grid(column: column, width: proxy.size.width, bottomInset: bottomInset)
+          window: shown, pager: pager, model: dayModel, today: today,
+          timeZoneLabel: timeZoneLabel, column: column, canSelectDay: days.count > 1,
+          onSelectDay: onSelectDay, onOpen: onOpen, onPick: onPick)
+        grid(shown, column: column, width: proxy.size.width, bottomInset: bottomInset)
       }
+    }
+    .onChange(of: CalendarPagerInput(mode: mode, days: days), initial: true) { _, _ in
+      if window != shown { window = shown }
+    }
+    .task(id: CalendarWarmKey(epoch: shown.epoch, slot: shown.slot, generation: generation)) {
+      await buildNeighbours()
     }
   }
 
@@ -65,14 +96,17 @@ struct CalendarWeekGrid: View, Equatable {
     24 * hour + tailHours * hour + bottomInset
   }
 
-  private func grid(column: CGFloat, width: CGFloat, bottomInset: CGFloat) -> some View {
+  private func grid(
+    _ shown: CalendarPagerWindow, column: CGFloat, width: CGFloat, bottomInset: CGFloat
+  ) -> some View {
     let height = contentHeight(bottomInset: bottomInset)
+    let dayWidth = column * CGFloat(days.count)
     return GeometryReader { viewport in
       ScrollViewReader { reader in
         ScrollView {
           HStack(alignment: .top, spacing: 0) {
             hourColumn(height: height)
-            dayArea(column: column, height: height)
+            dayArea(shown, column: column, height: height)
           }
           .overlay(alignment: .topLeading) {
             CalendarDragLayer(model: model, days: days, column: column)
@@ -86,8 +120,8 @@ struct CalendarWeekGrid: View, Equatable {
                   viewport: CGSize(
                     width: viewport.size.width, height: viewport.size.height - bottomInset))
               },
-              swipeLimit: width * 0.4,
-              onSwipeChange: { if !sliding { swipeOffset = $0 } },
+              swipeLimit: dayWidth,
+              onSwipeChange: { dragSwipe($0, width: dayWidth) },
               onSwipeEnd: { dx, dy, elapsed in
                 finishSwipe(dx: dx, dy: dy, elapsed: elapsed, width: width)
               })
@@ -106,7 +140,11 @@ struct CalendarWeekGrid: View, Equatable {
           // A swipe that began before the lift is dropped.
           if active { settle() }
         }
-        .onDisappear { model.reset() }
+        .onDisappear {
+          model.reset()
+          pager.dragging = false
+          if !pager.sliding { pager.moving = false }
+        }
         .onAppear {
           reader.scrollTo("hour-\(CalendarPlan.initialHour)", anchor: .top)
         }
@@ -156,27 +194,24 @@ struct CalendarWeekGrid: View, Equatable {
     .accessibilityHidden(true)
   }
 
-  /// The columns with their separators, clipped to their own width so the slide of a period
-  /// change never covers the time column.
-  private func dayArea(column: CGFloat, height: CGFloat) -> some View {
-    ZStack(alignment: .topLeading) {
-      CalendarGridLines(hour: hour, column: column, columns: days.count, vertical: false)
-        .stroke(RitmTheme.line, lineWidth: 1)
-      CalendarGridLines(hour: hour, column: column, columns: days.count, vertical: true)
-        .stroke(RitmTheme.line.opacity(0.75), lineWidth: 1)
-      HStack(spacing: 0) {
-        ForEach(days, id: \.self) { day in dayColumn(day, column: column, height: height) }
-      }
+  /// The pages with their separators, clipped to the day area so the slide of a period change
+  /// never covers the time column.
+  private func dayArea(_ shown: CalendarPagerWindow, column: CGFloat, height: CGFloat) -> some View {
+    CalendarPageStrip(position: pager, window: shown) { slot in
+      hourPage(shown, slot: slot, column: column, height: height)
     }
-    .offset(x: swipeOffset)
     .frame(width: column * CGFloat(days.count), height: height, alignment: .topLeading)
     .clipped()
   }
 
-  private func dayColumn(_ day: String, column: CGFloat, height: CGFloat) -> some View {
-    CalendarDayColumn(
-      day: day, placed: dayModel.layout(day), column: column, height: height,
-      isToday: day == today, liftedKey: model.liftedKey, generation: generation,
+  private func hourPage(
+    _ shown: CalendarPagerWindow, slot: Int, column: CGFloat, height: CGFloat
+  ) -> some View {
+    let pageDays = shown.days(slot: slot)
+    return CalendarHourPage(
+      days: pageDays, stamps: dayModel.stamps(pageDays), placed: pageDays.map(dayModel.layout),
+      column: column, height: height, today: today,
+      liftedKey: slot == shown.slot ? model.liftedKey : nil,
       hint: { entry in
         dragBlock(entry)
           ?? store.text(
@@ -184,8 +219,8 @@ struct CalendarWeekGrid: View, Equatable {
             "Hold and drag the entry to another time or day.")
       },
       onOpen: { entry in if model.tapsAllowed { onOpen(entry) } },
-      onTap: { point in tapped(day, column: column, at: point) },
-      onAddMorning: { onAdd(day, 540) }
+      onTap: { day, point in tapped(day, column: column, at: point) },
+      onAddMorning: { day in onAdd(day, 540) }
     )
     .equatable()
   }
@@ -214,7 +249,7 @@ struct CalendarWeekGrid: View, Equatable {
       resolve: { content in resolve(content, column: column) },
       dayKey: { days.indices.contains($0) ? days[$0] : nil },
       scrollTo: { reader.scrollTo($0, anchor: .top) },
-      switchWeek: onStep,
+      switchWeek: { advance($0) },
       showHint: { store.toasts.show($0) },
       move: onMove)
   }
@@ -251,28 +286,17 @@ struct CalendarWeekGrid: View, Equatable {
       model.tick(dt: Double(elapsed.components.attoseconds) / 1e18 + Double(elapsed.components.seconds))
     }
   }
+}
 
-  // MARK: Swipe between periods
+/// What makes the grid take a new window: another view or other days chosen from outside.
+struct CalendarPagerInput: Hashable {
+  let mode: CalendarViewMode
+  let days: [String]
+}
 
-  /// A deliberate horizontal swipe slides to the next or previous period; anything else settles
-  /// the columns back.
-  private func finishSwipe(dx: CGFloat, dy: CGFloat, elapsed: TimeInterval, width: CGFloat) {
-    let direction = model.active ? 0 : CalendarPlan.weekSwipe(dx: dx, dy: dy, elapsed: elapsed, width: width)
-    guard direction != 0, !sliding else {
-      if !sliding { settle() }
-      return
-    }
-    sliding = true
-    Task { @MainActor in
-      await CalendarSlide.run(
-        direction: direction, width: width - timeColumn, reduceMotion: reduceMotion,
-        offset: $swipeOffset
-      ) { onStep(direction) }
-      sliding = false
-    }
-  }
-
-  private func settle() {
-    withAnimation(reduceMotion ? nil : RitmMotion.easeOut(0.22)) { swipeOffset = 0 }
-  }
+/// What the grid builds ahead for: it starts again when the window moves or the data changes.
+struct CalendarWarmKey: Hashable {
+  let epoch: Int
+  let slot: Int
+  let generation: Int
 }

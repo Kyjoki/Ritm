@@ -71,22 +71,10 @@ public enum CalendarEventPolicy {
 
   static func instant(_ value: String?) -> Date? {
     guard let value else { return nil }
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    if let date = formatter.date(from: value) { return date }
-    formatter.formatOptions = [.withInternetDateTime]
-    return formatter.date(from: value)
+    return CalendarInstants.parse(value)
   }
 
   static func isAmbiguous(_ instant: Date, zone: TimeZone) -> Bool {
-    let calendar = calendar(zone)
-    let components: Set<Calendar.Component> = [.year, .month, .day, .hour, .minute, .second]
-    let current = calendar.dateComponents(components, from: instant)
-    // Matches the web editor, including thirty-minute DST regions.
-    for offset in [-120, -90, -60, -30, -15, 15, 30, 60, 90, 120] {
-      let other = instant.addingTimeInterval(Double(offset * 60))
-      if calendar.dateComponents(components, from: other) == current { return true }
-    }
-    return false
+    CalendarInstants.isAmbiguous(instant, zone: zone)
   }
 }

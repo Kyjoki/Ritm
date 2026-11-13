@@ -46,12 +46,14 @@ struct CalendarEventCard: View {
     .padding(.leading, 5)
     .padding(.trailing, 3)
     .frame(width: width, height: height, alignment: .topLeading)
+    // A fill and a hairline with a plain rectangular clip: a rounded clipping mask on every block
+    // is an extra pass for the whole week while it slides.
     .background {
       let shape = RoundedRectangle(cornerRadius: Self.radius, style: .continuous)
       shape.fill(CalendarPalette.solid(entry.colorId))
         .overlay { shape.strokeBorder(Color.white.opacity(0.16), lineWidth: 1) }
     }
-    .clipShape(RoundedRectangle(cornerRadius: Self.radius, style: .continuous))
+    .clipped()
     .opacity(entry.completed ? 0.6 : 1)
   }
 

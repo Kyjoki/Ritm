@@ -156,21 +156,31 @@ extension CalendarView {
 
   // MARK: Reading Google
 
-  /// Reads Google only when the page needs days that were not read yet: switching between the
-  /// views, or a swipe inside the neighbours already read, costs no request.
+  /// Reads Google only when the page needs days that were not read yet. One read loads several
+  /// periods around the visible one, so a swipe inside them costs no request. When the swipe
+  /// has used up most of the loaded days, the next read is made quietly once the page has been
+  /// left alone: no spinner, no error banner, and the data is swapped in after any slide.
   func reloadIfNeeded() async {
-    if CalendarViewMode.covers(fetchedRange, range) { return }
-    await reload()
+    switch mode.readDecision(anchor: selected, scheduleDays: scheduleDays, read: fetchedRange) {
+    case .none:
+      return
+    case .now:
+      await reload()
+    case .whenIdle:
+      try? await Task.sleep(for: .milliseconds(700))
+      guard !Task.isCancelled else { return }
+      await reload(quiet: true)
+    }
   }
 
-  func reload() async {
+  func reload(quiet: Bool = false) async {
     guard navigation.section == .calendar else { return }
     let ticket = UUID()
     readID = ticket
-    loading = true
-    defer { if ticket == readID { loading = false } }
-    let (from, to) = range
-    let currentStatus = await store.read { try await $0.googleStatus() }
+    if !quiet && !loading { loading = true }
+    defer { if ticket == readID && loading { loading = false } }
+    let (from, to) = readRange
+    let currentStatus = await readStatus(quiet: quiet)
     guard ticket == readID, !Task.isCancelled else { return }
     if let currentStatus, currentStatus != status { status = currentStatus }
     guard currentStatus?.status == .connected else {
@@ -179,7 +189,7 @@ extension CalendarView {
         partial = false
         failed = false
         fetchedRange = (from, to)
-      } else {
+      } else if !quiet {
         failed = true
       }
       return
@@ -187,16 +197,39 @@ extension CalendarView {
     let zone = store.timeZone
     let result = await store.read { try await $0.googleEvents(from: from, to: to, timeZone: zone) }
     guard ticket == readID, !Task.isCancelled else { return }
-    if let result {
-      if events != result.events { events = result.events }
-      if partial != result.partial { partial = result.partial }
-      if fetchedAt != result.fetchedAt { fetchedAt = result.fetchedAt }
-      if failed { failed = false }
-      fetchedRange = (from, to)
-      if filter.remember(result.events) { CalendarFilterStore.save(filter, email: email) }
-    } else {
-      failed = true
+    guard let result else {
+      if !quiet { failed = true }
+      return
     }
+    await waitForCalm()
+    guard ticket == readID, !Task.isCancelled else { return }
+    apply(result, from: from, to: to)
+  }
+
+  /// The status of the connection; a quiet read trusts the one it already knows.
+  private func readStatus(quiet: Bool) async -> GoogleCalendarStatus? {
+    if quiet, let status, status.status == .connected { return status }
+    return await store.read { try await $0.googleStatus() }
+  }
+
+  /// A read that finishes while a finger is on the grid or a slide runs waits for it: swapping
+  /// the data then would redraw the pages in the middle of the motion.
+  private func waitForCalm() async {
+    var waited = 0
+    while pager.moving, waited < 50, !Task.isCancelled {
+      try? await Task.sleep(for: .milliseconds(60))
+      waited += 1
+    }
+  }
+
+  /// All the state of a finished read, written at once.
+  private func apply(_ result: GoogleCalendarResult, from: String, to: String) {
+    if events != result.events { events = result.events }
+    if partial != result.partial { partial = result.partial }
+    if fetchedAt != result.fetchedAt { fetchedAt = result.fetchedAt }
+    if failed { failed = false }
+    fetchedRange = (from, to)
+    if filter.remember(result.events) { CalendarFilterStore.save(filter, email: email) }
   }
 
   /// The days the search reads: the last 30 days and the next 180, fetched once per search.

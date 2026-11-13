@@ -5,8 +5,13 @@ import RitmCore
 /// The calendar page's reading of the days, kept between redraws. The page redraws for every
 /// small change (a spinner, a sheet, a swipe), and the work behind a day (instants, zones, the
 /// overlap layout, the month's cells) is far too heavy to repeat each time. This is not
-/// observed: it changes only when the page hands it new data (`sync`), which bumps `generation`
-/// so the views that drew the old data know to draw again.
+/// observed: it changes only when the page hands it new data (`sync`), which bumps `generation`.
+///
+/// Every day carries a `stamp` that changes only when what the day shows changes. After new data
+/// arrives a day is read again, but when it comes out the same as before it keeps its stamp, so
+/// the views drawn from that stamp do not draw it again: a Google read that only added events
+/// further away costs the visible week nothing. The days the page will need next (the
+/// neighbouring weeks) are read ahead on a background thread (`prewarm`) and copied in.
 @MainActor
 final class CalendarDayModel {
   private var tasks: [RitmTask] = []
@@ -14,9 +19,9 @@ final class CalendarDayModel {
   private var zone = ""
   private var language = Language.ru
   private var hidden: Set<String> = []
-  private var byDay: [String: [DayOccurrence]] = [:]
-  private var placedByDay: [String: [PlacedOccurrence]] = [:]
+  private var cache = CalendarDayCache()
   private var months: [String: [[CalendarMonthCell]]] = [:]
+  private var warming: Set<String> = []
   private(set) var generation = 0
 
   /// Hands over the data the page shows. Nothing is redone when it is the same as before (equal
@@ -34,35 +39,56 @@ final class CalendarDayModel {
     self.zone = zone
     self.language = language
     self.hidden = hidden
-    byDay = [:]
-    placedByDay = [:]
+    cache.invalidate()
     months = [:]
+    warming = []
     generation += 1
     return generation
   }
 
   /// Reads the days that are not cached yet in one go.
-  func prepare(_ days: [String]) {
-    let missing = days.filter { byDay[$0] == nil }
+  func prepare(_ requested: [String]) {
+    let missing = cache.missing(requested)
     guard !missing.isEmpty else { return }
-    let read = DayPlan.occurrencesByDay(
-      tasks: CalendarSources.visible(tasks, hidden: hidden),
-      events: CalendarSources.visible(events, hidden: hidden), dates: missing, timeZone: zone,
-      language: language)
-    byDay.merge(read) { _, new in new }
+    cache.ingest(
+      CalendarDayCompute.compute(
+        tasks: tasks, events: events, hidden: hidden, dates: missing, timeZone: zone,
+        language: language))
   }
 
-  func entries(_ day: String) -> [DayOccurrence] {
-    if byDay[day] == nil { prepare([day]) }
-    return byDay[day] ?? []
+  /// Reads days ahead of need on a background thread and copies the result in, unless the data
+  /// changed meanwhile. The page keeps working while it runs: a day it needs earlier is simply
+  /// read on the spot.
+  func prewarm(_ requested: [String]) async {
+    let missing = cache.missing(requested).filter { !warming.contains($0) }
+    guard !missing.isEmpty else { return }
+    warming.formUnion(missing)
+    let ticket = generation
+    let (tasks, events, hidden, zone, language) = (tasks, events, hidden, zone, language)
+    let read = await Task.detached(priority: .utility) {
+      CalendarDayCompute.compute(
+        tasks: tasks, events: events, hidden: hidden, dates: missing, timeZone: zone,
+        language: language)
+    }.value
+    guard ticket == generation else { return }
+    warming.subtract(missing)
+    cache.ingest(read)
   }
 
-  /// The overlap lanes of a day, worked out once per generation.
-  func layout(_ day: String) -> [PlacedOccurrence] {
-    if let placed = placedByDay[day] { return placed }
-    let placed = CalendarPlan.layout(entries(day))
-    placedByDay[day] = placed
-    return placed
+  private func entry(_ day: String) -> CalendarDayCache.Entry? {
+    if cache.entry(day) == nil { prepare([day]) }
+    return cache.entry(day)
+  }
+
+  func entries(_ day: String) -> [DayOccurrence] { entry(day)?.data.entries ?? [] }
+
+  /// The overlap lanes of a day, worked out with the day.
+  func layout(_ day: String) -> [PlacedOccurrence] { entry(day)?.data.placed ?? [] }
+
+  /// The stamps of `requested`, reading the missing days in one go.
+  func stamps(_ requested: [String]) -> [Int] {
+    prepare(requested)
+    return requested.map { cache.entry($0)?.stamp ?? 0 }
   }
 
   /// The six rows of the month cells around `anchor`, cached per look.
@@ -72,7 +98,7 @@ final class CalendarDayModel {
     prepare(CalendarPlan.monthDays(containing: anchor))
     let rows = CalendarPlan.monthRows(
       anchor: anchor, today: today, selected: selected, limit: limit, stamp: generation
-    ) { byDay[$0] ?? [] }
+    ) { cache.entry($0)?.data.entries ?? [] }
     months[key] = rows
     return rows
   }

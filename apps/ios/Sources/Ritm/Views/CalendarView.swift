@@ -54,12 +54,17 @@ struct CalendarView: View {
   @State var searchOpen = false
   @State var filter = CalendarFilter()
   @State var dayModel = CalendarDayModel()
+  /// Where the hour grid's pages are while a finger drags or a slide runs. This body never reads it.
+  @State var pager = CalendarPagerPosition()
   @State var chrome = CalendarChrome()
 
   var selected: String { date.isEmpty ? store.today : date }
   var gridDays: [String] { mode.visibleDays(anchor: selected) }
-  /// `calendarRange`: the Google read covers the visible period and its neighbours.
+  /// `calendarRange`: the least the page needs, the visible period and its neighbours.
   var range: (from: String, to: String) { mode.fetchRange(anchor: selected, scheduleDays: scheduleDays) }
+  /// What one Google read loads: in the hour grid several periods each way, so a swipe seldom
+  /// needs a read at all.
+  var readRange: (from: String, to: String) { mode.loadRange(anchor: selected, scheduleDays: scheduleDays) }
   var hourFormat: CalendarHourFormat { CalendarHourFormat(rawValue: storedHourFormat) ?? .default }
   var email: String { store.bootstrap?.settings.email ?? "" }
   var undatedTasks: [RitmTask] {
@@ -191,8 +196,8 @@ struct CalendarView: View {
 
   private func grid(_ generation: Int) -> some View {
     CalendarWeekGrid(
-      days: gridDays, dayModel: dayModel, generation: generation, today: store.today,
-      timeZoneLabel: timeZoneLabel, jumpToNow: nowJump,
+      days: gridDays, mode: mode, dayModel: dayModel, generation: generation, today: store.today,
+      timeZoneLabel: timeZoneLabel, jumpToNow: nowJump, pager: pager,
       dragBlock: dragBlock, onOpen: open,
       onPick: { day, group in pick = CalendarPick(date: day, keys: group.map(\.key)) },
       onAdd: { day, minute in addEntry(day, time: TaskSchedule.minuteTime(minute)) },

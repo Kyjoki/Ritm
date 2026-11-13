@@ -51,18 +51,17 @@ public enum TaskSchedule {
     return String(format: "%02d:%02d", normalized / 60, normalized % 60)
   }
 
+  /// Plain day arithmetic (no `Calendar` per call): a week of a busy planner asks this for every
+  /// task on every day it draws.
   public static func occursOn(_ task: RitmTask, date target: String) -> Bool {
-    guard let originKey = task.date, originKey <= target,
-      let origin = date(originKey), let targetDate = date(target)
+    guard let originKey = task.date, originKey <= target, HabitSchedule.isValidDate(originKey),
+      HabitSchedule.isValidDate(target)
     else { return false }
     switch task.repeat {
     case .none: return originKey == target
     case .daily: return true
-    case .weekly:
-      return calendar.component(.weekday, from: origin)
-        == calendar.component(.weekday, from: targetDate)
-    case .monthly:
-      return calendar.component(.day, from: origin) == calendar.component(.day, from: targetDate)
+    case .weekly: return HabitSchedule.weekday(originKey) == HabitSchedule.weekday(target)
+    case .monthly: return originKey.suffix(2) == target.suffix(2)
     }
   }
 

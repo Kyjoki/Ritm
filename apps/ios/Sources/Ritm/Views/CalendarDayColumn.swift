@@ -12,7 +12,7 @@ struct CalendarDayColumn: View, Equatable {
   let height: CGFloat
   let isToday: Bool
   let liftedKey: String?
-  let generation: Int
+  let stamp: Int
   let hint: (DayOccurrence) -> String
   let onOpen: (DayOccurrence) -> Void
   let onTap: (CGPoint) -> Void
@@ -22,7 +22,7 @@ struct CalendarDayColumn: View, Equatable {
   private let hour = CGFloat(CalendarPlan.hourHeight)
 
   nonisolated static func == (left: CalendarDayColumn, right: CalendarDayColumn) -> Bool {
-    left.day == right.day && left.generation == right.generation && left.column == right.column
+    left.day == right.day && left.stamp == right.stamp && left.column == right.column
       && left.height == right.height && left.isToday == right.isToday
       && left.liftedKey == right.liftedKey
   }
