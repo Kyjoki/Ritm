@@ -200,53 +200,20 @@ struct WorkoutEditorView: View {
         .buttonStyle(RitmPressStyle(scale: 0.92))
         .accessibilityLabel(store.text("Удалить упражнение «\(name)»", "Remove exercise “\(name)”"))
       }
-      HStack(spacing: 8) {
-        stepper(item, .sets, title: store.text("Подходы", "Sets"), value: "\(item.sets)")
-        stepper(item, .reps, title: store.text("Повторы", "Reps"), value: "\(item.reps)")
-        stepper(
-          item, .rest, title: store.text("Отдых", "Rest"),
-          value: "\(item.restSeconds)" + store.text(" с", " s"))
-      }
+      WorkoutPlanSteppers(
+        sets: item.sets, reps: item.reps, rest: item.restSeconds,
+        canStep: { draft.canStep(item.id, $0, direction: $1) },
+        step: { field, direction in
+          guard draft.canStep(item.id, field, direction: direction) else { return false }
+          draft.step(item.id, field, direction: direction)
+          return true
+        }
+      )
+      .padding(.horizontal, 4)
     }
     .padding(.leading, 4).padding(.trailing, 4).padding(.vertical, 6)
     .padding(.bottom, 4)
     .background { RitmPanelBackground(radius: 20) }
-  }
-
-  private func stepper(
-    _ item: WorkoutProgramItem, _ field: WorkoutProgramDraft.Field, title: String, value: String
-  ) -> some View {
-    VStack(spacing: 4) {
-      Text(title).ritmFont(10.5, weight: .semibold).foregroundStyle(RitmTheme.muted)
-      HStack(spacing: 0) {
-        stepButton("−", enabled: draft.canStep(item.id, field, direction: -1), label: title + " −") {
-          draft.step(item.id, field, direction: -1)
-        }
-        Text(value).ritmFont(14, weight: .bold).monospacedDigit().foregroundStyle(RitmTheme.text)
-          .frame(maxWidth: .infinity).minimumScaleFactor(0.8).lineLimit(1)
-        stepButton("+", enabled: draft.canStep(item.id, field, direction: 1), label: title + " +") {
-          draft.step(item.id, field, direction: 1)
-        }
-      }
-      .padding(3)
-      .background(WorkoutPalette.inset, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-      .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(WorkoutPalette.stroke, lineWidth: 1) }
-    }
-    .frame(maxWidth: .infinity)
-  }
-
-  private func stepButton(_ symbol: String, enabled: Bool, label: String, action: @escaping () -> Void)
-    -> some View
-  {
-    Button(action: action) {
-      Text(symbol).ritmFont(16, weight: .bold).foregroundStyle(RitmTheme.accentColor)
-        .frame(width: 32, height: 36)
-        .background(RitmTheme.soft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .contentShape(Rectangle())
-    }
-    .buttonStyle(RitmPressStyle(scale: 0.92))
-    .disabled(!enabled).opacity(enabled ? 1 : 0.35)
-    .accessibilityLabel(label)
   }
 
   private func save() {
