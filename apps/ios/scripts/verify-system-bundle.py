@@ -92,6 +92,55 @@ def profile_allows_identifier(value, grants):
                for grant in grants if isinstance(grant, str))
 
 
+STRING_TYPE = {"primitive": {"wrapper": {"typeIdentifier": 0}}}
+WORKOUT_ACTION = "RitmWorkoutActionIntent"
+PURCHASE_ACTION = "RecordPurchaseIntent"
+# (name, title) in the order the Shortcuts action shows them; all required String values.
+PURCHASE_PARAMETERS = [("amount", "Сумма"), ("merchant", "Магазин"), ("card", "Карта"),
+                       ("date", "Дата"), ("at", "Время")]
+
+
+def verify_routing(item, expected_ids):
+    for key in ["mangledTypeNameByBundleIdentifier", "mangledTypeNameByBundleIdentifierV2"]:
+        require(set(item.get(key, {})) == set(expected_ids), "App Intents routing IDs do not match this bundle")
+        require(set(item[key].values()) == {item.get("mangledTypeName")}, "App Intents routing names differ")
+
+
+def verify_workout_action(item, bundle_ids):
+    require(item.get("systemProtocols") == ["com.apple.link.systemProtocol.SessionStarting"], "unexpected intent process policy")
+    require(item.get("openAppWhenRun") is False, "interactive intent requests foreground launch")
+    verify_routing(item, bundle_ids)
+    parameters = item.get("parameters", [])
+    require(len(parameters) == 1 and parameters[0].get("name") == "request"
+            and parameters[0].get("isOptional") is False
+            and parameters[0].get("valueType") == STRING_TYPE,
+            "unsupported stale-tap request parameter metadata")
+
+
+def verify_purchase_action(item, bundle_ids):
+    """The Shortcuts action «Записать покупку»: app-only, discoverable, background, five Strings."""
+    require(item.get("fullyQualifiedTypeName") == "Ritm." + PURCHASE_ACTION, "purchase action type name differs")
+    require(re.fullmatch(r"4Ritm\d+" + PURCHASE_ACTION + "V", item.get("mangledTypeName", "")),
+            "purchase action mangled name is not the app module's struct")
+    require(item.get("title", {}).get("key") == "Записать покупку", "purchase action title differs")
+    require(item.get("openAppWhenRun") is False, "purchase action requests foreground launch")
+    require(item.get("isDiscoverable") is True
+            and item.get("visibilityMetadata", {}).get("isDiscoverable") is True
+            and item.get("visibilityMetadata", {}).get("assistantOnly") is False,
+            "purchase action must be discoverable in Shortcuts")
+    require(item.get("systemProtocols") == [] and item.get("systemProtocolMetadata") == [],
+            "purchase action must be a plain AppIntent")
+    require(item.get("authenticationPolicy") == 0 and item.get("isAuthPolExplicit") is False,
+            "purchase action must run without device authentication")
+    verify_routing(item, bundle_ids[:1])  # the application only, never the widget extension
+    parameters = item.get("parameters", [])
+    require([(p.get("name"), p.get("title", {}).get("key")) for p in parameters] == PURCHASE_PARAMETERS,
+            "purchase action parameters differ from amount/merchant/card/date/at")
+    for parameter in parameters:
+        require(parameter.get("isOptional") is False and parameter.get("valueType") == STRING_TYPE,
+                f"purchase parameter {parameter.get('name')} is not a required String")
+
+
 def verify(path, interactive=False, signed=False):
     files = BundleFiles(path)
     names = files.names()
@@ -122,16 +171,16 @@ def verify(path, interactive=False, signed=False):
         require(metadata_path in names, f"{executable}: metadata index is absent")
         actions = json.loads(files.read(metadata_path))["actions"]
         require(bool(actions) == interactive, f"{executable}: metadata does not match the selected interaction mode")
-        for item in actions.values():
-            require(item.get("systemProtocols") == ["com.apple.link.systemProtocol.SessionStarting"], "unexpected intent process policy")
-            require(item.get("openAppWhenRun") is False, "interactive intent requests foreground launch")
-            for key in ["mangledTypeNameByBundleIdentifier", "mangledTypeNameByBundleIdentifierV2"]:
-                require(set(item.get(key, {})) == set(bundle_ids), "App Intents routing IDs do not match this bundle")
-            parameters = item.get("parameters", [])
-            require(len(parameters) == 1 and parameters[0].get("name") == "request"
-                    and parameters[0].get("isOptional") is False
-                    and parameters[0].get("valueType") == {"primitive": {"wrapper": {"typeIdentifier": 0}}},
-                    "unsupported stale-tap request parameter metadata")
+        if interactive:
+            expected = {WORKOUT_ACTION} | ({PURCHASE_ACTION} if not prefix else set())
+            require(set(actions) == expected,
+                    f"{executable}: App Intents actions {sorted(actions)} differ from the expected {sorted(expected)}")
+        for identifier, item in actions.items():
+            require(item.get("identifier") == identifier, "App Intents action key differs from its identifier")
+            if identifier == PURCHASE_ACTION:
+                verify_purchase_action(item, bundle_ids)
+            else:
+                verify_workout_action(item, bundle_ids)
         summary = {"bundle": "extension" if prefix else "app", "codeBytes": code_size,
                    "definedMain": main, "appGroupCount": len(actual_groups), "intentCount": len(actions)}
         if signed:

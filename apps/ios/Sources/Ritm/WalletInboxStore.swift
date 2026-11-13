@@ -55,6 +55,15 @@ final class WalletInboxStore {
     return add(purchase)
   }
 
+  /// The Shortcuts action «Записать покупку»: stores the purchase WITHOUT the `onAdded` alert,
+  /// because that action posts its own notice (it can run with no loaded account state).
+  func receiveSilently(_ purchase: WalletPurchase) -> Receipt {
+    let result = state.receiving(purchase)
+    guard result.added else { return .duplicate }
+    update(result.state, announcing: false)
+    return .added
+  }
+
   /// Puts the purchases read from `purchases.txt` into the inbox in one step. Anything already
   /// pending, confirmed or skipped is a duplicate; a full inbox leaves the rest in the file.
   func receive(file purchases: [WalletPurchase]) -> WalletState.FileReceipt {
@@ -96,7 +105,7 @@ final class WalletInboxStore {
     return .added
   }
 
-  private func update(_ next: WalletState) {
+  private func update(_ next: WalletState, announcing: Bool = true) {
     guard next != state else { return }
     let previous = Set(state.pending.map(\.id))
     let remaining = Set(next.pending.map(\.id))
@@ -105,7 +114,7 @@ final class WalletInboxStore {
     state = next
     if let data = try? JSONEncoder().encode(next) { defaults.set(data, forKey: Self.key) }
     if !removed.isEmpty { onRemoved?(removed) }
-    if !added.isEmpty { onAdded?(added) }
+    if announcing, !added.isEmpty { onAdded?(added) }
   }
 
   private static func timestamp(_ date: Date) -> String {

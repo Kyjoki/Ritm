@@ -127,6 +127,7 @@ final class RitmStore {
     serverAddress = address
     client = try? APIClient(baseURL: address.url)
     vault = SessionVault(server: address)
+    PurchaseRecorder.liveInbox = wallet
     // Earlier builds saved the password for silent re-sign-in; it is never kept any more.
     SessionVault.purgeLegacySavedLogin()
     workouts.alerts.language = { [weak self] in self?.language ?? .ru }
@@ -245,6 +246,10 @@ final class RitmStore {
       calendarReady: calendarReady && freshCalendar, calendarPartial: calendarPartial,
       leadMinutes: 30, accountEpoch: epoch, until: credential.expires, now: Date())
     guard epoch == accountEpoch, isSignedIn else { return }
+    // What the background action «Записать покупку» may rely on when this store is not loaded.
+    WalletAlertGateStore.save(.init(
+      epoch: epoch, notificationsEnabled: snapshot.settings.notifications,
+      expires: credential.expires, language: language, timeZone: timeZone))
     publishWidget(expires: credential.expires)
     await notifyNewWalletPurchases([], epoch: epoch)
   }
@@ -1025,6 +1030,7 @@ final class RitmStore {
     habitConfirmed = [:]
     habitSending = []
     queuedWalletAlerts = [:]
+    WalletAlertGateStore.clear()
     calendarFetchedAt = nil
     calendarDay = nil
     calendarZone = nil

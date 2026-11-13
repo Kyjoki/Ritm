@@ -113,6 +113,27 @@ policy или режимы вызывают ошибку. Строка request �
 Этот shape проверен отдельным Swift 6.4.2/SDK 27.1 probe; работа dispatch на устройстве
 ещё требует проверки. Data format index не является публичным контрактом Apple.
 
+### Действие Shortcuts «Записать покупку»
+
+Второй поддерживаемый shape — обычный `AppIntent` модуля `Ritm` (`Sources/Ritm/PurchaseIntent.swift`,
+`RecordPurchaseIntent`): только обязательные `String`-параметры с literal `title`, `openAppWhenRun =
+false`, `perform() -> some IntentResult`, без своего `parameterSummary`, без system protocol.
+Действие записывается только в index приложения (не виджета), `isDiscoverable` true,
+`systemProtocols`/`systemProtocolMetadata` пустые, routing только на bundle ID приложения.
+Index виджета и действие тренировки остаются прежними байт-в-байт: `scripts/test-appintents-metadata.py`
+сравнивает вывод с golden-файлом, снятым старым emitter-ом на реальных constvalues. Источники формата:
+реальный Xcode-вывод для `LiveActivityIntent` со `String`-параметром (ссылка выше) и дамп
+`WidgetConfigurationIntent` из блога mengtnt (набор ключей, `descriptionMetadata`); **пустые
+`systemProtocols` для обычного AppIntent и отсутствие `parameterSummary` — вывод по аналогии, не
+наблюдение Apple-вывода**. Всё остальное (опциональные/нечисловые параметры, summary, entities,
+`AppShortcutsProvider`) по-прежнему вызывает ошибку.
+
+```bash
+python3 apps/ios/scripts/test-appintents-metadata.py
+```
+
+Видит ли Shortcuts действие и выполняется ли оно в фоне — проверяется только на iPhone.
+
 ```bash
 python3 apps/ios/scripts/appintents-metadata.py --configuration debug
 python3 apps/ios/scripts/appintents-metadata.py --configuration debug --check

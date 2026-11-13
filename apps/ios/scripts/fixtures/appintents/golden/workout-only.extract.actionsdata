@@ -1,0 +1,133 @@
+{
+  "actions": {
+    "RitmWorkoutActionIntent": {
+      "assistantDefinedSchemaTraits": [],
+      "assistantDefinedSchemas": [],
+      "authenticationPolicy": 0,
+      "availabilityAnnotations": {
+        "LNPlatformNameWildcard": {
+          "introducedVersion": "*"
+        }
+      },
+      "effectiveBundleIdentifiers": [],
+      "fullyQualifiedTypeName": "RitmSystem.RitmWorkoutActionIntent",
+      "identifier": "RitmWorkoutActionIntent",
+      "isAuthPolExplicit": false,
+      "isDiscoverable": false,
+      "mangledTypeName": "10RitmSystem0A19WorkoutActionIntentV",
+      "mangledTypeNameByBundleIdentifier": {
+        "XTL-TEST.app.ritm.personal": "10RitmSystem0A19WorkoutActionIntentV",
+        "XTL-TEST.app.ritm.personal.RitmWidgets": "10RitmSystem0A19WorkoutActionIntentV"
+      },
+      "mangledTypeNameByBundleIdentifierV2": {
+        "XTL-TEST.app.ritm.personal": "10RitmSystem0A19WorkoutActionIntentV",
+        "XTL-TEST.app.ritm.personal.RitmWidgets": "10RitmSystem0A19WorkoutActionIntentV"
+      },
+      "mangledTypeNameV2": "10RitmSystem0A19WorkoutActionIntentV",
+      "openAppWhenRun": false,
+      "outputFlags": 0,
+      "parameters": [
+        {
+          "capabilities": 0,
+          "dynamicOptionsSupport": 0,
+          "inputConnectionBehavior": 0,
+          "isInput": false,
+          "isOptional": false,
+          "name": "request",
+          "resolvableInputTypes": [
+            {
+              "kindValue": 0,
+              "valueType": {
+                "primitive": {
+                  "wrapper": {
+                    "typeIdentifier": 2
+                  }
+                }
+              }
+            },
+            {
+              "kindValue": 0,
+              "valueType": {
+                "primitive": {
+                  "wrapper": {
+                    "typeIdentifier": 0
+                  }
+                }
+              }
+            },
+            {
+              "kindValue": 0,
+              "valueType": {
+                "array": {
+                  "wrapper": {
+                    "capabilities": 3,
+                    "memberValueType": {
+                      "primitive": {
+                        "wrapper": {
+                          "typeIdentifier": 2
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "title": {
+            "alternatives": [],
+            "key": "Request"
+          },
+          "typeSpecificMetadata": [],
+          "valueType": {
+            "primitive": {
+              "wrapper": {
+                "typeIdentifier": 0
+              }
+            }
+          }
+        }
+      ],
+      "presentationStyle": 0,
+      "requiredCapabilities": [],
+      "supportedModes": 1,
+      "systemProtocolMetadata": [
+        "com.apple.link.systemProtocol.SessionStarting",
+        {
+          "empty": {}
+        }
+      ],
+      "systemProtocolMetadataV2": [
+        "com.apple.link.systemProtocol.SessionStarting",
+        {
+          "empty": {}
+        }
+      ],
+      "systemProtocols": [
+        "com.apple.link.systemProtocol.SessionStarting"
+      ],
+      "title": {
+        "alternatives": [],
+        "key": "Workout action"
+      },
+      "typeSpecificMetadata": [],
+      "visibilityMetadata": {
+        "assistantOnly": false,
+        "isDiscoverable": false
+      }
+    }
+  },
+  "assistantEntities": [],
+  "assistantIntentNegativePhrases": [],
+  "assistantIntents": [],
+  "autoShortcuts": [],
+  "entities": {},
+  "enums": [],
+  "generator": {
+    "name": "xcode-tools",
+    "version": "17F113"
+  },
+  "negativePhrases": [],
+  "queries": {},
+  "shortcutTileColor": 14,
+  "version": 1
+}

@@ -174,11 +174,11 @@ final class LocalNotifications {
     return destination
   }
 
-  private static func isAllowed(_ status: UNAuthorizationStatus) -> Bool {
+  static func isAllowed(_ status: UNAuthorizationStatus) -> Bool {
     status == .authorized || status == .provisional || status == .ephemeral
   }
 
-  private static func add(
+  static func add(
     _ plan: LocalNotificationPlan, requestID: String, to center: UNUserNotificationCenter
   ) async throws {
     if let expiry = plan.expiresAt, expiry <= Date() { throw NotificationSchedulingError.elapsed }
