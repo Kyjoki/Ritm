@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import type { GoogleCalendarResult, Task } from '../shared/types.ts';
-import { REMINDER_FAILURE_NAME, REMINDER_HEARTBEAT_NAME } from './telegram.ts';
+import {
+  REMINDER_FAILURE_NAME,
+  REMINDER_HEARTBEAT_NAME,
+  REMINDER_INTERVAL_MS,
+} from './telegram.ts';
 
 const MAX_LATE_MS = 5 * 60_000;
 const CURSOR_NAME = 'telegram-reminder-cursor';
@@ -113,7 +117,7 @@ export function googleReminders(result: GoogleCalendarResult): Reminder[] {
 }
 export function reminderText(
   reminder: Reminder,
-  leadMinutes: number,
+  _leadMinutes: number,
   timeZone: string,
   language: string,
   now: number,
@@ -130,13 +134,21 @@ export function reminderText(
       hourCycle: 'h23',
     }).format(new Date(value));
   const today = localDateAt(now, timeZone) === localDateAt(reminder.start, timeZone);
+  // A run may send up to one interval early, so the heading states the real time left.
+  const minutesLeft = Math.max(0, Math.round((reminder.start - now) / 60_000));
+  const ru = (n: number) =>
+    n % 10 === 1 && n % 100 !== 11
+      ? 'минуту'
+      : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14)
+        ? 'минуты'
+        : 'минут';
   const heading =
     language === 'en'
-      ? leadMinutes
-        ? `🔔 In ${leadMinutes} minutes`
+      ? minutesLeft
+        ? `🔔 In ${minutesLeft} minute${minutesLeft === 1 ? '' : 's'}`
         : '🔔 Starting now'
-      : leadMinutes
-        ? `🔔 Через ${leadMinutes} минут`
+      : minutesLeft
+        ? `🔔 Через ${minutesLeft} ${ru(minutesLeft)}`
         : '🔔 Сейчас';
   const day = today ? (language === 'en' ? 'Today' : 'Сегодня') : date;
   // No parse_mode: Telegram renders the title literally, including HTML/Markdown characters.
@@ -211,7 +223,11 @@ export function createTelegramReminderRunner(options: {
       let deliveryProblem: string | null = null;
       for (const reminder of [...local, ...remote]) {
         const due = reminder.start - snapshot.settings.leadMinutes * 60_000;
-        if (due <= from || due > current || current - due > MAX_LATE_MS) continue;
+        // Runs are REMINDER_INTERVAL_MS apart, so a run also sends what falls due before the
+        // next one: a reminder may come early, never late. The cursor stays at the real run
+        // time, so an event created between runs is still found by the next run.
+        if (due <= from || due > current + REMINDER_INTERVAL_MS || current - due > MAX_LATE_MS)
+          continue;
         const key =
           'telegram-reminder:' +
           createHash('sha256')

@@ -333,3 +333,33 @@ test('reminder cursor and delivery claims survive a runtime restart', () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('a run sends what falls due before the next run, once, with the real minutes left', async () => {
+  const f = fixture();
+  f.setTasks([task()]);
+  f.setClock(instant - 30 * 60_000); // due in 30 min: beyond the 20-minute interval
+  assert.equal((await f.runner()).sent, 0);
+  f.setClock(instant - 15 * 60_000); // due in 15 min: this run covers it
+  assert.equal((await f.runner()).sent, 1);
+  assert.match(f.sent[0], /^🔔 Через 25 минут\nGym/);
+  f.setClock(instant); // the scheduled moment itself: already sent, no duplicate
+  assert.equal((await f.runner()).sent, 0);
+  assert.equal(f.sent.length, 1);
+});
+
+test('reminder heading counts real minutes with Russian plurals', () => {
+  const at = (minutes: number, language = 'ru') =>
+    reminderText(
+      { key: 'x', title: 'T', start: instant + minutes * 60_000, end: instant + 7_200_000 },
+      10,
+      zone,
+      language,
+      instant,
+    ).split('\n')[0];
+  assert.equal(at(21), '🔔 Через 21 минуту');
+  assert.equal(at(23), '🔔 Через 23 минуты');
+  assert.equal(at(11), '🔔 Через 11 минут');
+  assert.equal(at(0), '🔔 Сейчас');
+  assert.equal(at(1, 'en'), '🔔 In 1 minute');
+  assert.equal(at(25, 'en'), '🔔 In 25 minutes');
+});

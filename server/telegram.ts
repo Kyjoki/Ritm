@@ -18,6 +18,10 @@ const CONFIG_NAME = 'telegram-connection';
 const REMINDER_SETTINGS_NAME = 'telegram-reminder-settings';
 export const REMINDER_HEARTBEAT_NAME = 'telegram-reminder-heartbeat';
 export const REMINDER_FAILURE_NAME = 'telegram-reminder-failure';
+/** QStash runs the reminder check this often. Between runs the Neon database can suspend
+ *  (it sleeps after 5 idle minutes); a two-minute schedule kept it awake and used up the
+ *  free compute quota. */
+export const REMINDER_INTERVAL_MS = 20 * 60_000;
 export const reminderLeadSchema = z.union([
   z.literal(0),
   z.literal(5),
@@ -154,7 +158,7 @@ export function createTelegramService({
     const lastRun = Number(await schedulerState?.getServerSecret(REMINDER_HEARTBEAT_NAME));
     const lastRunAt = Number.isFinite(lastRun) && lastRun > 0 ? lastRun : null;
     const schedulerActive = Boolean(
-      schedulerConfigured && lastRunAt && now() - lastRunAt < 5 * 60_000,
+      schedulerConfigured && lastRunAt && now() - lastRunAt < REMINDER_INTERVAL_MS + 10 * 60_000,
     );
     const googleConnected = (await google.status()).status === 'connected';
     const failureRaw = await schedulerState?.getServerSecret(REMINDER_FAILURE_NAME);

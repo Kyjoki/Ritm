@@ -1,4 +1,4 @@
-/** Create/update the free-tier two-minute QStash schedule without printing credentials. */
+/** Create/update the 20-minute QStash schedule (lets the free Neon database suspend) without printing credentials. */
 const origin = process.env.APP_ORIGIN;
 const qstashUrl = process.env.QSTASH_URL;
 const token = process.env.QSTASH_TOKEN;
@@ -21,7 +21,7 @@ if (
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
-        'Upstash-Cron': '*/2 * * * *',
+        'Upstash-Cron': '*/20 * * * *',
         'Upstash-Schedule-Id': 'ritm-telegram-reminders',
         'Upstash-Method': 'POST',
         'Upstash-Retries': '0',
