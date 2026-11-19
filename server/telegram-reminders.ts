@@ -7,6 +7,10 @@ import {
 } from './telegram.ts';
 
 const MAX_LATE_MS = 5 * 60_000;
+/** QStash (schedule managed in Upstash) may call every two minutes. Only the call in the first
+ *  two minutes of each REMINDER_INTERVAL_MS slot does work; the rest answer without touching
+ *  the database, so Neon can suspend between runs. A 20-minute schedule always hits the slot. */
+export const isReminderSlot = (now: number) => now % REMINDER_INTERVAL_MS < 2 * 60_000;
 const CURSOR_NAME = 'telegram-reminder-cursor';
 const LEASE_NAME = 'telegram-reminder-run';
 type State = {

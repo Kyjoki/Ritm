@@ -21,7 +21,7 @@ import type { WorkspaceRepository } from './repository.ts';
 import { SqliteRuntimeState, type RuntimeState } from './runtime-state.ts';
 import { SecretStore } from './secrets.ts';
 import { createTelegramService, TELEGRAM_WEBHOOK_PATH } from './telegram.ts';
-import { createTelegramReminderRunner } from './telegram-reminders.ts';
+import { createTelegramReminderRunner, isReminderSlot } from './telegram-reminders.ts';
 import { verifyQstashSignature } from './qstash-signature.ts';
 import type { VoiceInterpreter } from './telegram-voice.ts';
 import { Security } from './security.ts';
@@ -102,6 +102,8 @@ export interface AppOptions {
   telegramTransport?: typeof fetch;
   telegramVoiceInterpreter?: VoiceInterpreter;
   securityLogger?: SecurityLogger;
+  /** Clock for the reminder slot gate; tests pin it inside a slot. */
+  now?: () => number;
 }
 
 const contentSecurityPolicy =
@@ -320,6 +322,10 @@ export function createApp(options: AppOptions = {}) {
       (!sharedSecretValid && !signatureValid)
     )
       throw new AppError(401, 'REMINDER_AUTH_REQUIRED', 'Планировщик не авторизован.');
+    if (!isReminderSlot((options.now ?? Date.now)())) {
+      res.json({ busy: false, sent: 0, skipped: true });
+      return;
+    }
     res.json(await runTelegramReminders(signatureValid));
   });
   app.get('/api/session', async (req, res) => {

@@ -33,6 +33,7 @@ async function fixture(t: TestContext) {
   const instance = createApp({
     dataDir,
     seed: false,
+    now: () => Date.parse('2026-11-20T10:00:30Z'), // inside a 20-minute reminder slot
     repository: new Store(dataDir, false),
     runtimeState: state,
     env: {

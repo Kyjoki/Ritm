@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createTelegramReminderRunner,
+  isReminderSlot,
   googleReminders,
   localReminders,
   localStart,
@@ -362,4 +363,15 @@ test('reminder heading counts real minutes with Russian plurals', () => {
   assert.equal(at(0), '🔔 Сейчас');
   assert.equal(at(1, 'en'), '🔔 In 1 minute');
   assert.equal(at(25, 'en'), '🔔 In 25 minutes');
+});
+
+test('only one call per 20-minute slot does work, whatever the QStash cadence', () => {
+  const slot = Date.parse('2026-11-20T10:00:00Z');
+  assert.equal(isReminderSlot(slot), true);
+  assert.equal(isReminderSlot(slot + 90_000), true); // a delivery up to two minutes late still counts
+  assert.equal(isReminderSlot(slot + 2 * 60_000), false);
+  assert.equal(isReminderSlot(slot + 18 * 60_000), false);
+  assert.equal(isReminderSlot(slot + 20 * 60_000), true);
+  const everyTwoMinutes = Array.from({ length: 30 }, (_, i) => slot + i * 2 * 60_000);
+  assert.equal(everyTwoMinutes.filter(isReminderSlot).length, 3); // one per 20 minutes in an hour
 });
