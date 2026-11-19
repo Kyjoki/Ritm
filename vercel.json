@@ -23,6 +23,7 @@
       "claude/ritm-ios-settings": false,
       "claude/ritm-ios-calendar": false,
       "claude/ritm-ios-workout-polish": false,
+      "claude/ritm-ios-session-resilience": false,
       "claude/ritm-web-login": false
     }
   },

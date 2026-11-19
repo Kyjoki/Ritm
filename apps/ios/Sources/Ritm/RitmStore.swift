@@ -429,8 +429,12 @@ final class RitmStore {
       }
       schedulePolling()
     }
+    var hadSavedSession = false
     do {
-      if let credential = try vault.load() { try await client.restoreCredential(credential) }
+      if let credential = try vault.load() {
+        hadSavedSession = true
+        try await client.restoreCredential(credential)
+      }
       let session = try await client.session()
       guard session.authenticated else {
         await clearAccount()
@@ -440,7 +444,20 @@ final class RitmStore {
       workoutSync.request()
       await refresh()
     } catch {
+      guard
+        SessionRestorePolicy.keepsSignedIn(
+          afterStartupFailure: error, hadSavedSession: hadSavedSession)
+      else {
+        await present(error)
+        return
+      }
+      // A server error or lost connection at launch is not a sign-out: keep the saved session,
+      // show the notice until a refresh succeeds, and let polling (30 s) or reopening retry.
+      isSignedIn = true
       await present(error)
+      isOffline = true
+      connectionErrorShown = true
+      workoutSync.request()
     }
   }
 
