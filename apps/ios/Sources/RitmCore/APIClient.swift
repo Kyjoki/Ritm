@@ -596,18 +596,6 @@ extension APIClient {
   public func disconnectTelegram() async throws -> TelegramStatus {
     try await request(path: ["integrations", "telegram", "connection"], method: "DELETE")
   }
-  public func saveTelegramReminders(enabled: Bool, leadMinutes: Int) async throws -> TelegramStatus
-  {
-    guard [0, 5, 10, 15, 30, 60].contains(leadMinutes) else { throw invalidInput() }
-    return try await request(
-      path: ["integrations", "telegram", "reminders"], method: "PATCH",
-      body: encoded(TelegramRemindersInput(enabled: enabled, leadMinutes: leadMinutes)))
-  }
-  public func testTelegramReminder() async throws {
-    let result: OKEnvelope = try await request(
-      path: ["integrations", "telegram", "reminders", "test"], method: "POST")
-    guard result.ok else { throw invalidResponse() }
-  }
 
   public func createConversation() async throws -> Conversation {
     try await request(path: ["conversations"], method: "POST")
@@ -751,10 +739,6 @@ private struct AIConfigurationInput: Encodable {
   let model: String
 }
 private struct TelegramConfigurationInput: Encodable { let botToken: String }
-private struct TelegramRemindersInput: Encodable {
-  let enabled: Bool
-  let leadMinutes: Int
-}
 private struct ChatInput: Encodable {
   let conversationId: String?
   let message: String

@@ -118,6 +118,7 @@ test('pg-mem: explicit migrations are repeatable and do not overwrite settings',
     '003-workouts.sql',
     '004-device-sessions.sql',
     '005-workout-records-settings.sql',
+    '006-remove-telegram-reminders.sql',
   ]);
   await h.store.updateSettings({ displayName: 'Владелец', theme: 'light' });
   assert.deepEqual(await migrate(h.raw), []);

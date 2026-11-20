@@ -84,11 +84,19 @@ final class ParityModelsTests: XCTestCase {
 
   func testTelegramMillisecondsAndReadinessDecodeWithoutInventedConnection() throws {
     let json =
-      #"{"configured":true,"linked":false,"pairingUrl":"https://t.me/example?start=fixture","pairingExpiresAt":1793235600000,"reminders":{"enabled":true,"leadMinutes":15,"timeZone":"Asia/Qyzylorda","ready":false,"schedulerActive":false,"googleConnected":false,"lastRunAt":null,"problem":"Not connected"}}"#
+      #"{"configured":true,"linked":false,"pairingUrl":"https://t.me/example?start=fixture","pairingExpiresAt":1793235600000}"#
     let status = try JSONDecoder().decode(TelegramStatus.self, from: Data(json.utf8))
     XCTAssertFalse(status.linked)
     XCTAssertEqual(status.pairingExpiresAt, 1_793_235_600_000)
-    XCTAssertEqual(status.reminders?.ready, false)
-    XCTAssertNil(status.reminders?.lastRunAt)
+  }
+
+  func testTelegramStatusDecodesWithoutAndWithLegacyRemindersField() throws {
+    let bare = #"{"configured":true,"linked":true,"botUsername":"ritm_bot","account":{"firstName":"A"}}"#
+    let legacy =
+      #"{"configured":true,"linked":true,"reminders":{"enabled":true,"leadMinutes":15,"ready":true}}"#
+    let status = try JSONDecoder().decode(TelegramStatus.self, from: Data(bare.utf8))
+    XCTAssertTrue(status.linked)
+    XCTAssertEqual(status.botUsername, "ritm_bot")
+    XCTAssertTrue(try JSONDecoder().decode(TelegramStatus.self, from: Data(legacy.utf8)).linked)
   }
 }

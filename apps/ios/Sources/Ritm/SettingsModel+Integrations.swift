@@ -31,29 +31,9 @@ extension SettingsModel {
     await loadIntegrations()
   }
 
-  func saveReminders(enabled: Bool, lead: Int) async {
-    guard let store else { return }
-    reminderDraft = ReminderDraft(enabled: enabled, lead: lead)
-    defer { reminderDraft = nil }
-    if let result = await store.write({
-      try await $0.saveTelegramReminders(enabled: enabled, leadMinutes: lead)
-    }) {
-      telegram = result
-      showToast(text("Сохранено", "Saved"), failed: false)
-    }
-  }
-
   func pairTelegram() async {
     guard let store else { return }
     if let result = await store.write({ try await $0.pairTelegram() }) { telegram = result }
-  }
-
-  func testTelegram() async {
-    guard let store else { return }
-    if await store.performMutation({ try await $0.testTelegramReminder() }) {
-      showToast(
-        text("Тестовое уведомление отправлено", "Test notification sent"), failed: false)
-    }
   }
 
   /// The pairing link, only when it is Telegram's own, still valid and carries no credentials.

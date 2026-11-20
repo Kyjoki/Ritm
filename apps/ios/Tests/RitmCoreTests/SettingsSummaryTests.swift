@@ -46,13 +46,8 @@ final class SettingsSummaryTests: XCTestCase {
     XCTAssertEqual(SettingsSummary.sessions(2, .en), "2 sessions")
   }
 
-  func testDayRangeAndLeadTimes() {
+  func testDayRange() {
     XCTAssertEqual(SettingsSummary.dayRange(start: "09:00", end: "21:00"), "09:00\u{2013}21:00")
-    XCTAssertEqual(SettingsSummary.leadTime(0, .ru), "в момент начала")
-    XCTAssertEqual(SettingsSummary.leadTime(15, .ru), "за 15 мин")
-    XCTAssertEqual(SettingsSummary.leadSegment(0, .ru), "Сразу")
-    XCTAssertEqual(SettingsSummary.leadSegment(60, .ru), "60")
-    XCTAssertEqual(SettingsSummary.leadChoices, [0, 5, 10, 15, 30, 60])
   }
 
   func testNotificationsCountAndPermission() {
@@ -80,15 +75,6 @@ final class SettingsSummaryTests: XCTestCase {
       configured: true, source: "saved", clientId: "x", hasClientSecret: true, redirectUri: nil)
     XCTAssertEqual(SettingsSummary.google(status: noClient, setup: setup, .en).text, "Not connected")
     XCTAssertEqual(SettingsSummary.google(status: nil, setup: nil, .ru).tone, .none)
-  }
-
-  func testTelegramProblemCodesAreWordedInBothLanguagesAndUnknownOnesAreNil() {
-    XCTAssertEqual(
-      SettingsSummary.telegramProblem("chat_unlinked", .ru), "Личный чат Telegram не привязан.")
-    XCTAssertEqual(
-      SettingsSummary.telegramProblem("scheduler_stale", .en),
-      "The scheduler has not run for over five minutes.")
-    XCTAssertNil(SettingsSummary.telegramProblem("something_new", .ru))
   }
 
   func testTelegramOpenAIAndSecuritySummaries() {

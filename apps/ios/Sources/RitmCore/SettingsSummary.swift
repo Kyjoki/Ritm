@@ -153,37 +153,6 @@ public enum SettingsSummary {
     return "\(count) " + plural(count, "сеанс", "сеанса", "сеансов")
   }
 
-  public static func leadTime(_ minutes: Int, _ language: Language) -> String {
-    minutes == 0
-      ? pick(language, "в момент начала", "at the start")
-      : pick(language, "за \(minutes) мин", "\(minutes) min before")
-  }
-
-  /// The segment titles of the reminder lead time: «Сразу, 5, 10, 15, 30, 60».
-  public static func leadSegment(_ minutes: Int, _ language: Language) -> String {
-    minutes == 0 ? pick(language, "Сразу", "Now") : "\(minutes)"
-  }
-
-  public static let leadChoices = [0, 5, 10, 15, 30, 60]
-
-  /// Reminder problem codes as TelegramConnection.tsx words them; an unknown code gives nil.
-  public static func telegramProblem(_ code: String, _ language: Language) -> String? {
-    let words: [String: (String, String)] = [
-      "disabled": ("Автоматическая отправка выключена", "Automatic delivery is off"),
-      "chat_unlinked": ("Личный чат Telegram не привязан.", "The private Telegram chat is not linked."),
-      "scheduler_unconfigured": ("Серверные ключи планировщика не настроены.", "The scheduler server keys are not configured."),
-      "scheduler_waiting": ("Ожидается первый автоматический запуск планировщика.", "Waiting for the first automatic scheduler run."),
-      "scheduler_stale": ("Планировщик не запускался более пяти минут.", "The scheduler has not run for over five minutes."),
-      "google_disconnected": ("Google Calendar не подключён.", "Google Calendar is not connected."),
-      "google_error": ("Не удалось проверить Google Calendar.", "Could not check Google Calendar."),
-      "telegram_error": ("Ошибка отправки в Telegram.", "Could not send the Telegram notification."),
-      "telegram_rejected": ("Telegram отклонил уведомление.", "Telegram rejected the notification."),
-      "telegram_uncertain": ("Результат отправки в Telegram неизвестен.", "Telegram delivery status is unknown."),
-      "internal_error": ("Ошибка проверки напоминаний на сервере.", "The server could not check reminders."),
-    ]
-    return words[code].map { pick(language, $0.0, $0.1) }
-  }
-
   /// Russian plural forms: 1 сеанс, 2 сеанса, 5 сеансов, 11 сеансов, 21 сеанс.
   public static func plural(_ n: Int, _ one: String, _ few: String, _ many: String) -> String {
     let mod10 = n % 10

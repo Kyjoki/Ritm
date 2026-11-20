@@ -142,8 +142,7 @@ Express CDN output. [Express на Vercel](https://vercel.com/docs/frameworks/bac
 | `OPENAI_MODEL`          | Название модели, по умолчанию `gpt-6-luna`                                             |
 
 `NODEJS_HELPERS=0` задаётся до сборки deployment: Vercel читает его при создании
-Node.js-обвязки. Express уже разбирает query, JSON и cookies; для QStash сохраняются
-исходные байты тела запроса. Настройка не отключает предупреждения Node.
+Node.js-обвязки. Express уже разбирает query, JSON и cookies. Настройка не отключает предупреждения Node.
 См. [официальную настройку helpers](https://vercel.com/docs/functions/runtimes/node-js/advanced-node-configuration#disabling-helpers-for-node.js).
 
 При создании PostgreSQL pool и в CLI миграций общий `postgresConnectionString`

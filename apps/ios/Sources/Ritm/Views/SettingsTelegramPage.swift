@@ -1,7 +1,7 @@
 import RitmCore
 import SwiftUI
 
-/// «Telegram»: the bot, the private chat, and the reminders sent there with their lead time.
+/// «Telegram»: the bot, the private chat, and the buttons in it.
 struct SettingsTelegramPage: View {
   @Environment(RitmStore.self) private var store
   @Environment(SettingsModel.self) private var model
@@ -13,8 +13,6 @@ struct SettingsTelegramPage: View {
   private var telegram: TelegramStatus? { model.telegram }
   private var configured: Bool { telegram?.configured == true }
   private var linked: Bool { telegram?.linked == true }
-  private var enabled: Bool { model.reminderDraft?.enabled ?? telegram?.reminders?.enabled ?? false }
-  private var lead: Int { model.reminderDraft?.lead ?? telegram?.reminders?.leadMinutes ?? 10 }
 
   var body: some View {
     SettingsPage(title: "Telegram") {
@@ -25,7 +23,7 @@ struct SettingsTelegramPage: View {
         }
       } else {
         chat
-        if linked { reminders }
+        if linked { menuHint }
         actions
       }
       if let notice = model.notice { SettingsNotice(text: notice) }
@@ -92,48 +90,11 @@ struct SettingsTelegramPage: View {
     }
   }
 
-  // MARK: Reminders
-
-  private var reminders: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      SettingsCaption(text: store.text("Напоминания", "Reminders")).padding(.top, 20)
-      SettingsGroup {
-        SettingsToggleRow(
-          icon: "bell", title: store.text("Напоминания в Telegram", "Telegram reminders"),
-          subtitle: deliveryText,
-          isOn: Binding(
-            get: { enabled }, set: { value in Task { await model.saveReminders(enabled: value, lead: lead) } }))
-        .disabled(!store.canWrite)
-      }
-      if enabled {
-        SettingsCaption(text: store.text("Напомнить за, мин", "Remind me, min before")).padding(.top, 20)
-        RitmSegmentedControl(
-          label: store.text("Когда напомнить", "When to remind"), values: SettingsSummary.leadChoices,
-          title: { SettingsSummary.leadSegment($0, model.language) },
-          selection: Binding(
-            get: { lead }, set: { value in Task { await model.saveReminders(enabled: true, lead: value) } }),
-          fontSize: 12
-        )
-        .disabled(!store.canWrite)
-      }
-      SettingsButtonStack {
-        SettingsActionButton(
-          title: store.text("Тестовое уведомление", "Test notification"), icon: "paperplane", kind: .secondary
-        ) { Task { await model.testTelegram() } }
-        .disabled(!store.canWrite)
-      }
-      SettingsFootnote(
-        text: store.text(
-          "В личном чате отправь /menu, чтобы открыть кнопки быстрых дел, плана и итога. Сообщения не передаются ИИ.",
-          "Send /menu in the private chat to open quick task, plan and summary buttons. Messages are not passed to AI."))
-    }
-  }
-
-  private var deliveryText: String {
-    let reminders = telegram?.reminders
-    if reminders?.ready == true { return store.text("Автоматическая отправка работает", "Automatic delivery is working") }
-    return reminders?.problem.flatMap { SettingsSummary.telegramProblem($0, model.language) }
-      ?? store.text("Ожидание планировщика или привязки чата", "Waiting for the scheduler or a linked chat")
+  private var menuHint: some View {
+    SettingsFootnote(
+      text: store.text(
+        "В личном чате отправь /menu, чтобы открыть кнопки быстрых дел, плана и итога. Сообщения не передаются ИИ.",
+        "Send /menu in the private chat to open quick task, plan and summary buttons. Messages are not passed to AI."))
   }
 
   // MARK: Actions

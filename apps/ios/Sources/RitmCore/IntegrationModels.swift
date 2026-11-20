@@ -105,31 +105,6 @@ public struct TelegramAccount: Codable, Sendable, Equatable {
   }
 }
 
-public struct TelegramReminders: Codable, Sendable, Equatable {
-  public var enabled: Bool
-  public var leadMinutes: Int
-  public var timeZone: String
-  public var ready: Bool
-  public var schedulerActive: Bool
-  public var googleConnected: Bool
-  /// Unix milliseconds, as returned by the existing API.
-  public var lastRunAt: Double?
-  public var problem: String?
-  public init(
-    enabled: Bool, leadMinutes: Int, timeZone: String, ready: Bool, schedulerActive: Bool,
-    googleConnected: Bool, lastRunAt: Double? = nil, problem: String? = nil
-  ) {
-    self.enabled = enabled
-    self.leadMinutes = leadMinutes
-    self.timeZone = timeZone
-    self.ready = ready
-    self.schedulerActive = schedulerActive
-    self.googleConnected = googleConnected
-    self.lastRunAt = lastRunAt
-    self.problem = problem
-  }
-}
-
 public struct TelegramStatus: Codable, Sendable, Equatable {
   public var configured: Bool
   public var linked: Bool
@@ -138,10 +113,9 @@ public struct TelegramStatus: Codable, Sendable, Equatable {
   public var pairingUrl: String?
   /// Unix milliseconds, not seconds.
   public var pairingExpiresAt: Double?
-  public var reminders: TelegramReminders?
   public init(
     configured: Bool, linked: Bool, botUsername: String? = nil, account: TelegramAccount? = nil,
-    pairingUrl: String? = nil, pairingExpiresAt: Double? = nil, reminders: TelegramReminders? = nil
+    pairingUrl: String? = nil, pairingExpiresAt: Double? = nil
   ) {
     self.configured = configured
     self.linked = linked
@@ -149,6 +123,5 @@ public struct TelegramStatus: Codable, Sendable, Equatable {
     self.account = account
     self.pairingUrl = pairingUrl
     self.pairingExpiresAt = pairingExpiresAt
-    self.reminders = reminders
   }
 }

@@ -4,11 +4,6 @@ import SwiftUI
 import UIKit
 import UserNotifications
 
-struct ReminderDraft: Equatable {
-  let enabled: Bool
-  let lead: Int
-}
-
 /// The tiny confirmation under the settings pages: «Сохранено», or why a change was put back.
 struct SettingsToast: Equatable, Identifiable {
   let id: Int
@@ -50,8 +45,6 @@ final class SettingsModel {
   var telegram: TelegramStatus?
   var notice: String?
   var loadingIntegrations = false
-  /// The Telegram reminder choice while it is being saved, so the switch and the segment answer at once.
-  var reminderDraft: ReminderDraft?
 
   @ObservationIgnored weak var store: RitmStore?
   @ObservationIgnored private var debounceTask: Task<Void, Never>?
